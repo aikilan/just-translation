@@ -1,0 +1,64 @@
+[data-justranslate-source][hidden],
+[data-justranslate-source-content][hidden] {
+  display: none !important;
+}
+
+[data-justranslate-source-content]:not([hidden]) {
+  display: contents !important;
+}
+
+[data-justranslate-translation] {
+  display: block !important;
+  box-sizing: border-box !important;
+  margin-block: 0.38em 0.1em !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: normal !important;
+}
+
+[data-justranslate-translation][data-justranslate-state='pending'] {
+  cursor: progress !important;
+  opacity: 0.62 !important;
+}
+
+[data-justranslate-translation][data-justranslate-state='pending']::after {
+  display: inline-block !important;
+  box-sizing: border-box !important;
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid currentcolor !important;
+  border-inline-end-color: transparent !important;
+  border-radius: 50% !important;
+  content: '' !important;
+  vertical-align: -0.125em !important;
+  animation: justtranslate-pending-spinner 0.72s linear infinite !important;
+}
+
+[data-justranslate-translation][data-justranslate-state='error'] {
+  color: #dc2626 !important;
+  cursor: pointer !important;
+  opacity: 0.9 !important;
+}
+
+[data-justranslate-translation][data-justranslate-state='error']:hover,
+[data-justranslate-translation][data-justranslate-state='error']:focus-visible {
+  text-decoration: underline !important;
+  text-underline-offset: 0.18em !important;
+}
+
+td > [data-justranslate-translation],
+th > [data-justranslate-translation] {
+  margin-top: 0.3em !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-justranslate-translation][data-justranslate-state='pending']::after {
+    animation: none !important;
+  }
+}
+
+@keyframes justtranslate-pending-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}

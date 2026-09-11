@@ -1,0 +1,49 @@
+{
+  "name": "just-translate",
+  "version": "0.3.27",
+  "private": true,
+  "description": "A local-first bilingual webpage translator using your own OpenAI-compatible API.",
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/verify-build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "check": "eslint . && vitest run && tsc --noEmit && vite build && node scripts/verify-build.mjs"
+  },
+  "dependencies": {
+    "@streamparser/json": "0.0.26",
+    "eventsource-parser": "4.1.0",
+    "idb": "8.0.3",
+    "lucide-react": "1.34.0",
+    "p-queue": "9.3.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tinyld": "1.3.4"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "2.7.1",
+    "@eslint/js": "9.39.5",
+    "@types/chrome": "0.2.7",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "fake-indexeddb": "6.2.5",
+    "globals": "17.11.0",
+    "jsdom": "26.1.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.68.0",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}
