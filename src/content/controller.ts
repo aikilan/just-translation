@@ -243,6 +243,12 @@ export class TranslationController {
     return this.startTranslation();
   }
 
+  /** Explicitly discards the old page session before translating with current preferences. */
+  async restart(): Promise<void> {
+    this.restore();
+    await this.start();
+  }
+
   private async startTranslation(scopeRoots?: readonly HTMLElement[]): Promise<void> {
     if (this.hasActiveOperation()) return;
     this.disconnectObserver(scopeRoots === undefined);
@@ -262,13 +268,35 @@ export class TranslationController {
       if (this.mainSessionId !== sessionId) return;
       const finishPreflight = this.metrics.start('preflight');
       const settings = await this.readValidSettings();
+      if (this.mainSessionId !== sessionId) return;
       if (isUrlExcluded(location.href, settings.excludedSites)) {
-        throw new Error('当前站点已被排除');
+        // Preflight exclusions are extension feedback, never failed paragraphs in the host page.
+        this.stop();
+        this.status.phase = 'error';
+        this.status.error = '当前站点已被排除';
+        return;
       }
-      await this.beginTranslationSession(sessionId, settings.activeProfileId);
+      if (this.hasDifferentContext(settings)) {
+        this.stop();
+        this.status.needsRestart = true;
+        return;
+      }
+      const context = await this.beginTranslationSession(sessionId, settings.activeProfileId);
       finishPreflight();
       sessionStarted = true;
       if (this.mainSessionId !== sessionId) return;
+      if (
+        this.hasDifferentContext({
+          activeProfileId: context.profileId,
+          targetLanguage: context.targetLanguage,
+        })
+      ) {
+        this.stop();
+        this.status.needsRestart = true;
+        return;
+      }
+      this.status.context = context;
+      this.status.needsRestart = false;
 
       this.dynamicContentEnabled = settings.translateDynamicContent;
       this.status.displayMode = settings.displayMode;
@@ -343,9 +371,23 @@ export class TranslationController {
       if (isUrlExcluded(location.href, settings.excludedSites)) {
         throw new Error('当前站点已被排除');
       }
-      await this.beginTranslationSession(sessionId, settings.activeProfileId);
+      if (this.hasDifferentContext(settings)) {
+        this.status.needsRestart = true;
+        throw new Error('翻译设置已改变，请在插件中用新设置重新翻译');
+      }
+      const context = await this.beginTranslationSession(sessionId, settings.activeProfileId);
       sessionStarted = true;
       if (!this.isCurrentRetry(record, sessionId, generation)) return;
+      if (
+        this.hasDifferentContext({
+          activeProfileId: context.profileId,
+          targetLanguage: context.targetLanguage,
+        })
+      ) {
+        this.status.needsRestart = true;
+        throw new Error('翻译设置已改变，请在插件中用新设置重新翻译');
+      }
+      this.status.context = context;
       const configurationId = this.sessionConfigurations.get(sessionId)!;
       if (
         record.checkpoint?.configurationId !== configurationId ||
@@ -509,7 +551,6 @@ export class TranslationController {
   setDisplayMode(displayMode: DisplayMode): void {
     this.status.displayMode = displayMode;
     setDocumentDisplayMode(displayMode);
-    void sendRuntimeMessage<void>({ type: 'SAVE_DISPLAY_MODE', displayMode });
   }
 
   private async translateUnprocessedElements(
@@ -1412,7 +1453,10 @@ export class TranslationController {
   }
 
   /** Captures provider, prompt and target language once before any page work is dispatched. */
-  private async beginTranslationSession(sessionId: string, profileId: string): Promise<void> {
+  private async beginTranslationSession(
+    sessionId: string,
+    profileId: string,
+  ): Promise<TranslationSessionInfo['context']> {
     const response = await sendPreflightMessage<TranslationSessionInfo>(
       {
         type: 'BEGIN_TRANSLATION_SESSION',
@@ -1424,6 +1468,7 @@ export class TranslationController {
     if (!response.ok) throw new Error(response.error);
     if (!response.data?.configurationId) throw new Error('翻译会话缺少配置指纹');
     this.sessionConfigurations.set(sessionId, response.data.configurationId);
+    return response.data.context;
   }
 
   private async endTranslationSession(sessionId: string): Promise<void> {
@@ -1632,6 +1677,18 @@ export class TranslationController {
       if (!this.observer) this.observeDynamicContent();
       this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
     }
+  }
+
+  /** Retains the language/profile of existing output across dynamic scans and manual continuation. */
+  private hasDifferentContext(
+    settings: Pick<PublicTranslatorSettings, 'activeProfileId' | 'targetLanguage'>,
+  ): boolean {
+    const context = this.status.context;
+    return Boolean(
+      context &&
+      (context.profileId !== settings.activeProfileId ||
+        context.targetLanguage !== settings.targetLanguage),
+    );
   }
 
   private async readValidSettings(): Promise<PublicTranslatorSettings> {

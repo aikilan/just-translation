@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  DEFAULT_SETTINGS,
-  DEFAULT_TRANSLATION_PROMPT,
-  SETTINGS_STORAGE_KEY,
-} from './settings';
+import { DEFAULT_SETTINGS, DEFAULT_TRANSLATION_PROMPT, SETTINGS_STORAGE_KEY } from './settings';
 import { getSettings, initializeSettings } from './settings-store';
 
 describe('settings store initialization', () => {
@@ -27,7 +23,7 @@ describe('settings store initialization', () => {
     });
   });
 
-  it('writes the default prompt into every existing profile that has no usable prompt', async () => {
+  it('normalizes read values without writing from the reading context', async () => {
     stored[SETTINGS_STORAGE_KEY] = {
       ...DEFAULT_SETTINGS,
       profiles: [
@@ -56,13 +52,7 @@ describe('settings store initialization', () => {
       DEFAULT_TRANSLATION_PROMPT,
       DEFAULT_TRANSLATION_PROMPT,
     ]);
-    expect(stored[SETTINGS_STORAGE_KEY]).toMatchObject({
-      profiles: [
-        expect.objectContaining({ translationPrompt: DEFAULT_TRANSLATION_PROMPT }),
-        expect.objectContaining({ translationPrompt: DEFAULT_TRANSLATION_PROMPT }),
-      ],
-    });
-    expect(storageSet).toHaveBeenCalledOnce();
+    expect(storageSet).not.toHaveBeenCalled();
   });
 
   it('persists complete default settings when the extension has never been initialized', async () => {

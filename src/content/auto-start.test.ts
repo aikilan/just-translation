@@ -15,6 +15,18 @@ const SETTINGS: PublicTranslatorSettings = {
 };
 
 describe('tryStartAutomaticTranslation', () => {
+  it.each(['news.ycombinator.com', '*.ycombinator.com'])(
+    'does not start when the auto-translated site also matches exclusion %s',
+    async (rule) => {
+      const start = vi.fn().mockResolvedValue(undefined);
+      await tryStartAutomaticTranslation(
+        { start },
+        'https://news.ycombinator.com/news',
+        vi.fn().mockResolvedValue({ ok: true, data: { ...SETTINGS, excludedSites: [rule] } }),
+      );
+      expect(start).not.toHaveBeenCalled();
+    },
+  );
   it('starts immediately when the loaded page hostname is marked for automatic translation', async () => {
     const start = vi.fn().mockResolvedValue(undefined);
 

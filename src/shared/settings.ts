@@ -209,6 +209,37 @@ export function normalizeHostname(input: string): string {
   return hostname;
 }
 
+/** Normalizes user-entered values once at the profile persistence boundary. */
+export function normalizeTranslationProfile(profile: TranslationProfile): TranslationProfile {
+  return {
+    ...profile,
+    id: profile.id.trim(),
+    name: profile.name.trim(),
+    apiUrl: profile.apiUrl.trim(),
+    model: profile.model.trim(),
+    translationPrompt: profile.translationPrompt.trim(),
+  };
+}
+
+/** Validates a hostname, allowing an explicit wildcard only for exclusion rules. */
+export function normalizeSiteRule(input: string, allowWildcard: boolean): string {
+  const value = input.trim().toLowerCase().replace(/\.$/u, '');
+  const wildcard = value.startsWith('*.');
+  if (wildcard && !allowWildcard) throw new Error('自动翻译仅支持精确域名');
+  const host = wildcard ? value.slice(2) : value;
+  if (
+    !/^[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/u.test(host) ||
+    host.includes('..') ||
+    host
+      .split('.')
+      .some((label) => label.startsWith('-') || label.endsWith('-') || label.length > 63) ||
+    host.length > 253
+  ) {
+    throw new Error('请输入有效域名，不包含协议、路径或端口');
+  }
+  return `${wildcard ? '*.' : ''}${normalizeHostname(host)}`;
+}
+
 function cloneDefaultSettings(): TranslatorSettings {
   return {
     ...DEFAULT_SETTINGS,

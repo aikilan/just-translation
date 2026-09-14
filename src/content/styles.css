@@ -35,7 +35,11 @@
 }
 
 [data-justranslate-translation][data-justranslate-state='error'] {
-  color: #dc2626 !important;
+  color: var(--justranslate-source-color, inherit) !important;
+  font-size: 0.875em !important;
+  text-decoration: underline !important;
+  text-decoration-style: dotted !important;
+  text-underline-offset: 0.2em !important;
   cursor: pointer !important;
   opacity: 0.9 !important;
 }

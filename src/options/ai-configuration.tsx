@@ -1,0 +1,509 @@
+import { Check, Eye, EyeOff, LoaderCircle, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import { getErrorMessage, type PublicTranslatorSettings } from '../shared/messages';
+import {
+  DEFAULT_TRANSLATION_PROMPT,
+  MAX_TRANSLATION_PROMPT_CHARACTERS,
+  normalizeTranslationProfile,
+  validateTranslationProfile,
+  type TranslationProfile,
+  type TranslatorSettings,
+  type TranslationProfileValidationErrors,
+} from '../shared/settings';
+import { SaveFeedback, useSettingsMutation } from '../ui/controls';
+import { testTranslatorConfiguration } from './test-configuration';
+
+type TestState =
+  | { status: 'untested' }
+  | { status: 'testing' }
+  | { status: 'passed'; text: string; latency: number }
+  | { status: 'failed'; message: string };
+interface Props {
+  settings: TranslatorSettings;
+  onSaved: (profile: TranslationProfile, result: PublicTranslatorSettings) => void;
+  onDeleted: (id: string, result: PublicTranslatorSettings) => void;
+  onActivated: (result: PublicTranslatorSettings) => void;
+}
+const sameProfile = (a: TranslationProfile | undefined, b: TranslationProfile | undefined) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
+/** Keeps profile drafts independent from global activation, automatic preferences and connection tests. */
+export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: Props) {
+  const [drafts, setDrafts] = useState(settings.profiles);
+  const [selectedId, setSelectedId] = useState(settings.activeProfileId);
+  const [tests, setTests] = useState<Record<string, TestState>>({});
+  const [touched, setTouched] = useState<Record<string, TranslationProfileValidationErrors>>({});
+  const [showKey, setShowKey] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const previous = useRef(settings.profiles);
+  const testVersion = useRef(0);
+  const testing = useRef(false);
+  const alive = useRef(true);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
+  const { feedback, save, clear } = useSettingsMutation();
+  const idPrefix = useId();
+  const profile = drafts.find((item) => item.id === selectedId);
+  const persisted = settings.profiles.find((item) => item.id === selectedId);
+  const dirty = !sameProfile(profile, persisted);
+  const anyDirty = drafts.some(
+    (item) =>
+      !sameProfile(
+        item,
+        settings.profiles.find((saved) => saved.id === item.id),
+      ),
+  );
+  const busy = feedback.ai?.status === 'saving';
+  const state = tests[selectedId] ?? { status: 'untested' };
+  const validation = profile ? validateTranslationProfile(profile) : {};
+  const errors = touched[selectedId] ?? {};
+  const current = selectedId === settings.activeProfileId;
+  const firstRun = settings.profiles.every(
+    (item) => Object.keys(validateTranslationProfile(item)).length > 0,
+  );
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      testVersion.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    const oldSaved = previous.current;
+    setDrafts((existing) => [
+      ...settings.profiles.map((saved) => {
+        const draft = existing.find((item) => item.id === saved.id);
+        return draft &&
+          !sameProfile(
+            draft,
+            oldSaved.find((item) => item.id === saved.id),
+          )
+          ? draft
+          : saved;
+      }),
+      ...existing.filter(
+        (item) =>
+          !settings.profiles.some((saved) => saved.id === item.id) &&
+          !oldSaved.some((saved) => saved.id === item.id),
+      ),
+    ]);
+    previous.current = settings.profiles;
+  }, [settings.profiles]);
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (anyDirty) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [anyDirty]);
+  useEffect(() => {
+    testVersion.current += 1;
+    testing.current = false;
+    setTests({});
+  }, [settings.targetLanguage]);
+  useEffect(() => {
+    if (confirmDelete && dialog.current && !dialog.current.open) dialog.current.showModal?.();
+    if (!confirmDelete) deleteTrigger.current?.focus();
+  }, [confirmDelete]);
+
+  function invalidate() {
+    testVersion.current += 1;
+    testing.current = false;
+    setTests((existing) => ({ ...existing, [selectedId]: { status: 'untested' } }));
+    clear('ai');
+  }
+  function edit(patch: Partial<TranslationProfile>) {
+    setDrafts((existing) =>
+      existing.map((item) => (item.id === selectedId ? { ...item, ...patch } : item)),
+    );
+    setTouched((existing) => ({ ...existing, [selectedId]: {} }));
+    invalidate();
+  }
+  function select(id: string) {
+    invalidate();
+    setSelectedId(id);
+    setShowKey(false);
+    setConfirmDelete(false);
+  }
+  function add() {
+    const id = crypto.randomUUID();
+    let number = drafts.length + 1;
+    while (drafts.some((item) => item.name === `配置 ${number}`)) number += 1;
+    setDrafts((existing) => [
+      ...existing,
+      {
+        id,
+        name: `配置 ${number}`,
+        apiUrl: 'https://api.openai.com/v1',
+        apiKey: '',
+        model: '',
+        translationPrompt: DEFAULT_TRANSLATION_PROMPT,
+      },
+    ]);
+    select(id);
+  }
+  function discard() {
+    if (persisted)
+      setDrafts((existing) => existing.map((item) => (item.id === selectedId ? persisted : item)));
+    else {
+      setDrafts((existing) => existing.filter((item) => item.id !== selectedId));
+      select(settings.activeProfileId);
+    }
+    setTouched((existing) => ({ ...existing, [selectedId]: {} }));
+    invalidate();
+  }
+  function validate(): boolean {
+    setTouched((existing) => ({ ...existing, [selectedId]: validation }));
+    if (Object.keys(validation).length > 0) {
+      const first = Object.keys(validation)[0];
+      document.getElementById(`${idPrefix}-${first}`)?.focus();
+      return false;
+    }
+    return Boolean(profile);
+  }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!profile || busy || !validate()) return;
+    const snapshot = normalizeTranslationProfile(profile);
+    void save('ai', { type: 'SAVE_TRANSLATION_PROFILE', profile: snapshot }, (result) => {
+      setDrafts((existing) =>
+        existing.map((item) =>
+          item.id === snapshot.id && sameProfile(item, profile) ? snapshot : item,
+        ),
+      );
+      onSaved(snapshot, result);
+    });
+  }
+  /** A revision binds a test result to its exact draft and target language, not just the selected tab. */
+  async function testConnection() {
+    if (testing.current || !profile || !validate()) return;
+    const version = ++testVersion.current;
+    const testedId = selectedId;
+    testing.current = true;
+    setTests((existing) => ({ ...existing, [testedId]: { status: 'testing' } }));
+    const started = performance.now();
+    try {
+      const text = await testTranslatorConfiguration(profile, settings.targetLanguage);
+      if (alive.current && version === testVersion.current)
+        setTests((existing) => ({
+          ...existing,
+          [testedId]: { status: 'passed', text, latency: Math.round(performance.now() - started) },
+        }));
+    } catch (reason) {
+      if (alive.current && version === testVersion.current)
+        setTests((existing) => ({
+          ...existing,
+          [testedId]: { status: 'failed', message: getErrorMessage(reason) },
+        }));
+    } finally {
+      if (version === testVersion.current) testing.current = false;
+    }
+  }
+  function errorProps(field: keyof TranslationProfileValidationErrors) {
+    return {
+      id: `${idPrefix}-${field}`,
+      'aria-invalid': Boolean(errors[field]),
+      'aria-describedby': errors[field] ? `${idPrefix}-${field}-error` : undefined,
+    };
+  }
+  function fieldError(field: keyof TranslationProfileValidationErrors) {
+    return errors[field] ? (
+      <small className="field-error" role="alert" id={`${idPrefix}-${field}-error`}>
+        {errors[field]}
+      </small>
+    ) : null;
+  }
+  function blur(field: keyof TranslationProfileValidationErrors) {
+    setTouched((existing) => ({
+      ...existing,
+      [selectedId]: { ...existing[selectedId], [field]: validation[field] },
+    }));
+  }
+
+  if (!profile) return <p>此配置已删除，请重新打开设置。</p>;
+  return (
+    <>
+      {firstRun ? (
+        <div className="onboarding">
+          <span className="eyebrow">开始使用</span>
+          <h2>连接你的第一个 AI</h2>
+          <p>填写接口和模型，测试连接后保存。也可以直接保存，稍后测试。</p>
+          <ol>
+            <li>
+              <span>1</span>填写配置
+            </li>
+            <li>
+              <span>2</span>测试连接
+            </li>
+            <li>
+              <span>3</span>保存并开始阅读
+            </li>
+          </ol>
+        </div>
+      ) : null}
+      <div className="profile-toolbar">
+        <label className="profile-picker">
+          <span>正在编辑的配置</span>
+          <select
+            aria-label="正在编辑的配置"
+            value={selectedId}
+            disabled={busy}
+            onChange={(event) => select(event.target.value)}
+          >
+            {drafts.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name || '未命名配置'}
+                {item.id === settings.activeProfileId ? ' · 当前使用' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="button" type="button" disabled={busy} onClick={add}>
+          <Plus aria-hidden="true" />
+          新增配置
+        </button>
+      </div>
+      <div className="profile-state">
+        <span>
+          {current ? (
+            <>
+              <Check aria-hidden="true" />
+              当前使用
+            </>
+          ) : (
+            '未启用'
+          )}
+          <span className="separator">·</span>
+          {dirty ? '未保存' : '已保存'}
+        </span>
+        {!current ? (
+          <button
+            type="button"
+            className="text-button"
+            disabled={dirty || busy || Object.keys(validation).length > 0}
+            onClick={() => {
+              void save('ai', { type: 'SET_ACTIVE_PROFILE', profileId: selectedId }, onActivated);
+            }}
+          >
+            设为当前使用
+          </button>
+        ) : null}
+      </div>
+      <form onSubmit={submit} noValidate>
+        <div className="form-section">
+          <label className="field">
+            <span>配置名称</span>
+            <input
+              aria-label="配置名称"
+              {...errorProps('name')}
+              value={profile.name}
+              disabled={busy}
+              onBlur={() => blur('name')}
+              onChange={(event) => edit({ name: event.target.value })}
+            />
+            {fieldError('name')}
+          </label>
+          <label className="field">
+            <span>API 地址</span>
+            <input
+              aria-label="API 地址"
+              {...errorProps('apiUrl')}
+              type="url"
+              spellCheck={false}
+              placeholder="https://api.example.com/v1"
+              value={profile.apiUrl}
+              disabled={busy}
+              onBlur={() => blur('apiUrl')}
+              onChange={(event) => edit({ apiUrl: event.target.value })}
+            />
+            <small>支持 OpenAI 兼容接口，包含 /v1 的地址也可直接使用。</small>
+            {fieldError('apiUrl')}
+          </label>
+          <div className="credential-grid">
+            <label className="field">
+              <span>API Key</span>
+              <span className="secret-input">
+                <input
+                  aria-label="API Key"
+                  type={showKey ? 'text' : 'password'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={profile.apiKey}
+                  placeholder="本地服务可留空"
+                  disabled={busy}
+                  onChange={(event) => edit({ apiKey: event.target.value })}
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                  onClick={() => setShowKey((value) => !value)}
+                >
+                  {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                </button>
+              </span>
+            </label>
+            <label className="field">
+              <span>模型</span>
+              <input
+                aria-label="模型"
+                {...errorProps('model')}
+                value={profile.model}
+                spellCheck={false}
+                placeholder="服务商提供的模型名称"
+                disabled={busy}
+                onBlur={() => blur('model')}
+                onChange={(event) => edit({ model: event.target.value })}
+              />
+              {fieldError('model')}
+            </label>
+          </div>
+        </div>
+        <details className="prompt-details">
+          <summary>
+            高级设置<span>自定义翻译 Prompt</span>
+          </summary>
+          <div className="prompt-editor">
+            <div className="prompt-heading">
+              <label htmlFor={`${idPrefix}-translationPrompt`}>翻译 Prompt</label>
+              <button
+                type="button"
+                className="text-button"
+                disabled={busy}
+                onClick={() => edit({ translationPrompt: DEFAULT_TRANSLATION_PROMPT })}
+              >
+                恢复默认 Prompt
+              </button>
+            </div>
+            <textarea
+              aria-label="自定义翻译 Prompt"
+              {...errorProps('translationPrompt')}
+              rows={6}
+              maxLength={MAX_TRANSLATION_PROMPT_CHARACTERS}
+              value={profile.translationPrompt}
+              disabled={busy}
+              onBlur={() => blur('translationPrompt')}
+              onChange={(event) => edit({ translationPrompt: event.target.value })}
+            />
+            <div className="prompt-hint">
+              <small>用 {'{{targetLanguage}}'} 表示目标语言。</small>
+              <small>
+                {profile.translationPrompt.length} / {MAX_TRANSLATION_PROMPT_CHARACTERS}
+              </small>
+            </div>
+            {fieldError('translationPrompt')}
+          </div>
+        </details>
+        <div
+          className={`connection-result test-${state.status}`}
+          role={state.status === 'failed' ? 'alert' : 'status'}
+        >
+          <div className="connection-heading">
+            <span className="status-dot" />
+            {state.status === 'testing'
+              ? '测试中'
+              : state.status === 'passed'
+                ? '测试通过'
+                : state.status === 'failed'
+                  ? '测试失败'
+                  : '未测试'}
+            {state.status === 'passed' ? <span className="latency">{state.latency} ms</span> : null}
+          </div>
+          {state.status === 'passed' ? (
+            <>
+              <p className="test-translation">{state.text}</p>
+              <small>接口响应有效，请根据测试译文确认翻译质量。</small>
+            </>
+          ) : state.status === 'failed' ? (
+            <p>{state.message}</p>
+          ) : (
+            <p>
+              {state.status === 'testing'
+                ? '正在请求你的 API…'
+                : '测试会直接请求你的 API，不会保存或启用配置。'}
+            </p>
+          )}
+        </div>
+        <div className="ai-actions">
+          <div className="action-buttons">
+            <button className="button button-primary" type="submit" disabled={busy}>
+              {busy ? <LoaderCircle className="spin" aria-hidden="true" /> : null}保存配置
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={busy || state.status === 'testing'}
+              onClick={() => void testConnection()}
+            >
+              {state.status === 'testing' ? '测试中…' : '测试连接'}
+            </button>
+            {dirty ? (
+              <button className="text-button" type="button" disabled={busy} onClick={discard}>
+                放弃修改
+              </button>
+            ) : null}
+          </div>
+          <SaveFeedback state={feedback.ai} />
+        </div>
+      </form>
+      <div className="configuration-footer">
+        <p>密钥仅保存在当前浏览器，翻译请求直接发送到你的 API。</p>
+        <button
+          ref={deleteTrigger}
+          className="text-button danger-text"
+          type="button"
+          disabled={busy || current || drafts.length <= 1}
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 aria-hidden="true" />
+          删除配置
+        </button>
+        {current ? <small>删除前请先启用其他配置。</small> : null}
+      </div>
+      {confirmDelete ? (
+        <dialog
+          ref={dialog}
+          role="dialog"
+          aria-labelledby={`${idPrefix}-delete-title`}
+          onCancel={() => setConfirmDelete(false)}
+        >
+          <h2 id={`${idPrefix}-delete-title`}>删除“{profile.name}”？</h2>
+          <p>配置和未保存的修改会一并移除。</p>
+          <div className="dialog-actions">
+            <button className="button" disabled={busy} onClick={() => setConfirmDelete(false)}>
+              取消
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={() => {
+                if (!persisted) {
+                  discard();
+                  setConfirmDelete(false);
+                  return;
+                }
+                void save(
+                  'ai',
+                  { type: 'DELETE_TRANSLATION_PROFILE', profileId: selectedId },
+                  (result) => {
+                    onDeleted(selectedId, result);
+                    setDrafts((existing) => existing.filter((item) => item.id !== selectedId));
+                    select(settings.activeProfileId);
+                  },
+                );
+              }}
+            >
+              确认删除
+            </button>
+          </div>
+          <SaveFeedback state={feedback.ai} />
+        </dialog>
+      ) : null}
+    </>
+  );
+}

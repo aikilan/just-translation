@@ -1,138 +1,127 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY } from '../shared/settings';
 import {
+  DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
+  type TranslatorSettings,
+} from '../shared/settings';
+import {
+  deleteTranslationProfile,
   readPublicSettings,
-  saveAndReadPublicSettings,
+  saveTranslationProfile,
   selectActiveProfile,
   setSiteAutoTranslation,
+  updateReadingPreferences,
+  updateSiteRule,
 } from './configuration-service';
 
 describe('configuration service', () => {
-  let stored: Record<string, unknown>;
-
+  let stored: TranslatorSettings;
+  let storageSet: ReturnType<
+    typeof vi.fn<(values: Record<string, TranslatorSettings>) => Promise<void>>
+  >;
   beforeEach(() => {
-    stored = {};
+    stored = structuredClone(DEFAULT_SETTINGS);
+    storageSet = vi.fn((values: Record<string, TranslatorSettings>) => {
+      stored = structuredClone(values[SETTINGS_STORAGE_KEY]);
+      return Promise.resolve();
+    });
     vi.stubGlobal('chrome', {
       storage: {
         local: {
-          get: vi.fn((key: string) => Promise.resolve({ [key]: stored[key] })),
-          set: vi.fn((values: Record<string, unknown>) => {
-            Object.assign(stored, values);
-            return Promise.resolve();
-          }),
+          get: vi.fn(() => Promise.resolve({ [SETTINGS_STORAGE_KEY]: structuredClone(stored) })),
+          set: storageSet,
         },
       },
     });
   });
-
-  it('persists settings and returns the same configured state used by the popup', async () => {
-    const publicSettings = await saveAndReadPublicSettings({
-      ...DEFAULT_SETTINGS,
-      profiles: [
-        {
-          ...DEFAULT_SETTINGS.profiles[0],
-          apiUrl: ' https://api.deepseek.com/v1 ',
-          apiKey: 'secret',
-          model: ' deepseek-v4-flash ',
-        },
-      ],
+  it('saves a single profile, normalizes values and keeps secrets private', async () => {
+    const result = await saveTranslationProfile({
+      ...stored.profiles[0],
+      model: ' model ',
+      apiKey: 'secret',
     });
-
-    expect(publicSettings.configured).toBe(true);
-    expect(publicSettings).not.toHaveProperty('batchMaxCharacters');
-    expect(publicSettings).not.toHaveProperty('batchMaxItems');
-    expect(publicSettings).not.toHaveProperty('batchConcurrency');
-    expect(stored[SETTINGS_STORAGE_KEY]).toMatchObject({
-      profiles: [
-        expect.objectContaining({
-          apiUrl: 'https://api.deepseek.com/v1',
-          model: 'deepseek-v4-flash',
-        }),
-      ],
-    });
-    await expect(readPublicSettings()).resolves.toEqual(publicSettings);
+    expect(result.configured).toBe(true);
+    expect(stored.profiles[0].model).toBe('model');
+    expect(JSON.stringify(result)).not.toContain('secret');
+    await expect(readPublicSettings()).resolves.toEqual(result);
   });
-
-  it('rejects a save when storage cannot read back the values that were written', async () => {
-    stored[SETTINGS_STORAGE_KEY] = DEFAULT_SETTINGS;
-    vi.stubGlobal('chrome', {
-      storage: {
-        local: {
-          get: vi.fn((key: string) => Promise.resolve({ [key]: stored[key] })),
-          set: vi.fn().mockResolvedValue(undefined),
-        },
-      },
+  it('saves preferences and sites independently from incomplete AI configuration', async () => {
+    await expect(updateReadingPreferences({ targetLanguage: ' Japanese ' })).resolves.toMatchObject(
+      { configured: false, targetLanguage: 'Japanese' },
+    );
+    await updateSiteRule({
+      list: 'excludedSites',
+      hostname: '*.Internal.Example.com',
+      enabled: true,
     });
-
+    expect(stored.excludedSites).toEqual(['*.internal.example.com']);
+    expect(stored.profiles[0].model).toBe('');
+  });
+  it('serializes simultaneous domain updates against latest storage', async () => {
+    await Promise.all([
+      saveTranslationProfile({ ...stored.profiles[0], model: 'model' }),
+      updateReadingPreferences({ targetLanguage: 'Japanese' }),
+      updateReadingPreferences({ displayMode: 'translation' }),
+      setSiteAutoTranslation('News.Example.com', true),
+      updateSiteRule({ list: 'excludedSites', hostname: 'bank.example.com', enabled: true }),
+    ]);
+    expect(stored).toMatchObject({
+      targetLanguage: 'Japanese',
+      displayMode: 'translation',
+      autoTranslateSites: ['news.example.com'],
+      excludedSites: ['bank.example.com'],
+      profiles: [expect.objectContaining({ model: 'model' })],
+    });
+  });
+  it('rejects unconfirmed writes and recovers the queue after failure', async () => {
+    storageSet.mockResolvedValueOnce(undefined);
+    await expect(updateReadingPreferences({ targetLanguage: 'Japanese' })).rejects.toThrow(
+      '回读不一致',
+    );
+    await expect(updateReadingPreferences({ targetLanguage: 'English' })).resolves.toMatchObject({
+      targetLanguage: 'English',
+    });
+  });
+  it('requires explicit valid activation and protects the active or last profile', async () => {
+    await saveTranslationProfile({
+      ...stored.profiles[0],
+      id: 'second',
+      name: '第二个',
+      model: 'model',
+    });
+    expect(stored.activeProfileId).toBe(DEFAULT_SETTINGS.activeProfileId);
+    await expect(deleteTranslationProfile(DEFAULT_SETTINGS.activeProfileId)).rejects.toThrow();
+    await selectActiveProfile('second');
+    await expect(selectActiveProfile(DEFAULT_SETTINGS.activeProfileId)).rejects.toThrow('模型');
+    await deleteTranslationProfile(DEFAULT_SETTINGS.activeProfileId);
+    expect(stored.profiles).toHaveLength(1);
+    await expect(deleteTranslationProfile('second')).rejects.toThrow();
+  });
+  it('rejects duplicate names and malformed rules', async () => {
     await expect(
-      saveAndReadPublicSettings({
-        ...DEFAULT_SETTINGS,
-        profiles: [
-          {
-            ...DEFAULT_SETTINGS.profiles[0],
-            apiUrl: 'https://api.deepseek.com/v1',
-            apiKey: 'secret',
-            model: 'deepseek-v4-flash',
-          },
-        ],
-      }),
-    ).rejects.toThrow(/回读不一致/u);
+      saveTranslationProfile({ ...stored.profiles[0], id: 'second', model: 'model' }),
+    ).rejects.toThrow('名称不能重复');
+    for (const hostname of [
+      'https://example.com',
+      'example.com/path',
+      '*.*.example.com',
+      'example.com?x',
+      'example.com#x',
+      'user@example.com',
+    ]) {
+      await expect(
+        updateSiteRule({ list: 'excludedSites', hostname, enabled: true }),
+      ).rejects.toThrow();
+    }
+    await expect(setSiteAutoTranslation('*.example.com', true)).rejects.toThrow();
+    await expect(updateReadingPreferences({ targetLanguage: '' })).rejects.toThrow();
+    expect(stored).toEqual(DEFAULT_SETTINGS);
   });
-
-  it('returns the exact validation reason when stored configuration is incomplete', async () => {
-    stored[SETTINGS_STORAGE_KEY] = DEFAULT_SETTINGS;
-
-    await expect(readPublicSettings()).resolves.toMatchObject({
-      configured: false,
-      configurationError: '请填写模型名称',
-    });
-  });
-
-  it('switches the active profile without exposing provider secrets', async () => {
-    stored[SETTINGS_STORAGE_KEY] = {
-      ...DEFAULT_SETTINGS,
-      profiles: [
-        {
-          ...DEFAULT_SETTINGS.profiles[0],
-          id: 'one',
-          name: '配置一',
-          apiUrl: 'https://one.example.com/v1',
-          apiKey: 'secret-one',
-          model: 'model-one',
-        },
-        {
-          ...DEFAULT_SETTINGS.profiles[0],
-          id: 'two',
-          name: '配置二',
-          apiUrl: 'https://two.example.com/v1',
-          apiKey: 'secret-two',
-          model: 'model-two',
-        },
-      ],
-      activeProfileId: 'one',
-    };
-
-    const publicSettings = await selectActiveProfile('two');
-
-    expect(publicSettings.activeProfileId).toBe('two');
-    expect(publicSettings.profiles.map((profile) => profile.name)).toEqual(['配置一', '配置二']);
-    expect(publicSettings).not.toHaveProperty('apiKey');
-    expect(JSON.stringify(publicSettings)).not.toContain('secret-two');
-    expect(stored[SETTINGS_STORAGE_KEY]).toMatchObject({ activeProfileId: 'two' });
-  });
-
-  it('marks and unmarks an exact hostname for automatic translation', async () => {
-    stored[SETTINGS_STORAGE_KEY] = {
-      ...DEFAULT_SETTINGS,
-      profiles: [{ ...DEFAULT_SETTINGS.profiles[0], model: 'configured-model' }],
-    };
-
-    await expect(setSiteAutoTranslation('News.YCombinator.com', true)).resolves.toMatchObject({
-      autoTranslateSites: ['news.ycombinator.com'],
-    });
-    await expect(setSiteAutoTranslation('news.ycombinator.com', false)).resolves.toMatchObject({
-      autoTranslateSites: [],
-    });
+  it('deduplicates rules and retains exclusion conflicts', async () => {
+    await setSiteAutoTranslation('News.Example.com', true);
+    await setSiteAutoTranslation('news.example.com', true);
+    await updateSiteRule({ list: 'excludedSites', hostname: 'news.example.com', enabled: true });
+    expect(stored.autoTranslateSites).toEqual(['news.example.com']);
+    expect(stored.excludedSites).toEqual(['news.example.com']);
   });
 });

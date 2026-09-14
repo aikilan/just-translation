@@ -390,10 +390,21 @@ describe('DOM translation rendering', () => {
 
     const error = source.querySelector<HTMLElement>('[data-justranslate-translation]')!;
     expect(error.dataset.justranslateState).toBe('error');
-    expect(error.textContent).toContain('翻译失败，点击重试');
+    expect(error.textContent).toContain('翻译失败 · 重试');
     expect(error.getAttribute('role')).toBe('button');
     expect(error.tabIndex).toBe(0);
     expect(error.getAttribute('title')).toBeNull();
+  });
+
+  it('keeps retry feedback readable using the original website color', () => {
+    document.body.innerHTML =
+      '<p style="color: rgb(210, 215, 220)">Readable dark website text.</p>';
+    const source = document.querySelector('p')!;
+    const error = renderTranslationError(source, 'unit-dark');
+    expect(error.style.color).toBe('rgb(210, 215, 220)');
+    renderTranslation(source, '译文');
+    expect(error.getAttribute('role')).toBeNull();
+    expect(error.getAttribute('tabindex')).toBeNull();
   });
 
   it('copies the dominant original text typography before wrapping Hacker News cells', () => {

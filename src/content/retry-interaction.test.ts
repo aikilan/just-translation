@@ -18,7 +18,7 @@ describe('translation retry interactions', () => {
           data-justranslate-state="error"
           role="button"
           tabindex="0"
-        >翻译失败，点击重试</span>
+        >翻译失败 · 重试</span>
       </a>
       <p data-justranslate-source>
         <span data-justranslate-source-content>Other source</span>
@@ -27,7 +27,7 @@ describe('translation retry interactions', () => {
           data-justranslate-state="error"
           role="button"
           tabindex="0"
-        >翻译失败，点击重试</span>
+        >翻译失败 · 重试</span>
       </p>
     `;
     const retry = vi.fn();

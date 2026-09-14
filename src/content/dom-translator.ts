@@ -544,11 +544,11 @@ export function renderTranslationError(source: HTMLElement, unitId: string): HTM
   const translation = ensureTranslationElement(source);
   setTranslationState(translation, 'error');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
-  translation.setAttribute('aria-label', '翻译失败，点击重试');
+  translation.setAttribute('aria-label', '翻译失败 · 重试');
   translation.setAttribute('role', 'button');
   translation.tabIndex = 0;
   translation.removeAttribute('title');
-  translation.textContent = '翻译失败，点击重试';
+  translation.textContent = '翻译失败 · 重试';
   return translation;
 }
 
@@ -579,9 +579,7 @@ function setTranslationState(
 ): void {
   translation.setAttribute(TRANSLATION_STATE_ATTRIBUTE, state);
   const sourceColor = translation.style.getPropertyValue(SOURCE_COLOR_PROPERTY);
-  if (state === 'error') {
-    translation.style.setProperty('color', '#dc2626', 'important');
-  } else if (sourceColor) {
+  if (sourceColor) {
     translation.style.setProperty('color', sourceColor, 'important');
   }
 }

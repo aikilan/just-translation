@@ -1,5 +1,5 @@
 import type { TranslationSegment } from './batching';
-import type { DisplayMode, TranslatorSettings } from './settings';
+import type { DisplayMode, TranslationProfile, TranslatorSettings } from './settings';
 import type { TranslationRequestStage } from './translation-metrics';
 
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
@@ -11,6 +11,8 @@ export interface PageTranslationStatus {
   total: number;
   error?: string;
   displayMode: DisplayMode;
+  context?: { profileId: string; targetLanguage: string };
+  needsRestart?: boolean;
 }
 
 export interface PublicTranslationProfile {
@@ -53,6 +55,7 @@ export interface TranslationCacheWrite {
 
 /** Opaque snapshot identity: enables safe partial retry without exposing provider configuration. */
 export interface TranslationSessionInfo {
+  context: { profileId: string; targetLanguage: string };
   configurationId: string;
 }
 
@@ -71,6 +74,16 @@ export interface TranslationBatchProgress {
   batchId: string;
   translations: Record<string, string>;
   timing?: { stage: TranslationRequestStage; durationMs: number };
+}
+
+export type ReadingPreferences = Pick<
+  TranslatorSettings,
+  'targetLanguage' | 'displayMode' | 'translateDynamicContent'
+>;
+export interface SiteRuleUpdate {
+  list: 'autoTranslateSites' | 'excludedSites';
+  hostname: string;
+  enabled: boolean;
 }
 
 export type RuntimeRequest =
@@ -98,8 +111,10 @@ export type RuntimeRequest =
       priority: TranslationPriority;
     }
   | { type: 'END_TRANSLATION_SESSION'; sessionId: string }
-  | { type: 'SAVE_SETTINGS'; settings: TranslatorSettings }
-  | { type: 'SAVE_DISPLAY_MODE'; displayMode: DisplayMode }
+  | { type: 'SAVE_TRANSLATION_PROFILE'; profile: TranslationProfile }
+  | { type: 'DELETE_TRANSLATION_PROFILE'; profileId: string }
+  | { type: 'UPDATE_READING_PREFERENCES'; patch: Partial<ReadingPreferences> }
+  | { type: 'UPDATE_SITE_RULE'; rule: SiteRuleUpdate }
   | { type: 'SET_ACTIVE_PROFILE'; profileId: string }
   | { type: 'SET_SITE_AUTO_TRANSLATE'; hostname: string; enabled: boolean };
 
@@ -107,6 +122,7 @@ export type PageCommand =
   | TranslationBatchProgress
   | { type: 'GET_PAGE_DIAGNOSTICS' }
   | { type: 'START_TRANSLATION' }
+  | { type: 'RESTART_TRANSLATION' }
   | { type: 'STOP_TRANSLATION' }
   | { type: 'RESTORE_PAGE' }
   | { type: 'TOGGLE_TRANSLATION' }

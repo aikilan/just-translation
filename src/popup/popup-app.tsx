@@ -1,559 +1,438 @@
 import {
-  BrainCircuit,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
+  ArrowUpRight,
   CircleAlert,
   LoaderCircle,
   Play,
   RotateCcw,
   Settings,
-  ShieldCheck,
   Square,
-  X,
-  type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-
-import packageJson from '../../package.json' with { type: 'json' };
+import { useEffect, useRef, useState } from 'react';
 import { sendRuntimeMessage, sendTabMessage } from '../shared/chrome-api';
-import type { PageCommand, PageTranslationStatus, PublicTranslatorSettings } from '../shared/messages';
-import type { DisplayMode } from '../shared/settings';
-
-const INITIAL_STATUS: PageTranslationStatus = {
-  phase: 'idle',
-  translated: 0,
-  failed: 0,
-  total: 0,
-  displayMode: 'bilingual',
-};
+import {
+  getErrorMessage,
+  type PageCommand,
+  type PageTranslationStatus,
+  type PublicTranslatorSettings,
+} from '../shared/messages';
+import { isUrlExcluded } from '../shared/settings';
+import {
+  DisplayModeControl,
+  LanguagePicker,
+  SettingRow,
+  Switch,
+  languageLabel,
+  useSettingsMutation,
+} from '../ui/controls';
 
 type TranslationCommand = Extract<
   PageCommand['type'],
-  'START_TRANSLATION' | 'STOP_TRANSLATION' | 'RESTORE_PAGE'
+  'START_TRANSLATION' | 'STOP_TRANSLATION' | 'RESTORE_PAGE' | 'RESTART_TRANSLATION'
 >;
-
-interface StatusAction {
-  label: string;
-  command?: TranslationCommand;
-  closesPopup?: boolean;
-  tone: 'primary' | 'secondary';
-  icon: LucideIcon;
+const IDLE: PageTranslationStatus = {
+  phase: 'idle',
+  total: 0,
+  translated: 0,
+  failed: 0,
+  displayMode: 'bilingual',
+};
+interface PageState {
+  settings: PublicTranslatorSettings;
+  tabId?: number;
+  hostname?: string;
+  url?: string;
+  available: boolean;
+  restricted: boolean;
 }
 
 export function PopupApp() {
-  const [tabId, setTabId] = useState<number>();
-  const [configured, setConfigured] = useState(false);
-  const [configurationError, setConfigurationError] = useState<string>();
-  const [publicSettings, setPublicSettings] = useState<PublicTranslatorSettings>();
-  const [activeHostname, setActiveHostname] = useState<string>();
-  const [status, setStatus] = useState<PageTranslationStatus>(INITIAL_STATUS);
-  const [pageAvailable, setPageAvailable] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string>();
-  const [moreSettingsOpen, setMoreSettingsOpen] = useState(true);
+  const [page, setPage] = useState<PageState>();
+  const [status, setStatus] = useState(IDLE);
+  const [loadError, setLoadError] = useState('');
+  const [commandError, setCommandError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const commandLock = useRef(false);
+  const { feedback, save } = useSettingsMutation();
 
   useEffect(() => {
-    let intervalId: number | undefined;
     let mounted = true;
-    void loadInitialState()
-      .then(({ activeTabId, activeTabUrl, publicSettings, pageStatus }) => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let polling = false;
+    async function load() {
+      try {
+        const [result, tabs] = await Promise.all([
+          sendRuntimeMessage<PublicTranslatorSettings>({ type: 'GET_PUBLIC_SETTINGS' }),
+          chrome.tabs.query({ active: true, currentWindow: true }),
+        ]);
+        if (!result.ok) throw new Error(result.error);
+        const tab = tabs[0];
+        const http = Boolean(tab?.url && /^https?:/u.test(tab.url));
+        const restricted =
+          !http ||
+          Boolean(
+            tab?.url &&
+            /^https:\/\/(chromewebstore.google.com|chrome.google.com\/webstore|microsoftedge.microsoft.com\/addons)/u.test(
+              tab.url,
+            ),
+          );
+        const nextStatus =
+          !restricted && tab?.id !== undefined
+            ? await sendTabMessage<PageTranslationStatus>(tab.id, {
+                type: 'GET_PAGE_STATUS',
+              }).catch(() => null)
+            : null;
         if (!mounted) return;
-        setPublicSettings(publicSettings);
-        setConfigured(publicSettings.configured);
-        setConfigurationError(publicSettings.configurationError);
-        setActiveHostname(getHttpHostname(activeTabUrl));
-        setStatus(
-          pageStatus ?? {
-            ...INITIAL_STATUS,
-            displayMode: publicSettings.displayMode,
-          },
-        );
-        if (activeTabId === undefined || pageStatus === null) {
-          setPageAvailable(false);
-          return;
+        setPage({
+          settings: result.data,
+          tabId: tab?.id,
+          url: tab?.url,
+          hostname: http ? new URL(tab.url!).hostname : undefined,
+          available: nextStatus !== null,
+          restricted,
+        });
+        setStatus(nextStatus ?? { ...IDLE, displayMode: result.data.displayMode });
+        if (nextStatus && tab?.id !== undefined) {
+          const tabId = tab.id;
+          timer = setInterval(() => {
+            if (polling || commandLock.current) return;
+            polling = true;
+            void sendTabMessage<PageTranslationStatus>(tabId, { type: 'GET_PAGE_STATUS' })
+              .then((value) => {
+                if (mounted && !commandLock.current) setStatus(value);
+              })
+              .catch(() => {
+                if (mounted) setPage((current) => current && { ...current, available: false });
+              })
+              .finally(() => {
+                polling = false;
+              });
+          }, 500);
         }
-        setTabId(activeTabId);
-        intervalId = window.setInterval(() => {
-          void sendTabMessage<PageTranslationStatus>(activeTabId, { type: 'GET_PAGE_STATUS' })
-            .then(setStatus)
-            .catch(() => setPageAvailable(false));
-        }, 500);
-      })
-      .catch((error: unknown) => {
-        if (mounted) setLoadError(getMessage(error));
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
+      } catch (error) {
+        if (mounted) setLoadError(getErrorMessage(error));
+      }
+    }
+    void load();
+    function changed(_changes: Record<string, chrome.storage.StorageChange>, area: string) {
+      if (area !== 'local') return;
+      void sendRuntimeMessage<PublicTranslatorSettings>({ type: 'GET_PUBLIC_SETTINGS' })
+        .then((result) => {
+          if (mounted && result.ok)
+            setPage((current) => current && { ...current, settings: result.data });
+        })
+        .catch(() => {});
+    }
+    chrome.storage.onChanged.addListener(changed);
     return () => {
       mounted = false;
-      window.clearInterval(intervalId);
+      clearInterval(timer);
+      chrome.storage.onChanged.removeListener(changed);
     };
   }, []);
 
-  /** Sends one existing content-script command and reflects its immediate status snapshot. */
-  async function runCommand(type: TranslationCommand): Promise<void> {
-    if (tabId === undefined) return;
+  /** Executes one document command; explicit restart is the only destructive configuration apply. */
+  async function run(type: TranslationCommand) {
+    if (page?.tabId === undefined || commandLock.current) return;
+    commandLock.current = true;
+    setBusy(true);
+    setCommandError('');
     try {
-      const nextStatus = await sendTabMessage<PageTranslationStatus>(tabId, { type });
-      setStatus(nextStatus);
-    } catch {
-      setPageAvailable(false);
-    }
-  }
-
-  async function changeDisplayMode(displayMode: DisplayMode): Promise<void> {
-    if (tabId === undefined) return;
-    try {
-      const nextStatus = await sendTabMessage<PageTranslationStatus>(tabId, {
-        type: 'SET_DISPLAY_MODE',
-        displayMode,
-      });
-      setStatus(nextStatus);
+      setStatus(await sendTabMessage<PageTranslationStatus>(page.tabId, { type }));
     } catch (error) {
-      setStatus({ ...status, phase: 'error', error: getMessage(error) });
+      setCommandError(`操作未完成：${getErrorMessage(error)}`);
+    } finally {
+      commandLock.current = false;
+      setBusy(false);
     }
   }
-
-  async function changeProfile(profileId: string): Promise<void> {
-    const result = await sendRuntimeMessage<PublicTranslatorSettings>({
-      type: 'SET_ACTIVE_PROFILE',
-      profileId,
-    });
-    if (!result.ok) {
-      setLoadError(result.error);
-      return;
-    }
-    setPublicSettings(result.data);
-    setConfigured(result.data.configured);
-    setConfigurationError(result.data.configurationError);
+  function accept(settings: PublicTranslatorSettings) {
+    setPage((current) => current && { ...current, settings });
   }
-
-  async function changeAutoTranslation(enabled: boolean): Promise<void> {
-    if (!activeHostname || !publicSettings) return;
-    const result = await sendRuntimeMessage<PublicTranslatorSettings>({
-      type: 'SET_SITE_AUTO_TRANSLATE',
-      hostname: activeHostname,
-      enabled,
-    });
-    if (!result.ok) {
-      setLoadError(result.error);
-      return;
-    }
-    setPublicSettings(result.data);
-    if (enabled && tabId !== undefined && result.data.configured) {
-      try {
-        setStatus(await sendTabMessage<PageTranslationStatus>(tabId, { type: 'START_TRANSLATION' }));
-      } catch {
-        setPageAvailable(false);
-      }
-    }
+  function openSettings(section?: 'sites') {
+    if (section)
+      void chrome.tabs.create({ url: chrome.runtime.getURL(`src/options/index.html#${section}`) });
+    else void chrome.runtime.openOptionsPage();
   }
-
-  const hasPageTranslationState = status.total > 0;
+  const settings = page?.settings;
+  const excluded = Boolean(
+    page?.url && settings && isUrlExcluded(page.url, settings.excludedSites),
+  );
+  const contextChanged = Boolean(
+    settings &&
+    status.context &&
+    (settings.activeProfileId !== status.context.profileId ||
+      settings.targetLanguage !== status.context.targetLanguage),
+  );
+  const needsRestart = status.context ? contextChanged : Boolean(status.needsRestart);
+  const saving = Object.values(feedback).some((value) => value?.status === 'saving');
+  const canTranslate = Boolean(page?.available && settings?.configured && !excluded);
+  const action = needsRestart
+    ? '用新设置重新翻译'
+    : status.phase === 'translating'
+      ? '停止翻译'
+      : status.failed > 0
+        ? '返回网页重试'
+        : status.phase === 'stopped'
+          ? '继续翻译'
+          : status.phase === 'complete'
+            ? '翻译新内容'
+            : status.phase === 'error'
+              ? '重新翻译'
+              : '翻译此网页';
+  const title = needsRestart
+    ? '新设置已就绪'
+    : status.phase === 'translating'
+      ? '正在翻译'
+      : status.failed > 0
+        ? '部分段落未完成'
+        : status.phase === 'complete'
+          ? status.total
+            ? '翻译完成'
+            : '未发现需要翻译的内容'
+          : status.phase === 'stopped'
+            ? '已停止'
+            : status.phase === 'error'
+              ? '暂时无法翻译'
+              : '准备翻译';
 
   return (
     <main className="popup-shell">
-      <PopupHeader />
-
+      <header className="popup-header">
+        <div className="popup-brand">
+          <img src="/icons/icon.svg" alt="" className="popup-logo" />
+          <strong>只是翻译</strong>
+        </div>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="打开设置"
+          onClick={() => openSettings()}
+        >
+          <Settings aria-hidden="true" />
+        </button>
+      </header>
       <div className="popup-content">
-        {loading ? (
-          <InlineState
-            icon={LoaderCircle}
-            title="正在读取插件状态"
-            description="正在获取当前网页和翻译配置…"
-            loading
-          />
-        ) : loadError ? (
-          <InlineState
-            icon={CircleAlert}
-            title="无法读取插件状态"
-            description={loadError}
-            tone="error"
-            actionLabel="打开设置"
-            onAction={() => void chrome.runtime.openOptionsPage()}
-          />
-        ) : publicSettings ? (
-          <>
-            <ProfilePicker settings={publicSettings} onChange={changeProfile} />
-
-            <section className="popup-advanced">
-              <button
-                className="advanced-toggle"
-                type="button"
-                aria-expanded={moreSettingsOpen}
-                aria-controls="popup-advanced-content"
-                onClick={() => setMoreSettingsOpen((open) => !open)}
-              >
-                <span>更多设置</span>
-                <ChevronDown aria-hidden="true" />
+        <p className="current-site">{page?.hostname ?? '当前网页'}</p>
+        {loadError ? (
+          <section className="popup-notice">
+            <CircleAlert aria-hidden="true" />
+            <h1>无法读取插件状态</h1>
+            <p role="alert">{loadError}</p>
+            <button className="button" onClick={() => window.location.reload()}>
+              重新加载
+            </button>
+          </section>
+        ) : !page || !settings ? (
+          <section className="popup-notice" role="status">
+            <LoaderCircle className="spin" aria-hidden="true" />
+            <p>正在读取插件状态…</p>
+          </section>
+        ) : !settings.configured ? (
+          <section className="popup-notice">
+            <h1>用你的 AI，读懂网页</h1>
+            <p>连接支持 OpenAI 协议的 API，即可开始双语阅读。</p>
+            {settings.configurationError ? <p>{settings.configurationError}</p> : null}
+            <button className="button button-primary button-block" onClick={() => openSettings()}>
+              连接你的 AI
+              <ArrowUpRight aria-hidden="true" />
+            </button>
+            <small>配置仅保存在本地，请求直接发送到你的 API。</small>
+          </section>
+        ) : !page.available || excluded ? (
+          <section className="popup-notice">
+            <CircleAlert aria-hidden="true" />
+            <h1>
+              {excluded ? '此站已排除' : page.restricted ? '此页面无法翻译' : '尚未连接到当前网页'}
+            </h1>
+            <p>
+              {excluded
+                ? '此站符合不翻译规则，自动翻译也不会启动。'
+                : page.restricted
+                  ? '浏览器内置页、扩展商店等页面不允许读取内容。'
+                  : '请刷新网页后重新打开插件。'}
+            </p>
+            {excluded ? (
+              <button className="button" onClick={() => openSettings('sites')}>
+                管理站点规则
               </button>
-
-              {moreSettingsOpen ? (
-                <div
-                  className="popup-advanced-content advanced-enter"
-                  id="popup-advanced-content"
+            ) : null}
+          </section>
+        ) : (
+          <section className="translation-status" aria-label="网页翻译状态">
+            <div className="status-heading">
+              <span className={`status-dot phase-${status.phase}`} />
+              <h1>{title}</h1>
+              {needsRestart && status.phase === 'translating' ? (
+                <button
+                  className="text-button"
+                  onClick={() => void run('STOP_TRANSLATION')}
+                  disabled={busy}
                 >
-                  {!configured ? (
-                    <InlineState
-                      icon={CircleAlert}
-                      title="先连接你的 AI"
-                      description={
-                        configurationError
-                          ? `配置未生效：${configurationError}`
-                          : '填写 OpenAI 协议 API 地址和模型后，就可以开始翻译。'
-                      }
-                      tone="error"
-                      actionLabel="打开设置"
-                      onAction={() => void chrome.runtime.openOptionsPage()}
-                    />
-                  ) : !pageAvailable ? (
-                    <InlineState
-                      icon={CircleAlert}
-                      title="这个页面无法翻译"
-                      description="浏览器内置页、扩展商店和本地新标签页不允许插件读取内容。"
-                    />
-                  ) : (
-                    <>
-                      {activeHostname ? (
-                        <label className="site-auto-setting">
-                          <span className="setting-copy">
-                            <strong>此站自动翻译</strong>
-                            <small>进入该网站时自动翻译页面内容</small>
-                          </span>
-                          <input
-                            aria-label="此站自动翻译"
-                            type="checkbox"
-                            checked={publicSettings.autoTranslateSites.includes(activeHostname)}
-                            onChange={(event) => void changeAutoTranslation(event.target.checked)}
-                          />
-                          <span className="checkbox-control" aria-hidden="true">
-                            <Check />
-                          </span>
-                        </label>
-                      ) : null}
-
-                      <TranslationStatusCard
-                        status={status}
-                        onCommand={runCommand}
-                        onViewDetails={() => window.close()}
-                      />
-
-                      {status.error ? (
-                        <div className="popup-error" role="alert">
-                          <CircleAlert aria-hidden="true" />
-                          <span>
-                            <strong>{status.error}</strong>
-                            <small>请检查模型兼容性、响应格式和当前 API 配置。</small>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void chrome.runtime.openOptionsPage()}
-                          >
-                            检查 API 配置
-                            <ChevronRight aria-hidden="true" />
-                          </button>
-                        </div>
-                      ) : null}
-
-                      <label className="mode-picker">
-                        <span>显示设置</span>
-                        <select
-                          aria-label="显示设置"
-                          value={status.displayMode}
-                          onChange={(event) =>
-                            void changeDisplayMode(event.target.value as DisplayMode)
-                          }
-                        >
-                          <option value="bilingual">原文 + 译文</option>
-                          <option value="translation">仅译文</option>
-                        </select>
-                      </label>
-                    </>
-                  )}
-                </div>
+                  停止翻译
+                </button>
               ) : null}
-            </section>
-          </>
+            </div>
+            <p className="status-description" role="status">
+              {needsRestart
+                ? `当前译文保留${status.context ? `（${languageLabel(status.context.targetLanguage)}）` : ''}，重新翻译后应用新设置。`
+                : status.total > 0
+                  ? `已翻译 ${status.translated} / ${status.total} 个段落${status.failed ? ` · ${status.failed} 个失败` : ''}`
+                  : status.phase === 'translating'
+                    ? '正在查找需要翻译的内容…'
+                    : '译文将显示在原文下方。'}
+            </p>
+            {status.phase === 'translating' && status.total > 0 ? (
+              <div
+                className="progress-track"
+                role="progressbar"
+                aria-label="已翻译段落"
+                aria-valuemin={0}
+                aria-valuemax={status.total}
+                aria-valuenow={status.translated}
+              >
+                <span
+                  style={{ width: `${Math.min(100, (status.translated / status.total) * 100)}%` }}
+                />
+              </div>
+            ) : null}
+            <button
+              className={`button button-block ${status.phase === 'translating' && !needsRestart ? '' : 'button-primary'}`}
+              disabled={busy || saving}
+              onClick={() => {
+                if (needsRestart) void run('RESTART_TRANSLATION');
+                else if (status.phase === 'translating') void run('STOP_TRANSLATION');
+                else if (status.failed > 0) window.close();
+                else void run('START_TRANSLATION');
+              }}
+            >
+              {busy ? (
+                <LoaderCircle className="spin" aria-hidden="true" />
+              ) : status.phase === 'translating' && !needsRestart ? (
+                <Square aria-hidden="true" />
+              ) : (
+                <Play aria-hidden="true" />
+              )}
+              {action}
+            </button>
+            {status.failed ? (
+              <p className="retry-guidance">在网页中点击失败段落的“重试”，已完成的译文会保留。</p>
+            ) : null}
+            {status.error ? (
+              <details className="popup-error" open>
+                <summary>错误详情</summary>
+                <p>{status.error}</p>
+                <button className="text-button" onClick={() => openSettings()}>
+                  检查 AI 配置
+                  <ArrowUpRight aria-hidden="true" />
+                </button>
+              </details>
+            ) : null}
+          </section>
+        )}
+        {commandError ? (
+          <p className="field-error" role="alert">
+            {commandError}
+          </p>
+        ) : null}
+        {settings?.configured ? (
+          <div className="popup-preferences">
+            <SettingRow label="翻译为" feedback={feedback.language}>
+              <LanguagePicker
+                label="翻译为"
+                value={settings.targetLanguage}
+                disabled={saving || busy}
+                onChange={(targetLanguage) => {
+                  void save(
+                    'language',
+                    { type: 'UPDATE_READING_PREFERENCES', patch: { targetLanguage } },
+                    accept,
+                  );
+                }}
+              />
+            </SettingRow>
+            <SettingRow label="显示方式" feedback={feedback.mode}>
+              <DisplayModeControl
+                value={status.context || status.total ? status.displayMode : settings.displayMode}
+                disabled={saving || busy}
+                onChange={(displayMode) => {
+                  void save(
+                    'mode',
+                    { type: 'UPDATE_READING_PREFERENCES', patch: { displayMode } },
+                    (next) => {
+                      accept(next);
+                      if (page?.available && page.tabId !== undefined)
+                        void sendTabMessage<PageTranslationStatus>(page.tabId, {
+                          type: 'SET_DISPLAY_MODE',
+                          displayMode,
+                        })
+                          .then(setStatus)
+                          .catch(() =>
+                            setCommandError('偏好已保存，当前网页应用失败，请刷新后重试。'),
+                          );
+                    },
+                  );
+                }}
+              />
+            </SettingRow>
+            <SettingRow label="AI 配置" feedback={feedback.profile}>
+              <select
+                aria-label="AI 配置"
+                value={settings.activeProfileId}
+                disabled={saving || busy}
+                onChange={(event) => {
+                  void save(
+                    'profile',
+                    { type: 'SET_ACTIVE_PROFILE', profileId: event.target.value },
+                    accept,
+                  );
+                }}
+              >
+                {settings.profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id} disabled={!profile.configured}>
+                    {profile.name}
+                    {profile.configured ? '' : '（待配置）'}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+            <SettingRow label="此站自动翻译" feedback={feedback.auto}>
+              <Switch
+                label="此站自动翻译"
+                checked={Boolean(
+                  page?.hostname && settings.autoTranslateSites.includes(page.hostname),
+                )}
+                disabled={!canTranslate || saving || busy}
+                onChange={(enabled) => {
+                  if (!page?.hostname) return;
+                  void save(
+                    'auto',
+                    { type: 'SET_SITE_AUTO_TRANSLATE', hostname: page.hostname, enabled },
+                    (next) => {
+                      accept(next);
+                      if (enabled && status.phase === 'idle' && !status.context)
+                        void run('START_TRANSLATION');
+                    },
+                  );
+                }}
+              />
+            </SettingRow>
+          </div>
         ) : null}
       </div>
-
       <footer className="popup-footer">
         <button
-          className="restore-button"
+          className="text-button"
           type="button"
-          disabled={!pageAvailable || !hasPageTranslationState}
-          onClick={() => void runCommand('RESTORE_PAGE')}
+          disabled={!page?.available || !status.total || busy || saving}
+          onClick={() => void run('RESTORE_PAGE')}
         >
           <RotateCcw aria-hidden="true" />
-          恢复原始网页
+          恢复原文
         </button>
-        <span>Alt + T 快速切换</span>
-        <span>v{packageJson.version}</span>
+        <span>
+          <kbd>Alt</kbd> + <kbd>T</kbd>
+        </span>
       </footer>
     </main>
   );
-}
-
-function PopupHeader() {
-  return (
-    <header className="popup-header">
-      <div className="popup-brand">
-        <img className="popup-logo" src="/icons/icon.svg" alt="" />
-        <span className="brand-copy">
-          <strong>只是翻译</strong>
-          <small>
-            BYO AI · 不经过中转服务
-            <ShieldCheck aria-label="密钥仅保存在本地" />
-          </small>
-        </span>
-      </div>
-      <button
-        className="icon-button close-button"
-        type="button"
-        aria-label="关闭弹窗"
-        onClick={() => window.close()}
-      >
-        <X aria-hidden="true" />
-      </button>
-    </header>
-  );
-}
-
-function ProfilePicker({
-  settings,
-  onChange,
-}: {
-  settings: PublicTranslatorSettings;
-  onChange: (profileId: string) => Promise<void>;
-}) {
-  return (
-    <section className="profile-picker">
-      <span className="section-label">翻译模型</span>
-      <label className="profile-select">
-        <BrainCircuit aria-hidden="true" />
-        <select
-          aria-label="翻译模型"
-          value={settings.activeProfileId}
-          onChange={(event) => void onChange(event.target.value)}
-        >
-          {settings.profiles.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        className="settings-button"
-        type="button"
-        aria-label="打开设置"
-        onClick={() => void chrome.runtime.openOptionsPage()}
-      >
-        <Settings aria-hidden="true" />
-      </button>
-    </section>
-  );
-}
-
-function TranslationStatusCard({
-  status,
-  onCommand,
-  onViewDetails,
-}: {
-  status: PageTranslationStatus;
-  onCommand: (command: TranslationCommand) => Promise<void>;
-  onViewDetails: () => void;
-}) {
-  const action = getStatusAction(status);
-  const Icon = getStatusIcon(status);
-  const ActionIcon = action.icon;
-  return (
-    <section className={`translation-status-card status-${status.phase}`} aria-live="polite">
-      <div className="status-main">
-        <span className="status-icon" aria-hidden="true">
-          <Icon />
-        </span>
-        <span className="status-copy">
-          <strong>{getStatusTitle(status)}</strong>
-          <small>{getStatusDescription(status)}</small>
-        </span>
-        <button
-          className={`status-action status-action-${action.tone}`}
-          type="button"
-          onClick={() => {
-            if (action.closesPopup) onViewDetails();
-            else if (action.command) void onCommand(action.command);
-          }}
-        >
-          {action.label}
-          <ActionIcon aria-hidden="true" />
-        </button>
-      </div>
-      {status.total > 0 ? (
-        <div
-          className="progress-track"
-          role="progressbar"
-          aria-label={`已翻译 ${status.translated} / ${status.total}`}
-          aria-valuemin={0}
-          aria-valuemax={status.total}
-          aria-valuenow={status.translated}
-        >
-          <span style={{ width: `${Math.min(100, (status.translated / status.total) * 100)}%` }} />
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function InlineState({
-  icon: Icon,
-  title,
-  description,
-  tone = 'neutral',
-  actionLabel,
-  onAction,
-  loading = false,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  tone?: 'neutral' | 'error';
-  actionLabel?: string;
-  onAction?: () => void;
-  loading?: boolean;
-}) {
-  return (
-    <section className={`inline-state inline-state-${tone}`}>
-      <Icon className={loading ? 'is-spinning' : undefined} aria-hidden="true" />
-      <span>
-        <strong>{title}</strong>
-        <small>{description}</small>
-      </span>
-      {actionLabel && onAction ? (
-        <button className="button button-secondary" type="button" onClick={onAction}>
-          {actionLabel}
-        </button>
-      ) : null}
-    </section>
-  );
-}
-
-async function loadInitialState(): Promise<{
-  activeTabId?: number;
-  activeTabUrl?: string;
-  publicSettings: PublicTranslatorSettings;
-  pageStatus: PageTranslationStatus | null;
-}> {
-  const [settingsResult, tabs] = await Promise.all([
-    sendRuntimeMessage<PublicTranslatorSettings>({ type: 'GET_PUBLIC_SETTINGS' }),
-    chrome.tabs.query({ active: true, currentWindow: true }),
-  ]);
-  if (!settingsResult.ok) throw new Error(settingsResult.error);
-  const activeTabId = tabs[0]?.id;
-  let pageStatus: PageTranslationStatus | null = null;
-  if (activeTabId !== undefined) {
-    try {
-      pageStatus = await sendTabMessage<PageTranslationStatus>(activeTabId, {
-        type: 'GET_PAGE_STATUS',
-      });
-    } catch {
-      pageStatus = null;
-    }
-  }
-  return {
-    activeTabId,
-    activeTabUrl: tabs[0]?.url,
-    publicSettings: settingsResult.data,
-    pageStatus,
-  };
-}
-
-function getStatusAction(status: PageTranslationStatus): StatusAction {
-  if (status.phase === 'translating') {
-    return {
-      label: '停止翻译',
-      command: 'STOP_TRANSLATION',
-      tone: 'secondary',
-      icon: Square,
-    };
-  }
-  if (status.phase === 'error' && status.failed > 0) {
-    return {
-      label: '查看详情',
-      closesPopup: true,
-      tone: 'secondary',
-      icon: ChevronRight,
-    };
-  }
-  if (status.phase === 'complete') {
-    return {
-      label: '翻译新内容',
-      command: 'START_TRANSLATION',
-      tone: 'secondary',
-      icon: Play,
-    };
-  }
-  if (status.phase === 'stopped') {
-    return {
-      label: '继续翻译',
-      command: 'START_TRANSLATION',
-      tone: 'primary',
-      icon: Play,
-    };
-  }
-  return {
-    label: status.phase === 'error' ? '重新翻译' : '翻译此网页',
-    command: 'START_TRANSLATION',
-    tone: 'primary',
-    icon: Play,
-  };
-}
-
-function getStatusIcon(status: PageTranslationStatus): LucideIcon {
-  if (status.phase === 'error') return CircleAlert;
-  if (status.phase === 'complete') return CheckCircle2;
-  if (status.phase === 'translating') return LoaderCircle;
-  return BrainCircuit;
-}
-
-function getStatusTitle(status: PageTranslationStatus): string {
-  switch (status.phase) {
-    case 'translating':
-      return '正在翻译';
-    case 'complete':
-      return '翻译完成';
-    case 'stopped':
-      return '已停止';
-    case 'error':
-      return '翻译中断';
-    case 'idle':
-      return '准备翻译';
-  }
-}
-
-function getStatusDescription(status: PageTranslationStatus): string {
-  if (status.failed > 0) {
-    return `${status.failed} 个段落翻译失败，请在网页中点击失败提示重试`;
-  }
-  if (status.total > 0) return `已处理 ${status.translated} / ${status.total} 个段落`;
-  return '原文会保留在译文上方';
-}
-
-function getHttpHostname(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    const parsed = new URL(url);
-    return ['http:', 'https:'].includes(parsed.protocol)
-      ? parsed.hostname.toLowerCase()
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function getMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '插件通信失败';
 }

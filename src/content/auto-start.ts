@@ -1,6 +1,6 @@
 import { sendRuntimeMessage } from '../shared/chrome-api';
 import type { PublicTranslatorSettings, Result } from '../shared/messages';
-import { isUrlAutoTranslated } from '../shared/settings';
+import { isUrlAutoTranslated, isUrlExcluded } from '../shared/settings';
 
 interface AutoStartController {
   start(): Promise<void>;
@@ -17,6 +17,7 @@ export async function tryStartAutomaticTranslation(
 ): Promise<void> {
   const result = await readSettings();
   if (!result.ok || !result.data.configured) return;
+  if (isUrlExcluded(pageUrl, result.data.excludedSites)) return;
   if (!isUrlAutoTranslated(pageUrl, result.data.autoTranslateSites)) return;
   await controller.start();
 }

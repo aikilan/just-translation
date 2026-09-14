@@ -4,11 +4,14 @@ import { ProviderRequestQueue } from './provider-request-queue';
 import { ensurePageTranslationMenu, handlePageTranslationMenuClick } from './context-menu';
 import {
   readPublicSettings,
-  saveAndReadPublicSettings,
+  saveTranslationProfile,
+  deleteTranslationProfile,
+  updateReadingPreferences,
+  updateSiteRule,
   selectActiveProfile,
   setSiteAutoTranslation,
 } from './configuration-service';
-import { getSettings, initializeSettings, saveSettings } from '../shared/settings-store';
+import { getSettings, initializeSettings } from '../shared/settings-store';
 import {
   getErrorMessage,
   type Result,
@@ -110,6 +113,20 @@ async function handleRuntimeRequest(
   sender: chrome.runtime.MessageSender,
 ): Promise<Result<unknown>> {
   try {
+    // Content scripts can translate, but cannot mutate credentials or global preferences.
+    if (
+      !sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`) &&
+      [
+        'SAVE_TRANSLATION_PROFILE',
+        'DELETE_TRANSLATION_PROFILE',
+        'UPDATE_READING_PREFERENCES',
+        'UPDATE_SITE_RULE',
+        'SET_ACTIVE_PROFILE',
+        'SET_SITE_AUTO_TRANSLATE',
+      ].includes(request.type)
+    ) {
+      throw new Error('设置只能由扩展页面修改');
+    }
     switch (request.type) {
       case 'GET_PUBLIC_SETTINGS': {
         return { ok: true, data: await readPublicSettings() };
@@ -130,7 +147,13 @@ async function handleRuntimeRequest(
           { ...settings, origin: identity.origin },
           '',
         );
-        return { ok: true, data: { configurationId } };
+        return {
+          ok: true,
+          data: {
+            configurationId,
+            context: { profileId: settings.id, targetLanguage: settings.targetLanguage },
+          },
+        };
       }
       case 'RESOLVE_TRANSLATION_CANDIDATES': {
         const session = await getTranslationSession(sender, request.sessionId);
@@ -234,13 +257,17 @@ async function handleRuntimeRequest(
         await translationSessions.delete(tabId, request.sessionId);
         return { ok: true, data: undefined };
       }
-      case 'SAVE_SETTINGS': {
-        return { ok: true, data: await saveAndReadPublicSettings(request.settings) };
+      case 'SAVE_TRANSLATION_PROFILE': {
+        return { ok: true, data: await saveTranslationProfile(request.profile) };
       }
-      case 'SAVE_DISPLAY_MODE': {
-        const settings = await getSettings();
-        await saveSettings({ ...settings, displayMode: request.displayMode });
-        return { ok: true, data: undefined };
+      case 'DELETE_TRANSLATION_PROFILE': {
+        return { ok: true, data: await deleteTranslationProfile(request.profileId) };
+      }
+      case 'UPDATE_READING_PREFERENCES': {
+        return { ok: true, data: await updateReadingPreferences(request.patch) };
+      }
+      case 'UPDATE_SITE_RULE': {
+        return { ok: true, data: await updateSiteRule(request.rule) };
       }
       case 'SET_ACTIVE_PROFILE': {
         return { ok: true, data: await selectActiveProfile(request.profileId) };
@@ -252,6 +279,8 @@ async function handleRuntimeRequest(
         };
       }
     }
+    // An extension page may still send a different build's command; never return an empty reply.
+    return { ok: false, error: '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面' };
   } catch (error) {
     return { ok: false, error: getErrorMessage(error) };
   }

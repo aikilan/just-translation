@@ -21,6 +21,9 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendRespons
     case 'START_TRANSLATION':
       void controller.start();
       break;
+    case 'RESTART_TRANSLATION':
+      void controller.restart();
+      break;
     case 'STOP_TRANSLATION':
       controller.stop();
       break;

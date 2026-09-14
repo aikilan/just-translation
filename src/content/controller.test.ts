@@ -308,7 +308,7 @@ describe('TranslationController', () => {
 
     expect(pendingBeforeSessionFailure).toBe(0);
     expect(document.querySelector('[data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     expect(controller.getStatus()).toMatchObject({
       phase: 'error',
@@ -336,7 +336,7 @@ describe('TranslationController', () => {
     await controller.start();
 
     expect(document.querySelector('[data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     expect(controller.getStatus()).toMatchObject({
       phase: 'error',
@@ -365,7 +365,7 @@ describe('TranslationController', () => {
     await translation;
 
     expect(document.querySelector('[data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     expect(controller.getStatus()).toMatchObject({
       phase: 'error',
@@ -487,7 +487,7 @@ describe('TranslationController', () => {
 
     expect(controller.getStatus()).toMatchObject({ phase: 'error', failed: 1, total: 1 });
     expect(document.querySelector('[data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     controller.restore();
   });
@@ -1144,7 +1144,7 @@ describe('TranslationController', () => {
     await controller.start();
 
     expect(document.querySelector('#failed [data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     expect(document.body.textContent).toContain('第二段译文');
     expect(controller.getStatus()).toMatchObject({
@@ -1264,7 +1264,7 @@ describe('TranslationController', () => {
 
     expect(batchCount).toBe(2);
     expect(source.querySelector('[data-justranslate-state="error"]')?.textContent).toBe(
-      '翻译失败，点击重试',
+      '翻译失败 · 重试',
     );
     expect(controller.getStatus()).toMatchObject({
       phase: 'error',
@@ -1920,7 +1920,15 @@ function controlResponse(request: RuntimeRequest): Extract<Result<unknown>, { ok
   return {
     ok: true,
     data:
-      request.type === 'BEGIN_TRANSLATION_SESSION' ? { configurationId: 'config-one' } : undefined,
+      request.type === 'BEGIN_TRANSLATION_SESSION'
+        ? {
+            configurationId: 'config-one',
+            context: {
+              profileId: PUBLIC_SETTINGS.activeProfileId,
+              targetLanguage: PUBLIC_SETTINGS.targetLanguage,
+            },
+          }
+        : undefined,
   };
 }
 type CacheWriteRequest = Extract<RuntimeRequest, { type: 'STORE_TRANSLATION_CACHE' }>;

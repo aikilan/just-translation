@@ -1,330 +1,164 @@
 // @vitest-environment jsdom
-
 import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { PageTranslationStatus, PublicTranslatorSettings } from '../shared/messages';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PopupApp } from './popup-app';
-
-const PUBLIC_SETTINGS: PublicTranslatorSettings = {
-  configured: true,
-  activeProfileId: 'profile-one',
-  profiles: [
-    { id: 'profile-one', name: '配置一', configured: true },
-    { id: 'profile-two', name: '配置二', configured: true },
-  ],
-  targetLanguage: 'Simplified Chinese',
-  displayMode: 'bilingual',
-  translateDynamicContent: true,
-  excludedSites: [],
-  autoTranslateSites: [],
-};
-
-const IDLE_STATUS: PageTranslationStatus = {
-  phase: 'idle',
-  translated: 0,
-  failed: 0,
-  total: 0,
-  displayMode: 'bilingual',
-};
-
-describe('PopupApp', () => {
-  let container: HTMLDivElement;
-  let root: Root;
-
-  beforeEach(() => {
-    Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
-  });
-
-  afterEach(() => {
-    act(() => root.unmount());
-    container.remove();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('renders the real brand, working header actions, and expanded settings by default', async () => {
-    const { openOptionsPage } = stubChrome({ status: IDLE_STATUS });
-    const closeWindow = vi.spyOn(window, 'close').mockImplementation(() => undefined);
-
-    await renderPopup(root);
-
-    expect(container.querySelector<HTMLImageElement>('.popup-logo')?.getAttribute('src')).toBe(
-      '/icons/icon.svg',
-    );
-    expect(container.textContent).toContain('BYO AI · 不经过中转服务');
-    expect(container.textContent).not.toContain('需要帮助');
-
-    const moreSettings = getButton(container, '更多设置');
-    expect(moreSettings.getAttribute('aria-expanded')).toBe('true');
-    expect(container.querySelector('.popup-advanced-content')).not.toBeNull();
-
-    await act(async () => {
-      moreSettings.click();
-      await Promise.resolve();
-    });
-    expect(moreSettings.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('.popup-advanced-content')).toBeNull();
-
-    await act(async () => {
-      getButton(container, '打开设置').click();
-      await Promise.resolve();
-      getButton(container, '关闭弹窗').click();
-    });
+import { DEFAULT_SETTINGS } from '../shared/settings';
+import {
+  button,
+  click,
+  input,
+  mount,
+  mockExtension,
+  IDLE_STATUS,
+  READY_SETTINGS,
+} from '../test-utils/ui';
+let view: Awaited<ReturnType<typeof mount>>;
+afterEach(() => {
+  view?.unmount();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+describe('popup reading controls', () => {
+  it('exposes the primary action and preferences without an accordion', async () => {
+    const { openOptionsPage } = mockExtension();
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('news.example.com');
+    expect(view.container.textContent).not.toContain('更多设置');
+    expect(button(view.container, '翻译此网页')).toBeDefined();
+    expect(view.container.querySelector('[aria-label="AI 配置"]')).not.toBeNull();
+    expect(view.container.querySelector('[aria-label="翻译为"]')).not.toBeNull();
+    expect(button(view.container, '恢复原文').disabled).toBe(true);
+    await click(view.container, '打开设置');
     expect(openOptionsPage).toHaveBeenCalledOnce();
-    expect(closeWindow).toHaveBeenCalledOnce();
   });
-
-  it('shows only configuration names and preserves profile and site-auto commands', async () => {
-    const { runtimeSend, tabSend } = stubChrome({ status: IDLE_STATUS });
-
-    await renderPopup(root);
-
-    const profileSelect = container.querySelector<HTMLSelectElement>('[aria-label="翻译模型"]')!;
-    expect(Array.from(profileSelect.options).map((option) => option.textContent)).toEqual([
-      '配置一',
-      '配置二',
-    ]);
-
-    await act(async () => {
-      setSelectValue(profileSelect, 'profile-two');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(runtimeSend).toHaveBeenCalledWith({
-      type: 'SET_ACTIVE_PROFILE',
-      profileId: 'profile-two',
-    });
-
-    const autoToggle = container.querySelector<HTMLInputElement>('[aria-label="此站自动翻译"]')!;
-    await act(async () => {
-      autoToggle.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(runtimeSend).toHaveBeenCalledWith({
-      type: 'SET_SITE_AUTO_TRANSLATE',
-      hostname: 'news.ycombinator.com',
-      enabled: true,
-    });
-    expect(tabSend).toHaveBeenCalledWith(7, { type: 'START_TRANSLATION' });
-  });
-
   it.each([
-    {
-      phase: 'idle' as const,
-      status: IDLE_STATUS,
-      title: '准备翻译',
-      action: '翻译此网页',
-      command: 'START_TRANSLATION',
-    },
-    {
-      phase: 'translating' as const,
-      status: { ...IDLE_STATUS, phase: 'translating' as const, total: 8, translated: 3 },
-      title: '正在翻译',
-      action: '停止翻译',
-      command: 'STOP_TRANSLATION',
-    },
-    {
-      phase: 'complete' as const,
-      status: { ...IDLE_STATUS, phase: 'complete' as const, total: 8, translated: 8 },
-      title: '翻译完成',
-      action: '翻译新内容',
-      command: 'START_TRANSLATION',
-    },
-    {
-      phase: 'stopped' as const,
-      status: { ...IDLE_STATUS, phase: 'stopped' as const, total: 8, translated: 3 },
-      title: '已停止',
-      action: '继续翻译',
-      command: 'START_TRANSLATION',
-    },
-  ])('maps $phase to its real status action', async ({ status, title, action, command }) => {
-    const { tabSend } = stubChrome({ status });
-
-    await renderPopup(root);
-
-    expect(container.querySelector('.translation-status-card')?.textContent).toContain(title);
-    await act(async () => {
-      getButton(container, action).click();
-      await Promise.resolve();
-    });
+    ['idle', 0, '翻译此网页', 'START_TRANSLATION'],
+    ['translating', 8, '停止翻译', 'STOP_TRANSLATION'],
+    ['stopped', 8, '继续翻译', 'START_TRANSLATION'],
+    ['complete', 8, '翻译新内容', 'START_TRANSLATION'],
+  ] as const)('maps %s to its command', async (phase, total, action, command) => {
+    const { tabSend } = mockExtension(READY_SETTINGS, { ...IDLE_STATUS, phase, total });
+    view = await mount(<PopupApp />);
+    await click(view.container, action);
     expect(tabSend).toHaveBeenCalledWith(7, { type: command });
   });
-
-  it('guides node-only retry, exposes the provider error, and returns to the page for details', async () => {
-    const closeWindow = vi.spyOn(window, 'close').mockImplementation(() => undefined);
-    const status: PageTranslationStatus = {
-      phase: 'error',
-      translated: 2,
-      failed: 1,
-      total: 3,
-      error: 'API 返回中缺少 choices',
-      displayMode: 'bilingual',
-    };
-    const { openOptionsPage } = stubChrome({ status });
-
-    await renderPopup(root);
-
-    expect(container.textContent).toContain('翻译中断');
-    expect(container.textContent).toContain('1 个段落翻译失败');
-    expect(container.textContent).toContain('API 返回中缺少 choices');
-    expect(container.textContent).not.toContain('全局重试');
-    expect(
-      Array.from(container.querySelectorAll('button')).map((button) => button.textContent),
-    ).not.toContain('重试');
-
-    await act(async () => {
-      getButton(container, '查看详情').click();
-      getButton(container, '检查 API 配置').click();
-      await Promise.resolve();
-    });
-    expect(closeWindow).toHaveBeenCalledOnce();
-    expect(openOptionsPage).toHaveBeenCalledOnce();
-  });
-
-  it('changes display mode and restores the page from the fixed footer', async () => {
-    const status: PageTranslationStatus = {
+  it('detects context differences on reopening and restarts only explicitly', async () => {
+    const { send, tabSend } = mockExtension(READY_SETTINGS, {
+      ...IDLE_STATUS,
       phase: 'complete',
       translated: 2,
-      failed: 0,
       total: 2,
-      displayMode: 'bilingual',
-    };
-    const { tabSend } = stubChrome({ status });
-
-    await renderPopup(root);
-
-    const displayMode = container.querySelector<HTMLSelectElement>('[aria-label="显示设置"]')!;
-    await act(async () => {
-      setSelectValue(displayMode, 'translation');
-      await Promise.resolve();
-      getButton(container, '恢复原始网页').click();
-      await Promise.resolve();
+      context: { profileId: 'second', targetLanguage: 'Japanese' },
     });
+    view = await mount(<PopupApp />);
+    expect(button(view.container, '用新设置重新翻译')).toBeDefined();
+    await input(view.container, '翻译为', 'English');
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { targetLanguage: 'English' },
+    });
+    expect(tabSend).not.toHaveBeenCalledWith(7, { type: 'RESTART_TRANSLATION' });
+    await click(view.container, '用新设置重新翻译');
+    expect(tabSend).toHaveBeenCalledWith(7, { type: 'RESTART_TRANSLATION' });
+  });
+  it('shows the current document mode when the default was changed elsewhere', async () => {
+    mockExtension(
+      { ...READY_SETTINGS, displayMode: 'translation' },
+      {
+        ...IDLE_STATUS,
+        phase: 'complete',
+        total: 2,
+        translated: 2,
+        context: {
+          profileId: READY_SETTINGS.activeProfileId,
+          targetLanguage: READY_SETTINGS.targetLanguage,
+        },
+      },
+    );
+    view = await mount(<PopupApp />);
+    expect(button(view.container, '双语').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('persists mode before applying it, retains the action on failure, and retries', async () => {
+    const { send, tabSend } = mockExtension();
+    view = await mount(<PopupApp />);
+    send.mockRejectedValueOnce(new Error('保存失败'));
+    await click(view.container, '仅译文');
+    expect(tabSend).not.toHaveBeenCalledWith(7, {
+      type: 'SET_DISPLAY_MODE',
+      displayMode: 'translation',
+    });
+    expect(view.container.textContent).toContain('保存失败');
+    expect(button(view.container, '翻译此网页')).toBeDefined();
+    await click(view.container, '重试保存');
     expect(tabSend).toHaveBeenCalledWith(7, {
       type: 'SET_DISPLAY_MODE',
       displayMode: 'translation',
     });
-    expect(tabSend).toHaveBeenCalledWith(7, { type: 'RESTORE_PAGE' });
   });
-
-  it('keeps the restore footer visible but disabled before translation starts', async () => {
-    stubChrome({ status: IDLE_STATUS });
-
-    await renderPopup(root);
-
-    expect(getButton(container, '恢复原始网页').disabled).toBe(true);
-    expect(container.textContent).toContain('Alt + T 快速切换');
-    expect(container.textContent).toContain('v0.3.27');
+  it('leaves a failed profile selection unapplied and guards duplicate commands', async () => {
+    const { send, tabSend } = mockExtension();
+    view = await mount(<PopupApp />);
+    send.mockRejectedValueOnce(new Error('写入失败'));
+    await input(view.container, 'AI 配置', 'second');
+    expect(view.container.querySelector<HTMLSelectElement>('[aria-label="AI 配置"]')?.value).toBe(
+      READY_SETTINGS.activeProfileId,
+    );
+    let finish!: () => void;
+    tabSend.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(IDLE_STATUS);
+        }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      button(view.container, '翻译此网页').click();
+      button(view.container, '翻译此网页').click();
+    });
+    expect(
+      tabSend.mock.calls.filter(
+        (call) => (call[1] as { type: string }).type === 'START_TRANSLATION',
+      ),
+    ).toHaveLength(1);
+    await act(async () => {
+      await Promise.resolve();
+      finish();
+    });
   });
-
-  it('shows load, setup, and unavailable states inside the redesigned shell', async () => {
-    const openOptionsPage = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal('chrome', {
-      runtime: {
-        sendMessage: vi.fn().mockRejectedValue(new Error('service worker unavailable')),
-        openOptionsPage,
-      },
-      tabs: { query: vi.fn().mockResolvedValue([{ id: 1 }]), sendMessage: vi.fn() },
+  it('handles setup, exclusion, restricted pages and empty completion', async () => {
+    mockExtension(DEFAULT_SETTINGS);
+    view = await mount(<PopupApp />);
+    expect(button(view.container, '连接你的 AI')).toBeDefined();
+    expect(view.container.textContent).not.toContain('翻译此网页');
+    view.unmount();
+    mockExtension({ ...READY_SETTINGS, excludedSites: ['*.example.com'] });
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('此站已排除');
+    expect(button(view.container, '管理站点规则')).toBeDefined();
+    view.unmount();
+    mockExtension(READY_SETTINGS, IDLE_STATUS, 'chrome://extensions');
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('此页面无法翻译');
+    view.unmount();
+    mockExtension(READY_SETTINGS, { ...IDLE_STATUS, phase: 'complete' });
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('未发现需要翻译的内容');
+  });
+  it('returns to the page for partial retry and displays the provider error', async () => {
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    mockExtension(READY_SETTINGS, {
+      ...IDLE_STATUS,
+      phase: 'error',
+      total: 3,
+      translated: 2,
+      failed: 1,
+      error: 'API 缺少 choices',
     });
-
-    await renderPopup(root);
-    expect(container.querySelector('.popup-header')).not.toBeNull();
-    expect(container.textContent).toContain('无法读取插件状态');
-    expect(container.textContent).toContain('service worker unavailable');
-
-    act(() => root.unmount());
-    root = createRoot(container);
-    stubChrome({
-      settings: {
-        ...PUBLIC_SETTINGS,
-        configured: false,
-        configurationError: '请填写模型名称',
-      },
-      status: null,
-      tab: undefined,
-    });
-    await renderPopup(root);
-    expect(container.textContent).toContain('先连接你的 AI');
-    expect(container.textContent).toContain('配置未生效：请填写模型名称');
-
-    act(() => root.unmount());
-    root = createRoot(container);
-    stubChrome({ status: null, tab: undefined });
-    await renderPopup(root);
-    expect(container.textContent).toContain('这个页面无法翻译');
-    expect(container.querySelector('.popup-footer')).not.toBeNull();
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('API 缺少 choices');
+    expect(view.container.textContent).toContain('已翻译 2');
+    await click(view.container, '返回网页重试');
+    expect(close).toHaveBeenCalledOnce();
   });
 });
-
-interface ChromeStubOptions {
-  settings?: PublicTranslatorSettings;
-  status: PageTranslationStatus | null;
-  tab?: { id: number; url: string };
-}
-
-function stubChrome({
-  settings = PUBLIC_SETTINGS,
-  status,
-  tab = { id: 7, url: 'https://news.ycombinator.com/news?p=2' },
-}: ChromeStubOptions) {
-  const openOptionsPage = vi.fn().mockResolvedValue(undefined);
-  const runtimeSend = vi.fn(
-    (request: { type: string; profileId?: string; hostname?: string; enabled?: boolean }) => {
-      if (request.type === 'SET_ACTIVE_PROFILE') {
-        return Promise.resolve({
-          ok: true,
-          data: { ...settings, activeProfileId: request.profileId },
-        });
-      }
-      if (request.type === 'SET_SITE_AUTO_TRANSLATE') {
-        return Promise.resolve({
-          ok: true,
-          data: {
-            ...settings,
-            autoTranslateSites: request.enabled ? [request.hostname!] : [],
-          },
-        });
-      }
-      return Promise.resolve({ ok: true, data: settings });
-    },
-  );
-  const tabSend = vi.fn().mockResolvedValue(status ?? IDLE_STATUS);
-  vi.stubGlobal('chrome', {
-    runtime: { sendMessage: runtimeSend, openOptionsPage },
-    tabs: {
-      query: vi.fn().mockResolvedValue(tab ? [tab] : []),
-      sendMessage:
-        status === null ? vi.fn().mockRejectedValue(new Error('page unavailable')) : tabSend,
-    },
-  });
-  return { openOptionsPage, runtimeSend, tabSend };
-}
-
-async function renderPopup(root: Root): Promise<void> {
-  await act(async () => {
-    root.render(<PopupApp />);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
-function getButton(container: HTMLElement, name: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
-    (candidate) =>
-      candidate.getAttribute('aria-label') === name || candidate.textContent?.includes(name),
-  );
-  if (!button) throw new Error(`找不到按钮：${name}`);
-  return button;
-}
-
-function setSelectValue(select: HTMLSelectElement, value: string): void {
-  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
-  select.dispatchEvent(new Event('change', { bubbles: true }));
-}

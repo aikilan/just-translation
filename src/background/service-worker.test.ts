@@ -67,6 +67,7 @@ describe('background document lifecycle', () => {
         },
       },
       runtime: {
+        id: 'test-extension',
         onInstalled: event(),
         onStartup: event(),
         onMessage: {
@@ -92,6 +93,35 @@ describe('background document lifecycle', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('rejects settings mutations from a web content script', async () => {
+    await expect(
+      send({ type: 'UPDATE_READING_PREFERENCES', patch: { targetLanguage: 'Japanese' } }),
+    ).resolves.toEqual({ ok: false, error: '设置只能由扩展页面修改' });
+  });
+
+  it('returns an explicit error for an unsupported runtime command', async () => {
+    const request = JSON.parse('{"type":"UNSUPPORTED_COMMAND"}') as RuntimeRequest;
+    await expect(send(request)).resolves.toEqual({
+      ok: false,
+      error: '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面',
+    });
+  });
+
+  it('accepts a trusted options page even when Chrome supplies sender.tab', async () => {
+    const result = await new Promise<Result<unknown>>((resolve) =>
+      message(
+        { type: 'SET_SITE_AUTO_TRANSLATE', hostname: 'example.com', enabled: false },
+        {
+          id: 'test-extension',
+          url: 'chrome-extension://test-extension/src/options/index.html',
+          tab: { id: 12 } as chrome.tabs.Tab,
+        },
+        resolve,
+      ),
+    );
+    expect(result.ok).toBe(true);
+  });
 
   it('publishes stream progress to the original document before the final response', async () => {
     let source!: ReadableStreamDefaultController<Uint8Array>;

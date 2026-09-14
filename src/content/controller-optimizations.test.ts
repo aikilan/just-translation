@@ -42,7 +42,16 @@ function installRuntime(
         if (request.type === 'GET_PUBLIC_SETTINGS')
           return Promise.resolve({ ok: true, data: SETTINGS });
         if (request.type === 'BEGIN_TRANSLATION_SESSION')
-          return Promise.resolve({ ok: true, data: { configurationId: 'config-one' } });
+          return Promise.resolve({
+            ok: true,
+            data: {
+              configurationId: 'config-one',
+              context: {
+                profileId: SETTINGS.activeProfileId,
+                targetLanguage: SETTINGS.targetLanguage,
+              },
+            },
+          });
         if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
           return Promise.resolve({
             ok: true,
@@ -443,7 +452,16 @@ describe('translation pipeline regressions', () => {
       const sent: number[] = [];
       installRuntime((request) => {
         if (changed && retrying && request.type === 'BEGIN_TRANSLATION_SESSION')
-          return Promise.resolve({ ok: true, data: { configurationId: 'config-two' } });
+          return Promise.resolve({
+            ok: true,
+            data: {
+              configurationId: 'config-two',
+              context: {
+                profileId: SETTINGS.activeProfileId,
+                targetLanguage: SETTINGS.targetLanguage,
+              },
+            },
+          });
         if (request.type !== 'TRANSLATE_BATCH') return;
         if (retrying) sent.push(...request.segments.map((s) => s.partIndex));
         if (!retrying)

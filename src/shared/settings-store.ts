@@ -1,62 +1,30 @@
-import {
-  SETTINGS_STORAGE_KEY,
-  getSettingsValidationMessage,
-  mergeSettings,
-  validateSettings,
-  type TranslatorSettings,
-} from './settings';
+import PQueue from 'p-queue';
+import { SETTINGS_STORAGE_KEY, mergeSettings, type TranslatorSettings } from './settings';
 
+// All read/modify/write transactions run in the background through this single queue.
+const writes = new PQueue({ concurrency: 1 });
+
+/** Reads a normalized snapshot without writing from an options page or content context. */
 export async function getSettings(): Promise<TranslatorSettings> {
   const stored = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
-  const storedSettings = stored[SETTINGS_STORAGE_KEY];
-  const settings = mergeSettings(storedSettings);
-  if (requiresDefaultPromptWrite(storedSettings)) {
-    await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: settings });
-  }
-  return settings;
+  return mergeSettings(stored[SETTINGS_STORAGE_KEY]);
 }
 
-export async function saveSettings(settings: TranslatorSettings): Promise<TranslatorSettings> {
-  const normalized: TranslatorSettings = {
-    ...settings,
-    profiles: settings.profiles.map((profile) => ({
-      ...profile,
-      id: profile.id.trim(),
-      name: profile.name.trim(),
-      apiUrl: profile.apiUrl.trim(),
-      model: profile.model.trim(),
-      translationPrompt: profile.translationPrompt.trim(),
-    })),
-    activeProfileId: settings.activeProfileId.trim(),
-    targetLanguage: settings.targetLanguage.trim(),
-    excludedSites: settings.excludedSites.map((site) => site.trim()).filter(Boolean),
-    autoTranslateSites: [...new Set(
-      settings.autoTranslateSites.map((site) => site.trim().toLowerCase()).filter(Boolean),
-    )],
-  };
-  const validation = validateSettings(normalized);
-  if (!validation.valid) {
-    throw new Error(getSettingsValidationMessage(validation) ?? '设置无效');
-  }
-  await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: normalized });
-  return normalized;
+/** Applies a domain-validated change to the latest snapshot and verifies durable readback. */
+export function updateStoredSettings(
+  update: (current: TranslatorSettings) => TranslatorSettings,
+): Promise<TranslatorSettings> {
+  return writes.add(async () => {
+    const next = update(await getSettings());
+    await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: next });
+    const stored = await getSettings();
+    if (JSON.stringify(stored) !== JSON.stringify(next)) {
+      throw new Error('设置写入后回读不一致，请重新加载扩展后重试');
+    }
+    return stored;
+  });
 }
 
 export async function initializeSettings(): Promise<void> {
-  await getSettings();
-}
-
-/** Detects the only invalid persisted state that initialization repairs automatically. */
-function requiresDefaultPromptWrite(value: unknown): boolean {
-  if (!isRecord(value) || !Array.isArray(value.profiles) || value.profiles.length === 0) return true;
-  return value.profiles.some(
-    (profile) =>
-      !isRecord(profile) ||
-      typeof profile.translationPrompt !== 'string' ||
-      !profile.translationPrompt.trim(),
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  await updateStoredSettings((settings) => settings);
 }
