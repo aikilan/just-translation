@@ -82,7 +82,13 @@ describe('background document lifecycle', () => {
         },
       },
       alarms: { get: () => Promise.resolve({ name: 'cleanup' }), onAlarm: event() },
-      contextMenus: { update: vi.fn().mockResolvedValue(undefined), onClicked: event() },
+      contextMenus: {
+        removeAll: vi.fn().mockResolvedValue(undefined),
+        create: vi.fn((_properties, callback: () => void) => {
+          callback();
+        }),
+        onClicked: event(),
+      },
       commands: { onCommand: event() },
       tabs: { onRemoved: event(), sendMessage: vi.fn().mockResolvedValue(undefined) },
       webNavigation: {
@@ -98,6 +104,15 @@ describe('background document lifecycle', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('registers exactly one menu on worker evaluation without repeating it for startup events', async () => {
+    for (const event of [chrome.runtime.onInstalled, chrome.runtime.onStartup]) {
+      const listener = vi.mocked(event).addListener.mock.calls[0][0];
+      (listener as () => void)();
+    }
+    await vi.waitFor(() => expect(chrome.contextMenus.create).toHaveBeenCalledOnce());
+    expect(chrome.contextMenus.removeAll).toHaveBeenCalledOnce();
+  });
 
   it('rejects settings mutations from a web content script', async () => {
     await expect(

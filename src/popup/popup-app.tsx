@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   CircleAlert,
+  FileText,
   LoaderCircle,
   Play,
   RotateCcw,
@@ -135,7 +136,7 @@ export function PopupApp() {
     };
   }, []);
 
-  /** Executes one document command; explicit restart is the only destructive configuration apply. */
+  /** Serialize explicit page actions, including a full-document restart with current settings. */
   async function run(type: TranslationCommand) {
     if (page?.tabId === undefined || commandLock.current) return;
     commandLock.current = true;
@@ -331,6 +332,18 @@ export function PopupApp() {
               )}
               {action}
             </button>
+            {!fullDocument ? (
+              <button
+                type="button"
+                className="text-button full-document-action"
+                title="让 AI 一次理解全文，保留跨段上下文；会重新翻译当前已加载的正文。"
+                disabled={busy || saving}
+                onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
+              >
+                <FileText aria-hidden="true" />
+                全文完整翻译
+              </button>
+            ) : null}
             {status.failed ? (
               <p className="retry-guidance">
                 {fullDocument

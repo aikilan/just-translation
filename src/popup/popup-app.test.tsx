@@ -19,6 +19,85 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('popup reading controls', () => {
+  it.each(['idle', 'translating', 'complete'] as const)(
+    'starts a full-document task from the popup while segmented mode is %s',
+    async (phase) => {
+      const { tabSend } = mockExtension(READY_SETTINGS, { ...IDLE_STATUS, phase });
+      view = await mount(<PopupApp />);
+      tabSend.mockResolvedValueOnce({
+        ...IDLE_STATUS,
+        mode: 'full-document',
+        phase: 'translating',
+        stage: 'collecting',
+      });
+      await click(view.container, '全文完整翻译');
+      expect(tabSend).toHaveBeenCalledWith(7, { type: 'START_FULL_DOCUMENT_TRANSLATION' });
+      expect(view.container.textContent).toContain('收集全文');
+      expect(button(view.container, '停止翻译')).toBeDefined();
+      expect(view.container.textContent).not.toContain('全文完整翻译');
+    },
+  );
+
+  it('shares the command lock with the main action and preserves full-mode retry after a messaging failure', async () => {
+    const { tabSend } = mockExtension();
+    view = await mount(<PopupApp />);
+    let fail!: (reason: Error) => void;
+    tabSend.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      button(view.container, '全文完整翻译').click();
+      button(view.container, '全文完整翻译').click();
+      button(view.container, '翻译此网页').click();
+    });
+    expect(
+      tabSend.mock.calls.filter(
+        ([, command]) => (command as { type: string }).type !== 'GET_PAGE_STATUS',
+      ),
+    ).toEqual([[7, { type: 'START_FULL_DOCUMENT_TRANSLATION' }]]);
+    expect(button(view.container, '全文完整翻译').disabled).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+      fail(new Error('页面暂时未响应'));
+    });
+    expect(view.container.textContent).toContain('页面暂时未响应');
+    expect(button(view.container, '全文完整翻译').disabled).toBe(false);
+    await click(view.container, '全文完整翻译');
+    expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'START_FULL_DOCUMENT_TRANSLATION' });
+  });
+
+  it('waits for preferences to save before allowing full-document translation', async () => {
+    const { send } = mockExtension();
+    view = await mount(<PopupApp />);
+    let finish!: () => void;
+    const savePreferences = send.getMockImplementation()!;
+    send.mockImplementationOnce(async (request) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return savePreferences(request);
+    });
+    await input(view.container, '翻译为', 'English');
+    expect(button(view.container, '全文完整翻译').disabled).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+      finish();
+    });
+    expect(button(view.container, '全文完整翻译').disabled).toBe(false);
+  });
+
+  it('does not expose full-document translation when the page cannot be reached', async () => {
+    const { tabSend } = mockExtension();
+    tabSend.mockRejectedValueOnce(new Error('Receiving end does not exist'));
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('尚未连接到当前网页');
+    expect(view.container.textContent).not.toContain('全文完整翻译');
+  });
+
   it.each([
     ['translating', 'collecting', '收集全文', '停止翻译', 'STOP_TRANSLATION'],
     ['translating', 'requesting', '全文翻译中', '停止翻译', 'STOP_TRANSLATION'],
@@ -41,6 +120,7 @@ describe('popup reading controls', () => {
       expect(view.container.textContent).toContain(title);
       expect(view.container.textContent).not.toContain('部分段落未完成');
       expect(view.container.textContent).not.toContain('返回网页重试');
+      expect(view.container.textContent).not.toContain('全文完整翻译');
       await click(view.container, action);
       expect(tabSend).toHaveBeenCalledWith(7, { type: command });
     },
@@ -158,15 +238,18 @@ describe('popup reading controls', () => {
     view = await mount(<PopupApp />);
     expect(button(view.container, '连接你的 AI')).toBeDefined();
     expect(view.container.textContent).not.toContain('翻译此网页');
+    expect(view.container.textContent).not.toContain('全文完整翻译');
     view.unmount();
     mockExtension({ ...READY_SETTINGS, excludedSites: ['*.example.com'] });
     view = await mount(<PopupApp />);
     expect(view.container.textContent).toContain('此站已排除');
     expect(button(view.container, '管理站点规则')).toBeDefined();
+    expect(view.container.textContent).not.toContain('全文完整翻译');
     view.unmount();
     mockExtension(READY_SETTINGS, IDLE_STATUS, 'chrome://extensions');
     view = await mount(<PopupApp />);
     expect(view.container.textContent).toContain('此页面无法翻译');
+    expect(view.container.textContent).not.toContain('全文完整翻译');
     view.unmount();
     mockExtension(READY_SETTINGS, { ...IDLE_STATUS, phase: 'complete' });
     view = await mount(<PopupApp />);

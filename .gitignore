@@ -3,3 +3,5 @@ dist/
 coverage/
 .DS_Store
 *.log
+*.zip
+artifacts/chrome-web-store/screenshots/

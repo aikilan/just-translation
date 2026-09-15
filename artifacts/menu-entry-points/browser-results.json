@@ -1,0 +1,127 @@
+{
+  "contextMenu": {
+    "nativeItems": [
+      "使用「只是翻译」翻译此网页"
+    ],
+    "submenu": false
+  },
+  "segmented": {
+    "mode": "segmented",
+    "phase": "complete",
+    "translated": 6,
+    "failed": 0,
+    "total": 6,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "profile-default",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "needsRestart": false
+  },
+  "segmentedRequests": {
+    "mode": "normal",
+    "calls": 2,
+    "active": 0,
+    "maximumActive": 2,
+    "sizes": [
+      4,
+      2
+    ],
+    "protectedTextLeaked": false,
+    "aborted": 0,
+    "requests": [
+      {
+        "ids": [
+          "candidate-0:0",
+          "candidate-1:0",
+          "candidate-2:0",
+          "candidate-3:0"
+        ],
+        "texts": [
+          "A real solar energy article title",
+          "First article paragraph about solar panels and new energy technologies.",
+          "Run [[JT_KEEP_0]] with [[JT_KEEP_1]].",
+          "A readable flex paragraph."
+        ],
+        "streaming": true
+      },
+      {
+        "ids": [
+          "candidate-8:0",
+          "candidate-9:0"
+        ],
+        "texts": [
+          "Another readable flex paragraph.",
+          "Final article paragraph about applications and future opportunities."
+        ],
+        "streaming": true
+      }
+    ]
+  },
+  "layoutInitial": {
+    "width": 380,
+    "height": 500,
+    "contentHeight": 399,
+    "scrollHeight": 422,
+    "text": "只是翻译\n\n127.0.0.1\n\n准备翻译\n\n译文将显示在原文下方。\n\n翻译此网页\n全文完整翻译\n翻译为\n简体中文\n繁體中文\n英语\n日语\n韩语\n法语\n德语\n西班牙语\n自定义语言…\n显示方式\n双语\n仅译文\nAI 配置\n验收 AI\n此站自动翻译\n恢复原文\nAlt + T"
+  },
+  "oldMenuRemovedAfterReload": true,
+  "layoutLight": {
+    "width": 380,
+    "height": 540,
+    "contentHeight": 439,
+    "scrollHeight": 439,
+    "scrollWidth": 380
+  },
+  "layoutDark": {
+    "width": 380,
+    "height": 540,
+    "contentHeight": 439,
+    "scrollHeight": 439
+  },
+  "fullDocument": {
+    "mode": "full-document",
+    "phase": "complete",
+    "translated": 6,
+    "failed": 0,
+    "total": 6,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "profile-default",
+      "targetLanguage": "Simplified Chinese"
+    }
+  },
+  "fullRequests": {
+    "mode": "slow",
+    "calls": 1,
+    "active": 0,
+    "maximumActive": 1,
+    "sizes": [
+      6
+    ],
+    "protectedTextLeaked": false,
+    "aborted": 0,
+    "requests": [
+      {
+        "ids": [
+          "full-0",
+          "full-1",
+          "full-2",
+          "full-3",
+          "full-4",
+          "full-5"
+        ],
+        "texts": [
+          "A real solar energy article title",
+          "First article paragraph about solar panels and new energy technologies.",
+          "Run [[JT_KEEP_0]] with [[JT_KEEP_1]].",
+          "A readable flex paragraph.",
+          "Another readable flex paragraph.",
+          "Final article paragraph about applications and future opportunities."
+        ],
+        "streaming": true
+      }
+    ]
+  },
+  "fullEntryKeyboard": "Tab x3, Enter"
+}

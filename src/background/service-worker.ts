@@ -51,17 +51,16 @@ void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void initializeSettings();
 void ensureCacheCleanupAlarm(chrome.alarms);
+// One registration per worker evaluation also covers install/startup, without concurrent resets.
 ensureContextMenu();
 
 chrome.runtime.onInstalled.addListener(() => {
   void initializeSettings();
   void ensureCacheCleanupAlarm(chrome.alarms);
-  ensureContextMenu();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void ensureCacheCleanupAlarm(chrome.alarms);
-  ensureContextMenu();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -409,8 +408,16 @@ async function getActiveTabId(): Promise<number | undefined> {
 
 function ensureContextMenu(): void {
   void ensurePageTranslationMenu({
-    update: (id, properties) => chrome.contextMenus.update(id, properties),
-    create: (properties) => chrome.contextMenus.create(properties),
+    removeAll: () => chrome.contextMenus.removeAll(),
+    create: (properties) =>
+      new Promise<void>((resolve, reject) => {
+        // create reports asynchronous registration errors through its callback, not its return ID.
+        chrome.contextMenus.create(properties, () => {
+          const error = chrome.runtime.lastError;
+          if (error) reject(new Error(error.message));
+          else resolve();
+        });
+      }),
   }).catch((error: unknown) => {
     console.error('右键翻译菜单注册失败', error);
   });
