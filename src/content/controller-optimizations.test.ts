@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Result, RuntimeRequest, TranslationBatchResult } from '../shared/messages';
 import { TranslationController } from './controller';
+import { TranslationScheduler } from './translation-scheduler';
 
 type Batch = Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
 const SETTINGS = {
@@ -10,6 +11,7 @@ const SETTINGS = {
   profiles: [{ id: 'one', name: 'Test', configured: true }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
+  translationConcurrency: 6,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: [],
@@ -77,7 +79,461 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** A regressed microtask spin would prevent Vitest's timeout from running; stop it explicitly. */
+function guardIdleSpin(instance: TranslationController): () => number {
+  let waits = 0;
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- Forwarded with the intercepted scheduler via call below.
+  const original = TranslationScheduler.prototype.waitForIdle;
+  vi.spyOn(TranslationScheduler.prototype, 'waitForIdle').mockImplementation(function (
+    this: TranslationScheduler,
+  ) {
+    if (++waits === 50) instance.stop();
+    return original.call(this);
+  });
+  return () => waits;
+}
+
 describe('translation pipeline regressions', () => {
+  it.each([1, 2, 6])('limits ordinary translation to %s concurrent batches', async (limit) => {
+    document.body.innerHTML = `<main>${Array.from(
+      { length: 32 },
+      (_, i) => `<p>Article paragraph number ${i} with readable English text.</p>`,
+    ).join('')}</main>`;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 10, 300, 20),
+    );
+    const releases: Array<() => void> = [];
+    let drain = false;
+    installRuntime((request) => {
+      if (request.type === 'GET_PUBLIC_SETTINGS')
+        return Promise.resolve({
+          ok: true,
+          data: { ...SETTINGS, translationConcurrency: limit },
+        });
+      if (request.type === 'TRANSLATE_BATCH' && !drain)
+        return new Promise((resolve) => {
+          releases.push(() => resolve(successful(request)));
+        });
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(releases.length).toBeGreaterThanOrEqual(limit));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(releases).toHaveLength(limit);
+    } finally {
+      drain = true;
+      releases.forEach((release) => release());
+      await work;
+    }
+    expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 32 });
+  });
+
+  it('uses the newly saved concurrency when manually retrying a long node', async () => {
+    document.body.innerHTML = `<main><p>${'Readable article sentence with detailed information. '.repeat(200)}</p></main>`;
+    let retrying = false;
+    let drain = false;
+    const releases: Array<() => void> = [];
+    installRuntime((request) => {
+      if (request.type === 'GET_PUBLIC_SETTINGS')
+        return Promise.resolve({
+          ok: true,
+          data: { ...SETTINGS, translationConcurrency: retrying ? 1 : 6 },
+        });
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      if (!retrying) return Promise.resolve({ ok: false, error: 'Failed request' });
+      if (!drain)
+        return new Promise((resolve) => releases.push(() => resolve(successful(request))));
+    });
+    const instance = controller();
+    await instance.start();
+    expect(instance.getStatus().failed).toBe(1);
+    retrying = true;
+    const work = instance.retry(document.querySelector('p')!);
+    try {
+      await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(releases).toHaveLength(1);
+    } finally {
+      drain = true;
+      releases.forEach((release) => release());
+      await work;
+    }
+    expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 1 });
+  });
+
+  it.each([
+    [true, 'miss'],
+    [false, 'miss'],
+    [true, 'cache'],
+    [false, 'cache'],
+  ] as const)(
+    'replaces stale queued sources after candidate lookup (dynamic=%s, result=%s)',
+    async (dynamic, result) => {
+      document.body.innerHTML =
+        '<main><p id="visible">Original visible source.</p><p id="offscreen">Background source.</p></main>';
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return new DOMRect(0, this.id === 'offscreen' ? 3000 : 10, 300, 20);
+      });
+      let release!: () => void;
+      let firstLookup = true;
+      const sent: string[] = [];
+      installRuntime((request) => {
+        if (request.type === 'GET_PUBLIC_SETTINGS')
+          return Promise.resolve({
+            ok: true,
+            data: { ...SETTINGS, translateDynamicContent: dynamic },
+          });
+        if (request.type === 'TRANSLATE_BATCH')
+          sent.push(...request.segments.map((segment) => segment.text));
+        if (request.type !== 'RESOLVE_TRANSLATION_CANDIDATES' || !firstLookup) return;
+        firstLookup = false;
+        return new Promise((resolve) => {
+          release = () =>
+            resolve({
+              ok: true,
+              data: {
+                skippedIds: [],
+                cachedTranslations:
+                  result === 'cache'
+                    ? Object.fromEntries(
+                        request.candidates.map((candidate) => [candidate.id, '过期缓存译文']),
+                      )
+                    : {},
+                missIds:
+                  result === 'miss' ? request.candidates.map((candidate) => candidate.id) : [],
+              },
+            });
+        });
+      });
+      const instance = controller();
+      const idleWaits = guardIdleSpin(instance);
+      const work = instance.start();
+      try {
+        await vi.waitFor(() => expect(release).toBeDefined());
+        document.querySelector('#visible')!.firstChild!.textContent = 'Updated visible source.';
+        release();
+        await work;
+        expect(idleWaits()).toBeLessThan(50);
+        expect(instance.getStatus()).toMatchObject({
+          phase: 'complete',
+          translated: 2,
+          failed: 0,
+          total: 2,
+        });
+        expect(sent).toEqual(
+          expect.arrayContaining(['Updated visible source.', 'Background source.']),
+        );
+        expect(
+          document.querySelector('#visible [data-justranslate-state="translated"]')?.textContent,
+        ).toBe('译文 Updated visible source.');
+        expect(document.body.textContent).not.toContain('过期缓存译文');
+      } finally {
+        instance.stop();
+        release?.();
+        await work;
+      }
+    },
+  );
+
+  it.each(['network', 'cache', 'failure'] as const)(
+    'releases an offscreen duplicate behind deferred text after visible %s settles',
+    async (result) => {
+      document.body.innerHTML =
+        '<main><p id="background">Earlier background source.</p><p id="duplicate">Shared visible source.</p><p id="visible">Shared visible source.</p></main>';
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return new DOMRect(0, this.id === 'visible' ? 10 : 3000, 300, 20);
+      });
+      let release!: () => void;
+      const sent: string[] = [];
+      installRuntime((request) => {
+        if (
+          result === 'cache' &&
+          request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+          request.candidates.some((candidate) => candidate.text === 'Shared visible source.')
+        ) {
+          return new Promise((resolve) => {
+            release = () =>
+              resolve({
+                ok: true,
+                data: {
+                  skippedIds: [],
+                  missIds: [],
+                  cachedTranslations: Object.fromEntries(
+                    request.candidates.map((candidate) => [candidate.id, '相同原文的缓存译文']),
+                  ),
+                },
+              });
+          });
+        }
+        if (request.type !== 'TRANSLATE_BATCH') return;
+        sent.push(...request.segments.map((segment) => segment.text));
+        if (request.segments.some((segment) => segment.text === 'Shared visible source.'))
+          return new Promise((resolve) => {
+            release = () =>
+              resolve(
+                result === 'failure'
+                  ? { ok: false, error: 'Provider failure' }
+                  : successful(request),
+              );
+          });
+      });
+      const instance = controller();
+      const idleWaits = guardIdleSpin(instance);
+      const work = instance.start();
+      try {
+        await vi.waitFor(() => expect(instance.getStatus().total).toBe(result === 'cache' ? 2 : 3));
+        expect(sent).not.toContain('Earlier background source.');
+        release();
+        await work;
+        expect(idleWaits()).toBeLessThan(50);
+        expect(instance.getStatus()).toMatchObject({
+          phase: result === 'failure' ? 'error' : 'complete',
+          translated: result === 'failure' ? 1 : 3,
+          failed: result === 'failure' ? 2 : 0,
+          total: 3,
+        });
+        expect(sent.filter((text) => text === 'Shared visible source.')).toHaveLength(
+          result === 'cache' ? 0 : 1,
+        );
+        expect(sent.filter((text) => text === 'Earlier background source.')).toHaveLength(1);
+        expect(
+          document.querySelector('#background [data-justranslate-state="translated"]'),
+        ).not.toBeNull();
+        expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(0);
+      } finally {
+        instance.stop();
+        release?.();
+        await work;
+      }
+    },
+  );
+
+  it('discovers the current viewport first and holds offscreen preflight until it is rendered', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 60 }, (_, i) => `<p id="p${i}">Readable paragraph number ${i}.</p>`).join('')}</main>`;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const i = Number(this.id.slice(1));
+      return {
+        top: this.id === 'p40' ? 20 : i < 40 ? -100 : 3000,
+        bottom: this.id === 'p40' ? 50 : i < 40 ? -50 : 3030,
+        left: 0,
+        right: 400,
+      } as DOMRect;
+    });
+    const candidates: string[][] = [];
+    const batches: Batch[] = [];
+    let release: (() => void) | undefined;
+    installRuntime((request) => {
+      if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
+        candidates.push(request.candidates.map((c) => c.text));
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      batches.push(request);
+      if (!release)
+        return new Promise((resolve) => {
+          release = () => resolve(successful(request));
+        });
+      expect(document.querySelector('#p40 [data-justranslate-state="translated"]')).not.toBeNull();
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batches).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(candidates.flat()).toEqual(['Readable paragraph number 40.']);
+      expect(batches[0].segments.map((s) => s.text)).toEqual(['Readable paragraph number 40.']);
+    } finally {
+      release?.();
+      await work;
+    }
+    expect(instance.getStatus()).toMatchObject({ total: 60, translated: 60, failed: 0 });
+  });
+
+  it.each(['cache', 'skip', 'failure'] as const)(
+    'releases offscreen work after visible %s without getting stuck',
+    async (outcome) => {
+      document.body.innerHTML =
+        '<main><p id="visible">Visible source.</p><p id="offscreen">Offscreen source.</p></main>';
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const top = this.id === 'offscreen' ? 3000 : 10;
+        return new DOMRect(0, top, 300, 20);
+      });
+      const batches: Batch[] = [];
+      installRuntime((request) => {
+        if (
+          request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+          request.candidates[0]?.text === 'Visible source.'
+        ) {
+          const id = request.candidates[0].id;
+          if (outcome === 'failure')
+            return Promise.resolve({ ok: false, error: 'Visible lookup failed' });
+          return Promise.resolve({
+            ok: true,
+            data: {
+              skippedIds: outcome === 'skip' ? [id] : [],
+              cachedTranslations: outcome === 'cache' ? { [id]: '可视译文' } : {},
+              missIds: [],
+            },
+          });
+        }
+        if (request.type === 'TRANSLATE_BATCH') batches.push(request);
+      });
+      const instance = controller();
+      await instance.start();
+      expect(batches.flatMap((batch) => batch.segments.map((s) => s.text))).toEqual([
+        'Offscreen source.',
+      ]);
+      expect(instance.getStatus()).toMatchObject({
+        translated: outcome === 'cache' ? 2 : 1,
+        failed: outcome === 'failure' ? 1 : 0,
+      });
+    },
+  );
+
+  it('keeps offscreen preflight blocked while a fully streamed visible request is still finishing', async () => {
+    document.body.innerHTML =
+      '<main><p id="visible">Visible streamed source.</p><p id="offscreen">Offscreen waiting source.</p></main>';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === 'offscreen' ? 3000 : 10, 300, 20);
+    });
+    const candidates: string[] = [];
+    let batch!: Batch;
+    let release!: () => void;
+    installRuntime((request) => {
+      if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
+        candidates.push(...request.candidates.map((c) => c.text));
+      if (request.type !== 'TRANSLATE_BATCH' || request.priority !== 'visible') return;
+      batch = request;
+      return new Promise((resolve) => {
+        release = () => resolve(successful(request));
+      });
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batch).toBeDefined());
+      const result = successful(batch);
+      if (!result.ok) throw new Error('Expected successful test response');
+      instance.receiveBatchProgress({
+        type: 'TRANSLATION_BATCH_PROGRESS',
+        batchId: batch.batchId,
+        sessionId: batch.sessionId,
+        translations: result.data.translations,
+      });
+      await vi.waitFor(() => expect(instance.getStatus().translated).toBe(1));
+      expect(candidates).toEqual(['Visible streamed source.']);
+    } finally {
+      release();
+      await work;
+    }
+    expect(instance.getStatus()).toMatchObject({ translated: 2, failed: 0 });
+  });
+
+  it('refills a released slot with the latest viewport after nested scrolling without cancellation', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 80 }, (_, i) => `<p id="p${i}">Scrollable paragraph number ${i}.</p>`).join('')}</main>`;
+    let visibleId = '';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return {
+        top: this.id === visibleId ? 20 : 3000,
+        bottom: this.id === visibleId ? 50 : 3030,
+        left: 0,
+        right: 400,
+      } as DOMRect;
+    });
+    const batches: Batch[] = [];
+    const releases: Array<() => void> = [];
+    const cancellations: RuntimeRequest[] = [];
+    installRuntime((request) => {
+      if (request.type === 'CANCEL_TRANSLATION_REQUESTS') cancellations.push(request);
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      batches.push(request);
+      return new Promise((resolve) => releases.push(() => resolve(successful(request))));
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batches).toHaveLength(6));
+      visibleId = 'p60';
+      document.querySelector('main')!.dispatchEvent(new Event('scroll'));
+      visibleId = 'p70';
+      document.querySelector('main')!.dispatchEvent(new Event('scroll'));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(batches).toHaveLength(6);
+      releases.shift()!();
+      await vi.waitFor(() => expect(batches).toHaveLength(7));
+      expect(batches[6].segments.map((s) => s.text)).toEqual(['Scrollable paragraph number 70.']);
+      expect(batches[6].priority).toBe('visible');
+      expect(cancellations).toHaveLength(0);
+    } finally {
+      instance.stop();
+      releases.forEach((release) => release());
+      await work;
+    }
+  });
+
+  it('rechecks scrolling that occurred while a foreground candidate lookup was pending', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 40 }, (_, i) => `<p id="p${i}">Lookup paragraph ${i}.</p>`).join('')}</main>`;
+    let visibleId = '';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === visibleId ? 10 : 3000, 300, 20);
+    });
+    let releaseInitial: (() => void) | undefined;
+    let releaseVisible: (() => void) | undefined;
+    const sent: Batch[] = [];
+    installRuntime((request) => {
+      if (request.type === 'TRANSLATE_BATCH') sent.push(request);
+      if (request.type !== 'RESOLVE_TRANSLATION_CANDIDATES') return;
+      const result = {
+        ok: true as const,
+        data: {
+          skippedIds: [],
+          cachedTranslations: {},
+          missIds: request.candidates.map((c) => c.id),
+        },
+      };
+      if (!releaseInitial)
+        return new Promise((resolve) => {
+          releaseInitial = () => resolve(result);
+        });
+      if (request.candidates.some((c) => c.text === 'Lookup paragraph 20.'))
+        return new Promise((resolve) => {
+          releaseVisible = () => resolve(result);
+        });
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(releaseInitial).toBeDefined());
+      visibleId = 'p20';
+      document.dispatchEvent(new Event('scroll'));
+      releaseInitial!();
+      await vi.waitFor(() => expect(releaseVisible).toBeDefined());
+      visibleId = 'p30';
+      document.dispatchEvent(new Event('scroll'));
+      releaseVisible!();
+      await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+      expect(sent[0].segments.map((segment) => segment.text)).toEqual(['Lookup paragraph 30.']);
+    } finally {
+      instance.stop();
+      releaseInitial?.();
+      releaseVisible?.();
+      await work;
+    }
+  });
+
   it('rescans changed raw prose after unwrapping its stale reading anchor', async () => {
     document.body.innerHTML =
       '<main><div>Original surrounding prose.<p>Nested stable paragraph.</p>Trailing readable prose.</div></main>';

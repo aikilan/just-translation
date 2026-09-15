@@ -1,3 +1,4 @@
+import { getElementTranslationPriority } from './viewport';
 import type { DisplayMode } from '../shared/settings';
 import { getTranslationSiteRule } from './site-rules';
 import { yieldToPage } from './render-tasks';
@@ -119,6 +120,10 @@ const PROTECTED_SELECTOR = 'code,kbd,samp,math,[translate="no" i],.notranslate';
 export interface CollectionOptions {
   isVisible?: (element: HTMLElement) => boolean;
   url?: string;
+  /** Restrict candidate extraction, never ancestor traversal, to the current reading viewport. */
+  viewportOnly?: boolean;
+  /** Already claimed reading leaves can be skipped before traversing their inline descendants. */
+  knownElements?: ReadonlySet<HTMLElement>;
 }
 
 interface DiscoveryOptions extends CollectionOptions {
@@ -241,6 +246,12 @@ function* iterateReadingElements(
         const { element } = current;
         if (!current.entered) {
           current.entered = true;
+          if (options.knownElements?.has(element)) {
+            stack.pop();
+            if (stack.length) stack[stack.length - 1].owned = true;
+            yield null;
+            continue;
+          }
           if (seen.has(element) || shouldSkipElement(element) || !isVisible(element)) {
             stack.pop();
             yield null;
@@ -293,6 +304,11 @@ function* iterateReadingElements(
               hasLayoutRisk(element.parentElement));
         if (!matches || hasLayoutRisk(element)) continue;
         if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
+        // A deferred leaf still owns its text: its ancestor must not absorb it as another unit.
+        if (options.viewportOnly && getElementTranslationPriority(element) !== 'visible') {
+          if (stack.length) stack[stack.length - 1].owned = true;
+          continue;
+        }
         const analysis = yield* analyzeSourceFragments(element);
         if (!hasReadableText(element.tagName, analysis.text)) {
           if (!readOnly) unwrapReadingRun(element);

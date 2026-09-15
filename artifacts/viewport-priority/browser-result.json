@@ -1,0 +1,62 @@
+{
+  "initialVisible": [
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "initialIds": [
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "beforeScroll": {
+    "calls": 8,
+    "active": 6
+  },
+  "scrolledVisible": [
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86
+  ],
+  "refillIds": [
+    79,
+    80,
+    81,
+    82
+  ],
+  "final": {
+    "calls": 26,
+    "maximumActive": 6,
+    "aborted": 0,
+    "uniqueParagraphs": 100
+  },
+  "status": {
+    "mode": "segmented",
+    "phase": "complete",
+    "translated": 100,
+    "failed": 0,
+    "total": 100,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "fixture",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "needsRestart": false
+  },
+  "errors": []
+}

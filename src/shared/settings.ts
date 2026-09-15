@@ -15,6 +15,8 @@ export interface TranslatorSettings {
   targetLanguage: string;
   displayMode: DisplayMode;
   translateDynamicContent: boolean;
+  /** Maximum concurrent batches in a page translation operation. */
+  translationConcurrency: number;
   excludedSites: string[];
   autoTranslateSites: string[];
 }
@@ -36,6 +38,7 @@ export interface SettingsValidationResult {
 }
 
 export const SETTINGS_STORAGE_KEY = 'translatorSettings';
+export const MAX_TRANSLATION_CONCURRENCY = 6;
 export const DEFAULT_PROFILE_ID = 'profile-default';
 export const MAX_TRANSLATION_PROMPT_CHARACTERS = 8_000;
 export const DEFAULT_TRANSLATION_PROMPT = [
@@ -59,6 +62,7 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translateDynamicContent: true,
+  translationConcurrency: 6,
   excludedSites: [],
   autoTranslateSites: [],
 };
@@ -146,6 +150,16 @@ export function getSettingsValidationMessage(result: SettingsValidationResult): 
   return undefined;
 }
 
+/** Accept only supported integer limits at storage and runtime-message boundaries. */
+export function isValidTranslationConcurrency(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= MAX_TRANSLATION_CONCURRENCY
+  );
+}
+
 export function mergeSettings(value: unknown): TranslatorSettings {
   if (!isRecord(value)) return cloneDefaultSettings();
   const profiles = Array.isArray(value.profiles)
@@ -175,6 +189,9 @@ export function mergeSettings(value: unknown): TranslatorSettings {
       typeof value.translateDynamicContent === 'boolean'
         ? value.translateDynamicContent
         : DEFAULT_SETTINGS.translateDynamicContent,
+    translationConcurrency: isValidTranslationConcurrency(value.translationConcurrency)
+      ? value.translationConcurrency
+      : DEFAULT_SETTINGS.translationConcurrency,
     excludedSites: readStringArray(value.excludedSites),
     autoTranslateSites: readStringArray(value.autoTranslateSites),
   };

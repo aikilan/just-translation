@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS } from '../shared/settings';
 import { createTranslationBatches, type TranslationSegment } from '../shared/batching';
 import type { TranslationPriority } from '../shared/messages';
 
@@ -22,6 +23,10 @@ export interface ScheduledTranslationBatch {
 
 export interface TranslationSchedulerOptions {
   concurrency?: number;
+  /** Refresh viewport discovery and pending priorities before filling available worker slots. */
+  beforeDispatch?: () => Promise<void>;
+  /** Includes visible candidate preflight and DOM commits outside the worker pool. */
+  canDispatchBackground?: () => boolean;
 }
 
 interface PendingSegment {
@@ -34,8 +39,6 @@ interface PendingSegment {
 const PRIORITIES: readonly TranslationPriority[] = ['visible', 'readAhead', 'background'];
 const SMALLEST_SEGMENT_LIMIT = 1_200;
 const COALESCE_WINDOW_MS = 20;
-
-export const INTERNAL_TRANSLATION_CONCURRENCY = 6;
 
 export const TRANSLATION_BATCH_PROFILES: Readonly<
   Record<TranslationPriority, TranslationBatchProfile>
@@ -59,7 +62,9 @@ export class TranslationScheduler {
     reject: (error: unknown) => void;
   }>();
   private activeCount = 0;
-  private activeNonVisibleCount = 0;
+  private activeVisibleCount = 0;
+  private refreshing = false;
+  private refreshAgain = false;
   private stopped = false;
   private firstError: unknown;
   private dispatched = false;
@@ -68,16 +73,20 @@ export class TranslationScheduler {
 
   constructor(
     private readonly worker: (batch: ScheduledTranslationBatch) => Promise<void>,
-    options: TranslationSchedulerOptions = {},
+    private readonly options: TranslationSchedulerOptions = {},
   ) {
-    this.concurrency = options.concurrency ?? INTERNAL_TRANSLATION_CONCURRENCY;
+    this.concurrency = options.concurrency ?? DEFAULT_SETTINGS.translationConcurrency;
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) {
       throw new Error('翻译调度并发数必须是正整数');
     }
   }
 
+  get hasQueuedWork(): boolean {
+    return this.pending.length > 0;
+  }
+
   get isIdle(): boolean {
-    return this.pending.length === 0 && this.activeCount === 0;
+    return this.pending.length === 0 && this.activeCount === 0 && !this.refreshing;
   }
 
   /** Adds new unique units and immediately fills free worker slots by priority. */
@@ -120,10 +129,30 @@ export class TranslationScheduler {
     this.pump();
   }
 
+  /** Replaces only queued priorities and reading order; running requests keep their identity. */
+  updatePriorities(
+    units: readonly Pick<ScheduledTranslationUnit, 'id' | 'priority' | 'order'>[],
+  ): void {
+    const byId = new Map(units.map((unit) => [unit.id, unit]));
+    for (const item of this.pending) {
+      const unit = byId.get(item.segment.unitId);
+      if (!unit) continue;
+      item.priority = unit.priority;
+      item.order = unit.order;
+    }
+    this.sortPending();
+  }
+
+  /** Wakes a queue blocked on controller preflight, layout changes, or render completion. */
+  refresh(): void {
+    this.pump();
+  }
+
   waitForIdle(): Promise<void> {
     // No more initial input is expected: flush the final partial batch immediately.
     this.finishing = true;
-    this.pump();
+    // Waiting is not new input; do not schedule another refresh behind one already in progress.
+    if (!this.refreshing) this.pump();
     if (this.isIdle) {
       return this.firstError === undefined
         ? Promise.resolve()
@@ -142,13 +171,39 @@ export class TranslationScheduler {
   }
 
   private pump(): void {
+    if (this.stopped || this.activeCount >= this.concurrency) return;
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return;
+    }
+    if (!this.options.beforeDispatch) {
+      this.dispatch();
+      return;
+    }
+    this.refreshing = true;
+    void this.options
+      .beforeDispatch()
+      .catch((error: unknown) => {
+        this.firstError ??= error;
+        this.stop();
+      })
+      .finally(() => {
+        const again = this.refreshAgain;
+        this.refreshAgain = false;
+        this.refreshing = false;
+        this.dispatch();
+        if (again) this.pump();
+      });
+  }
+
+  private dispatch(): void {
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
     while (!this.stopped && this.activeCount < this.concurrency && this.pending.length > 0) {
-      // Leave one dispatch slot for a newly visible unit; background work still drains to completion.
+      // Visible work must settle before offscreen requests may consume free slots.
       if (
         this.pending[0].priority !== 'visible' &&
-        this.activeNonVisibleCount >= Math.max(1, this.concurrency - 1)
+        (this.activeVisibleCount > 0 || this.options.canDispatchBackground?.() === false)
       )
         break;
       const remaining = COALESCE_WINDOW_MS - (performance.now() - this.pending[0].queuedAt);
@@ -159,14 +214,14 @@ export class TranslationScheduler {
       const batch = this.takeNextBatch();
       this.dispatched = true;
       this.activeCount += 1;
-      if (batch.priority !== 'visible') this.activeNonVisibleCount += 1;
+      if (batch.priority === 'visible') this.activeVisibleCount += 1;
       void this.worker(batch)
         .catch((error: unknown) => {
           this.firstError ??= error;
         })
         .finally(() => {
           this.activeCount -= 1;
-          if (batch.priority !== 'visible') this.activeNonVisibleCount -= 1;
+          if (batch.priority === 'visible') this.activeVisibleCount -= 1;
           this.pump();
           this.flushIdleWaiters();
         });

@@ -1,3 +1,4 @@
+import { getElementTranslationPriority } from './viewport';
 import {
   createTranslationBatches,
   mergeTranslatedSegments,
@@ -38,7 +39,6 @@ import {
   setSourceDisplayMode,
 } from './dom-translator';
 import {
-  INTERNAL_TRANSLATION_CONCURRENCY,
   TRANSLATION_BATCH_PROFILES,
   TranslationScheduler,
   type ScheduledTranslationBatch,
@@ -102,6 +102,8 @@ interface PreparedTranslationPass {
   elements: HTMLElement[];
   candidates: CandidateCollection;
   discovery: AsyncGenerator<HTMLElement[], void>;
+  viewportDiscoveryComplete: () => boolean;
+  roots: readonly HTMLElement[];
 }
 
 interface ActiveTranslationGroup {
@@ -145,6 +147,11 @@ interface ActiveTranslationPass {
   failedErrorsBySourceText: Map<string, string>;
   skippedSourceTexts: Set<string>;
   pendingDiscoveries: Set<Promise<void>>;
+  deferredGroups: Set<CandidateGroup>;
+  viewportDirty: boolean;
+  prioritiesDirty: boolean;
+  viewportDiscoveryComplete: () => boolean;
+  roots: readonly HTMLElement[];
   markStale: () => void;
   markError: (error: string) => void;
   priorityObserver?: {
@@ -460,7 +467,7 @@ export class TranslationController {
         .filter((batch) => batch.length > 0);
       const responses = await runWithConcurrency(
         missingBatches,
-        INTERNAL_TRANSLATION_CONCURRENCY,
+        settings.translationConcurrency,
         async (batch) => {
           const publish = (partial: Record<string, string>) => {
             if (!this.isCurrentRetry(record, sessionId, generation)) return;
@@ -530,6 +537,7 @@ export class TranslationController {
     this.retrySessionIds.clear();
     this.discoveryAbort.abort();
     this.batchReceivers.clear();
+    this.activePass?.priorityObserver?.disconnect();
     this.activePass?.scheduler.stop();
     this.activePass?.renderQueue.tasks.stop();
     this.activePass = null;
@@ -601,124 +609,139 @@ export class TranslationController {
     let hasStaleSource = false;
     let lastError: string | undefined;
 
-    const scheduler = new TranslationScheduler(async (batch: ScheduledTranslationBatch) => {
-      if (this.mainSessionId !== sessionId) return;
-      const activeBatch = batch.segments.filter((segment) => {
-        if (failedGroupIds.has(segment.unitId) || settledGroupIds.has(segment.unitId)) return false;
-        const group = activeGroups.get(segment.unitId);
-        // A detached/replaced source has no consumer. Keep deduplicated work only while
-        // at least one current member can still use its result.
-        return group?.records.some(
-          (record) =>
-            this.records.get(record.element) === record && this.isRecordSourceCurrent(record),
-        );
-      });
-      if (activeBatch.length === 0) return;
-
-      // Re-assert pending state for dynamically attached records when this batch starts.
-      for (const groupId of new Set(activeBatch.map((segment) => segment.unitId))) {
-        const group = activeGroups.get(groupId);
-        if (!group) continue;
-        for (const record of group.records) {
-          if (this.records.get(record.element) !== record || record.phase !== 'queued') continue;
-          record.phase = 'pending';
-          renderTranslationPending(record.element, record.id);
-        }
-      }
-      this.consumeObservedMutations();
-      this.syncStatusCounts();
-
-      const publish = (partial: Record<string, string>) => {
+    const scheduler = new TranslationScheduler(
+      async (batch: ScheduledTranslationBatch) => {
         if (this.mainSessionId !== sessionId) return;
-        Object.assign(translations, partial);
-        // Preserve every good part even if its sibling fails or finishes later.
-        for (const segment of activeBatch) {
-          const text = partial[segment.requestId];
-          if (text === undefined) continue;
+        const activeBatch = batch.segments.filter((segment) => {
+          if (failedGroupIds.has(segment.unitId) || settledGroupIds.has(segment.unitId))
+            return false;
           const group = activeGroups.get(segment.unitId);
-          if (group) group.checkpoint.translatedParts[segment.partIndex] = text;
-        }
-        const entries = this.stageCompletedGroupOutcomes(
-          new Set(activeBatch.map((segment) => segment.unitId)),
-          expectedSegmentsByGroup,
-          translations,
-          activeGroups,
-          settledGroupIds,
-          failedGroupIds,
-          completedTranslationsBySourceText,
-          () => {
-            hasStaleSource = true;
-          },
-        );
-        if (entries.length) this.storeCacheEntries(sessionId, entries);
-        this.flushOrderedRenderQueue(renderQueue);
-      };
+          // A detached/replaced source has no consumer. Keep deduplicated work only while
+          // at least one current member can still use its result.
+          return group?.records.some(
+            (record) =>
+              this.records.get(record.element) === record && this.isRecordSourceCurrent(record),
+          );
+        });
+        if (activeBatch.length === 0) return;
 
-      try {
-        const response = await this.sendBatch(sessionId, batch.priority, activeBatch, publish);
-        if (this.mainSessionId !== sessionId) return;
-        if (!response.ok) throw new Error(response.error);
-        publish(response.data.translations);
-        const failedRequestIds = new Set(Object.keys(response.data.failures));
-        for (const groupId of new Set(
-          activeBatch
-            .filter((segment) => failedRequestIds.has(segment.requestId))
-            .map((segment) => segment.unitId),
-        )) {
+        // Re-assert pending state for dynamically attached records when this batch starts.
+        for (const groupId of new Set(activeBatch.map((segment) => segment.unitId))) {
           const group = activeGroups.get(groupId);
           if (!group) continue;
-          const failedSegment = activeBatch.find(
-            (segment) => segment.unitId === groupId && failedRequestIds.has(segment.requestId),
-          );
-          const error = failedSegment
-            ? response.data.failures[failedSegment.requestId]
-            : 'AI 返回中缺少该段译文';
-          lastError = error;
-          failedGroupIds.add(groupId);
-          settledGroupIds.add(groupId);
-          failedErrorsBySourceText.set(group.sourceText, error);
           for (const record of group.records) {
-            if (this.records.get(record.element) === record) {
-              record.outcome = { kind: 'error', error };
+            if (this.records.get(record.element) !== record || record.phase !== 'queued') continue;
+            record.phase = 'pending';
+            renderTranslationPending(record.element, record.id);
+          }
+        }
+        this.consumeObservedMutations();
+        this.syncStatusCounts();
+
+        const publish = (partial: Record<string, string>) => {
+          if (this.mainSessionId !== sessionId) return;
+          Object.assign(translations, partial);
+          // Preserve every good part even if its sibling fails or finishes later.
+          for (const segment of activeBatch) {
+            const text = partial[segment.requestId];
+            if (text === undefined) continue;
+            const group = activeGroups.get(segment.unitId);
+            if (group) group.checkpoint.translatedParts[segment.partIndex] = text;
+          }
+          const entries = this.stageCompletedGroupOutcomes(
+            new Set(activeBatch.map((segment) => segment.unitId)),
+            expectedSegmentsByGroup,
+            translations,
+            activeGroups,
+            settledGroupIds,
+            failedGroupIds,
+            completedTranslationsBySourceText,
+            () => {
+              hasStaleSource = true;
+            },
+          );
+          if (entries.length) this.storeCacheEntries(sessionId, entries);
+          this.flushOrderedRenderQueue(renderQueue);
+        };
+
+        try {
+          const response = await this.sendBatch(sessionId, batch.priority, activeBatch, publish);
+          if (this.mainSessionId !== sessionId) return;
+          if (!response.ok) throw new Error(response.error);
+          publish(response.data.translations);
+          const failedRequestIds = new Set(Object.keys(response.data.failures));
+          for (const groupId of new Set(
+            activeBatch
+              .filter((segment) => failedRequestIds.has(segment.requestId))
+              .map((segment) => segment.unitId),
+          )) {
+            const group = activeGroups.get(groupId);
+            if (!group) continue;
+            const failedSegment = activeBatch.find(
+              (segment) => segment.unitId === groupId && failedRequestIds.has(segment.requestId),
+            );
+            const error = failedSegment
+              ? response.data.failures[failedSegment.requestId]
+              : 'AI 返回中缺少该段译文';
+            lastError = error;
+            failedGroupIds.add(groupId);
+            settledGroupIds.add(groupId);
+            failedErrorsBySourceText.set(group.sourceText, error);
+            for (const record of group.records) {
+              if (this.records.get(record.element) === record) {
+                record.outcome = { kind: 'error', error };
+                record.outcomeAt = performance.now();
+              }
+            }
+          }
+          const entries = this.stageCompletedGroupOutcomes(
+            new Set(activeBatch.map((segment) => segment.unitId)),
+            expectedSegmentsByGroup,
+            translations,
+            activeGroups,
+            settledGroupIds,
+            failedGroupIds,
+            completedTranslationsBySourceText,
+            () => {
+              hasStaleSource = true;
+            },
+          );
+          if (entries.length > 0) this.storeCacheEntries(sessionId, entries);
+        } catch (error) {
+          if (this.mainSessionId !== sessionId) return;
+          if (!activeBatch.some((segment) => activeGroups.has(segment.unitId))) return;
+          lastError = getErrorMessage(error);
+          for (const groupId of new Set(activeBatch.map((segment) => segment.unitId))) {
+            if (settledGroupIds.has(groupId)) continue;
+            const group = activeGroups.get(groupId);
+            if (!group) continue;
+            failedGroupIds.add(groupId);
+            settledGroupIds.add(groupId);
+            failedErrorsBySourceText.set(group.sourceText, lastError);
+            for (const record of group.records) {
+              if (this.records.get(record.element) !== record) continue;
+              record.outcome = { kind: 'error', error: lastError };
               record.outcomeAt = performance.now();
             }
           }
         }
-        const entries = this.stageCompletedGroupOutcomes(
-          new Set(activeBatch.map((segment) => segment.unitId)),
-          expectedSegmentsByGroup,
-          translations,
-          activeGroups,
-          settledGroupIds,
-          failedGroupIds,
-          completedTranslationsBySourceText,
-          () => {
-            hasStaleSource = true;
-          },
-        );
-        if (entries.length > 0) this.storeCacheEntries(sessionId, entries);
-      } catch (error) {
-        if (this.mainSessionId !== sessionId) return;
-        if (!activeBatch.some((segment) => activeGroups.has(segment.unitId))) return;
-        lastError = getErrorMessage(error);
-        for (const groupId of new Set(activeBatch.map((segment) => segment.unitId))) {
-          if (settledGroupIds.has(groupId)) continue;
-          const group = activeGroups.get(groupId);
-          if (!group) continue;
-          failedGroupIds.add(groupId);
-          settledGroupIds.add(groupId);
-          failedErrorsBySourceText.set(group.sourceText, lastError);
-          for (const record of group.records) {
-            if (this.records.get(record.element) !== record) continue;
-            record.outcome = { kind: 'error', error: lastError };
-            record.outcomeAt = performance.now();
-          }
-        }
-      }
-      this.flushOrderedRenderQueue(renderQueue);
-      this.consumeObservedMutations();
-      this.syncStatusCounts();
-    });
+        this.flushOrderedRenderQueue(renderQueue);
+        this.consumeObservedMutations();
+        this.syncStatusCounts();
+      },
+      {
+        // Snapshot the saved limit for this pass; active requests are never interrupted by edits.
+        concurrency: settings.translationConcurrency,
+        beforeDispatch: async () => {
+          // Candidate lookup yields to the page too: recheck a scroll before dispatching its result.
+          do {
+            await this.refreshViewport(activePass);
+            await this.resolveDeferredGroups(activePass);
+          } while (this.mainSessionId === sessionId && activePass.viewportDirty);
+        },
+        canDispatchBackground: () => this.canDispatchBackground(activePass),
+      },
+    );
     const pendingDiscoveries = new Set<Promise<void>>();
     const groupsBySourceText = new Map(
       candidates.groups.map((group) => [group.sourceText, group] as const),
@@ -735,6 +758,11 @@ export class TranslationController {
       failedErrorsBySourceText,
       skippedSourceTexts,
       pendingDiscoveries,
+      deferredGroups: new Set(),
+      viewportDirty: false,
+      prioritiesDirty: true,
+      viewportDiscoveryComplete: prepared.viewportDiscoveryComplete,
+      roots: prepared.roots,
       markStale: () => {
         hasStaleSource = true;
       },
@@ -749,9 +777,7 @@ export class TranslationController {
       hasStaleSource = true;
     });
 
-    const backgroundGroups = candidates.groups.filter((group) => group.priority !== 'visible');
-    // Observe before preflight completes so a scroll cannot miss unscheduled candidates.
-    const promotionObserver = this.observePriorityPromotions(backgroundGroups, scheduler);
+    const promotionObserver = this.observeViewport(candidates.groups, activePass);
     activePass.priorityObserver = promotionObserver;
     const trackDiscovery = (work: Promise<void>) => {
       const tracked = work.finally(() => pendingDiscoveries.delete(tracked));
@@ -777,12 +803,18 @@ export class TranslationController {
         trackDiscovery(this.enqueueDiscoveredElements(activePass, next.value));
       }
       if (this.mainSessionId !== sessionId) return { hasStaleSource: false };
-      await scheduler.waitForIdle();
-      while (pendingDiscoveries.size > 0) {
+      // Discovery can enqueue work while the scheduler is otherwise idle.
+      do {
         await Promise.allSettled([...pendingDiscoveries]);
         await scheduler.waitForIdle();
-      }
-      await renderQueue.tasks.waitForIdle();
+        await renderQueue.tasks.waitForIdle();
+      } while (
+        this.mainSessionId === sessionId &&
+        (pendingDiscoveries.size > 0 ||
+          activePass.deferredGroups.size > 0 ||
+          !scheduler.isIdle ||
+          activePass.viewportDirty)
+      );
     } finally {
       await prepared.discovery.return(undefined);
       promotionObserver?.disconnect();
@@ -791,8 +823,22 @@ export class TranslationController {
     return { hasStaleSource, lastError };
   }
 
-  /** Start one visible chunk first, then overlap bounded preflight work with active AI requests. */
+  /** Resolve visible candidates now; defer offscreen cache/language work until foreground settles. */
   private async resolveCandidateChunks(
+    pass: ActiveTranslationPass,
+    groups: readonly CandidateGroup[],
+  ): Promise<void> {
+    const visible: CandidateGroup[] = [];
+    for (const group of groups) {
+      if (group.priority === 'visible') visible.push(group);
+      else pass.deferredGroups.add(group);
+    }
+    await this.resolveReadyCandidateChunks(pass, visible);
+    pass.scheduler.refresh();
+  }
+
+  /** Start one visible chunk first, then overlap bounded preflight work with active AI requests. */
+  private async resolveReadyCandidateChunks(
     pass: ActiveTranslationPass,
     groups: readonly CandidateGroup[],
   ): Promise<void> {
@@ -971,6 +1017,10 @@ export class TranslationController {
         afterSlice: () => {
           this.consumeObservedMutations();
           this.syncStatusCounts();
+          if (this.activePass) {
+            this.activePass.prioritiesDirty = true;
+            this.activePass.scheduler.refresh();
+          }
         },
       }),
       lanes: {
@@ -1100,10 +1150,29 @@ export class TranslationController {
     scopeRoots?: readonly HTMLElement[],
   ): Promise<PreparedTranslationPass> {
     const signal = this.discoveryAbort.signal;
+    const roots = scopeRoots ?? [document.body];
+    let viewportComplete = false;
+    const discovered = new Set<HTMLElement>();
+    const notify = () => this.activePass?.scheduler.refresh();
     async function* discoverRoots(): AsyncGenerator<HTMLElement[], void> {
-      for (const root of scopeRoots ?? [document.body]) {
-        if (signal.aborted) return;
-        yield* discoverTranslatableElements(root, { url: location.href, signal });
+      for (const viewportOnly of [true, false]) {
+        if (!viewportOnly) {
+          viewportComplete = true;
+          notify();
+        }
+        for (const root of roots) {
+          if (signal.aborted) return;
+          for await (const slice of discoverTranslatableElements(root, {
+            url: location.href,
+            signal,
+            viewportOnly,
+            knownElements: discovered,
+          })) {
+            const fresh = slice.filter((element) => !discovered.has(element));
+            fresh.forEach((element) => discovered.add(element));
+            if (fresh.length) yield fresh;
+          }
+        }
       }
     }
     const discovery = discoverRoots();
@@ -1121,7 +1190,13 @@ export class TranslationController {
     }
     this.consumeObservedMutations();
     this.syncStatusCounts();
-    return { elements, candidates, discovery };
+    return {
+      elements,
+      candidates,
+      discovery,
+      roots,
+      viewportDiscoveryComplete: () => viewportComplete,
+    };
   }
 
   /** Promotes unfinished preflight records to the existing per-node retry lifecycle. */
@@ -1205,7 +1280,17 @@ export class TranslationController {
       for (const element of group.members) {
         const slot = this.ensureOrderedRenderSlot(renderQueue, element);
         if (!element.isConnected || getElementSourceText(element) !== group.sourceText) {
-          slot.skipped = true;
+          // A skipped render slot does not settle its queued record. Remove only this stale
+          // source's record so it cannot block foreground completion or a later rescan.
+          const staleRecord = this.records.get(element);
+          if (staleRecord?.sourceText === group.sourceText) {
+            this.discardRecord(staleRecord, element.isConnected);
+          }
+          // A dynamic scan may already own a newer record/slot for the same DOM element.
+          if (!this.records.has(element)) {
+            slot.record = undefined;
+            slot.skipped = true;
+          }
           markStale();
           continue;
         }
@@ -1282,6 +1367,7 @@ export class TranslationController {
   ): Promise<void> {
     if (this.mainSessionId !== pass.sessionId) return;
     const collection = this.createCandidateGroups(elements);
+    pass.prioritiesDirty = true;
     const newGroups: CandidateGroup[] = [];
     for (const discovered of collection.groups) {
       const existing = pass.groupsBySourceText.get(discovered.sourceText);
@@ -1303,7 +1389,7 @@ export class TranslationController {
     if (newGroups.length === 0) return;
 
     this.prepareCandidateRecords(newGroups, pass.renderQueue, pass.markStale);
-    pass.priorityObserver?.observe(newGroups.filter((group) => group.priority !== 'visible'));
+    pass.priorityObserver?.observe(newGroups);
 
     await this.resolveCandidateChunks(pass, newGroups);
   }
@@ -1330,10 +1416,8 @@ export class TranslationController {
         pass.markStale();
         continue;
       }
-      if (translatedText === undefined && failedError === undefined && !activeGroup) {
-        group.members.push(member);
-        continue;
-      }
+      if (!group.members.includes(member)) group.members.push(member);
+      if (translatedText === undefined && failedError === undefined && !activeGroup) continue;
       const record = this.createRecord(member, group.sourceText);
       slot.record = record;
       // A late duplicate shares settled parts, but keeps its own DOM retry lifecycle.
@@ -1355,42 +1439,146 @@ export class TranslationController {
     this.syncStatusCounts();
   }
 
-  private observePriorityPromotions(
-    backgroundGroups: readonly CandidateGroup[],
-    scheduler: TranslationScheduler,
-  ): ActiveTranslationPass['priorityObserver'] {
-    if (typeof IntersectionObserver === 'undefined') return undefined;
-    const groupByElement = new Map<Element, CandidateGroup>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const promotedIds = new Set<string>();
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const group = groupByElement.get(entry.target);
-          if (!group) continue;
-          // Preflight may still be running; carry promotion into the eventual enqueue call.
-          group.priority = 'visible';
-          promotedIds.add(group.id);
-          if (entry.target instanceof HTMLElement) this.promoteReadingSlot(entry.target);
-          observer.unobserve(entry.target);
-        }
-        scheduler.promote([...promotedIds], 'visible');
-        this.promoteBackgroundBatches(promotedIds);
-      },
-      { root: null, rootMargin: '0px', threshold: 0 },
-    );
-    const observe = (groups: readonly CandidateGroup[]) => {
-      for (const group of groups) {
-        for (const member of group.members) {
-          const record = this.records.get(member);
-          if (!record || record.phase !== 'queued') continue;
-          groupByElement.set(member, group);
-          observer.observe(member);
+  /** Checks controller-owned foreground stages in addition to the scheduler's active requests. */
+  private canDispatchBackground(pass: ActiveTranslationPass): boolean {
+    if (!pass.viewportDiscoveryComplete() || pass.viewportDirty) return false;
+    // A complete SSE paragraph can render before the logical request (including retry) settles.
+    if (
+      [...this.batchReceivers.values()].some(
+        (receiver) => receiver.sessionId === pass.sessionId && receiver.priority === 'visible',
+      )
+    )
+      return false;
+    for (const group of pass.groupsBySourceText.values()) {
+      if (group.priority !== 'visible' || pass.skippedSourceTexts.has(group.sourceText)) continue;
+      for (const element of group.members) {
+        const record = this.records.get(element);
+        if (
+          element.isConnected &&
+          record &&
+          (record.phase === 'queued' || record.phase === 'pending') &&
+          // Group priority is shared by duplicates; an offscreen member may be waiting
+          // behind deferred background text and must not hold that same work closed.
+          getElementTranslationPriority(element) === 'visible'
+        )
+          return false;
+      }
+    }
+    return true;
+  }
+
+  /** Uses at most one candidate chunk per refill unless every candidate is cached or skipped. */
+  private async resolveDeferredGroups(pass: ActiveTranslationPass): Promise<void> {
+    while (this.mainSessionId === pass.sessionId && pass.deferredGroups.size > 0) {
+      const visible = [...pass.deferredGroups].filter((group) => group.priority === 'visible');
+      if (!visible.length && !this.canDispatchBackground(pass)) return;
+      const ordered = (visible.length ? visible : [...pass.deferredGroups]).sort(
+        (a, b) => getPriorityRank(a.priority) - getPriorityRank(b.priority) || a.order - b.order,
+      );
+      // Do not make a next-screen request wait for a slower background cache lookup.
+      const groups = ordered
+        .filter((group) => group.priority === ordered[0].priority)
+        .slice(0, CANDIDATE_CHUNK_MAX_ITEMS);
+      groups.forEach((group) => pass.deferredGroups.delete(group));
+      await this.resolveReadyCandidateChunks(pass, groups);
+      if (pass.scheduler.hasQueuedWork) return;
+      await pass.renderQueue.tasks.waitForIdle();
+    }
+  }
+
+  /** Coalesced scroll work runs only when a request slot is available; it never cancels HTTP. */
+  private async refreshViewport(pass: ActiveTranslationPass): Promise<void> {
+    if (!pass.viewportDirty && !pass.prioritiesDirty) return;
+    pass.prioritiesDirty = false;
+    while (pass.viewportDirty && this.mainSessionId === pass.sessionId) {
+      pass.viewportDirty = false;
+      for (const root of pass.roots) {
+        if (!root.isConnected) continue;
+        for await (const elements of discoverTranslatableElements(root, {
+          url: location.href,
+          signal: this.discoveryAbort.signal,
+          viewportOnly: true,
+          knownElements: new Set(this.records.keys()),
+        })) {
+          if (this.mainSessionId !== pass.sessionId) return;
+          await this.enqueueDiscoveredElements(pass, elements);
         }
       }
+    }
+    if (this.mainSessionId !== pass.sessionId) return;
+    const groups = [...pass.groupsBySourceText.values()]
+      .filter((group) =>
+        group.members.some((element) => {
+          const record = this.records.get(element);
+          return record?.phase === 'queued' || record?.phase === 'pending';
+        }),
+      )
+      .sort((a, b) => {
+        const left = a.members.find((element) => element.isConnected);
+        const right = b.members.find((element) => element.isConnected);
+        if (!left || !right || left === right) return a.order - b.order;
+        return left.compareDocumentPosition(right) & DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+    for (const [order, group] of groups.entries()) {
+      group.order = order;
+      group.priority =
+        group.members
+          .filter((element) => element.isConnected)
+          .map(getElementTranslationPriority)
+          .sort((a, b) => getPriorityRank(a) - getPriorityRank(b))[0] ?? 'background';
+    }
+    pass.scheduler.updatePriorities(groups);
+    // Move only uncommitted render slots, retaining records and outcomes across both promotions and demotions.
+    const slots = TRANSLATION_PRIORITIES.flatMap((priority) => {
+      const lane = pass.renderQueue.lanes[priority];
+      return lane.slots.splice(lane.nextIndex);
+    });
+    for (const slot of slots) pass.renderQueue.slotByElement.delete(slot.element);
+    for (const slot of slots)
+      Object.assign(this.ensureOrderedRenderSlot(pass.renderQueue, slot.element), slot);
+    this.flushOrderedRenderQueue(pass.renderQueue);
+    this.promoteBackgroundBatches(
+      new Set(groups.filter((group) => group.priority === 'visible').map((group) => group.id)),
+    );
+  }
+
+  private observeViewport(
+    groups: readonly CandidateGroup[],
+    pass: ActiveTranslationPass,
+  ): NonNullable<ActiveTranslationPass['priorityObserver']> {
+    const changed = () => {
+      if (this.mainSessionId !== pass.sessionId) return;
+      pass.viewportDirty = true;
+      pass.scheduler.refresh();
     };
-    observe(backgroundGroups);
-    return { observe, disconnect: () => observer.disconnect() };
+    const observer =
+      typeof IntersectionObserver === 'undefined'
+        ? undefined
+        : new IntersectionObserver(changed, { root: null, rootMargin: '0px', threshold: 0 });
+    const observed = new Set<HTMLElement>();
+    const observe = (candidates: readonly CandidateGroup[]) => {
+      for (const group of candidates)
+        for (const member of group.members) {
+          if (observed.has(member)) continue;
+          observed.add(member);
+          observer?.observe(member);
+        }
+    };
+    // Capture observes nested scroll containers too; scroll itself does not bubble.
+    document.addEventListener('scroll', changed, { capture: true, passive: true });
+    window.addEventListener('scroll', changed, { passive: true });
+    window.addEventListener('resize', changed, { passive: true });
+    observe(groups);
+    return {
+      observe,
+      disconnect: () => {
+        observer?.disconnect();
+        document.removeEventListener('scroll', changed, true);
+        window.removeEventListener('scroll', changed);
+        window.removeEventListener('resize', changed);
+        observed.clear();
+      },
+    };
   }
 
   /** A unit may already be waiting inside the provider queue, beyond the page scheduler. */
@@ -1410,25 +1598,6 @@ export class TranslationController {
         batchIds,
         priority: 'visible',
       });
-  }
-
-  /** Move only uncommitted nodes: newly visible text must not wait behind an old background lane. */
-  private promoteReadingSlot(element: HTMLElement): void {
-    const queue = this.activePass?.renderQueue;
-    const slot = queue?.slotByElement.get(element);
-    if (!queue || !slot) return;
-    for (const priority of ['readAhead', 'background'] as const) {
-      const lane = queue.lanes[priority];
-      const index = lane.slots.indexOf(slot);
-      if (index < lane.nextIndex) continue;
-      lane.slots.splice(index, 1);
-      queue.slotByElement.delete(element);
-      const moved = this.ensureOrderedRenderSlot(queue, element);
-      moved.record = slot.record;
-      moved.skipped = slot.skipped;
-      this.flushOrderedRenderQueue(queue);
-      return;
-    }
   }
 
   private async resolveCandidates(
@@ -1814,14 +1983,6 @@ export class TranslationController {
     this.status.failed = failed;
     this.status.total = this.records.size;
   }
-}
-
-function getElementTranslationPriority(element: HTMLElement): TranslationPriority {
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
-  const bounds = element.getBoundingClientRect();
-  if (bounds.bottom >= 0 && bounds.top <= viewportHeight) return 'visible';
-  if (bounds.top > viewportHeight && bounds.top <= viewportHeight * 2) return 'readAhead';
-  return 'background';
 }
 
 function getPriorityRank(priority: TranslationPriority): number {

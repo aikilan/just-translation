@@ -1,0 +1,21 @@
+
+ RUN  v4.1.11 /private/tmp/justranslate-review-baseline.NjBiEA
+
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=true)
+{"dynamic":true,"waits":4,"guarded":false,"sent":["Background source."],"status":{"mode":"segmented","phase":"complete","translated":1,"failed":0,"total":2,"displayMode":"bilingual","context":{"profileId":"one","targetLanguage":"Simplified Chinese"},"needsRestart":false}}
+
+ ✓ src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=true) 82ms
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=false)
+{"dynamic":false,"waits":4,"guarded":false,"sent":["Background source."],"status":{"mode":"segmented","phase":"complete","translated":1,"failed":0,"total":2,"displayMode":"bilingual","context":{"profileId":"one","targetLanguage":"Simplified Chinese"},"needsRestart":false}}
+
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > does not wait for an offscreen duplicate that is blocked behind deferred background text
+{"case":"offscreen duplicate","waits":2,"guarded":false,"sent":["Shared visible source.","Earlier background source."]}
+
+ ✓ src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=false) 57ms
+ ✓ src/content/viewport-review.test.ts > viewport priority review reproductions > does not wait for an offscreen duplicate that is blocked behind deferred background text 56ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  10:05:03
+   Duration  506ms (transform 66ms, setup 0ms, import 79ms, tests 195ms, environment 158ms)
+

@@ -1,0 +1,55 @@
+async (page) => {
+  const origin = 'http://127.0.0.1:57507';
+  const context = await page.context().browser().browserType().launchPersistentContext('/tmp/justranslate-concurrency-' + Date.now(), {
+    headless: true,
+    executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    args: ['--disable-extensions-except=/Users/jintao.xu/Documents/只是翻译/dist', '--load-extension=/Users/jintao.xu/Documents/只是翻译/dist'],
+    viewport: { width: 1100, height: 720 },
+  });
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await worker.evaluate(async (origin) => chrome.storage.local.set({ translatorSettings: {
+      profiles: [{ id: 'fixture', name: 'Local fixture', apiUrl: origin, apiKey: '', model: 'fixture', translationPrompt: 'Translate into {{targetLanguage}}.' }],
+      activeProfileId: 'fixture', targetLanguage: 'Simplified Chinese', displayMode: 'bilingual', translationConcurrency: 6, translateDynamicContent: false, excludedSites: [], autoTranslateSites: [],
+    } }), origin);
+    const options = await context.newPage();
+    await options.goto(worker.url().split('/').slice(0, 3).join('/') + '/src/options/index.html#api');
+    const results = [];
+    for (const limit of [1, 2]) {
+      await options.getByLabel('单页翻译并发数', { exact: true }).selectOption(String(limit));
+      for (let i = 0; i < 30; i++) {
+        const saved = await worker.evaluate(async () => (await chrome.storage.local.get('translatorSettings')).translatorSettings.translationConcurrency);
+        if (saved === limit) break;
+        await options.waitForTimeout(100);
+      }
+      await options.reload();
+      const savedValue = await options.getByLabel('单页翻译并发数', { exact: true }).inputValue();
+      if (savedValue !== String(limit)) throw new Error('Concurrency did not persist: ' + savedValue);
+      const tab = await context.newPage();
+      const errors = [];
+      tab.on('pageerror', error => errors.push(error.message));
+      await tab.goto(origin + '/concurrency-' + limit);
+      await tab.evaluate(limit => {
+        document.body.innerHTML = '<main>' + Array.from({ length: 32 }, (_, i) => `<p style="margin:6px 0;line-height:20px">Concurrency ${limit} story ${i}: A readable English article about useful software.</p>`).join('') + '</main>';
+      }, limit);
+      const tabs = await worker.evaluate(url => chrome.tabs.query({ url }), tab.url());
+      const id = tabs[0].id;
+      const command = type => worker.evaluate(({ id, type }) => chrome.tabs.sendMessage(id, { type }), { id, type });
+      await tab.request.get(origin + '/scenario?mode=slow');
+      await command('START_TRANSLATION');
+      const deadline = Date.now() + 60000;
+      let status;
+      do {
+        status = await command('GET_PAGE_STATUS');
+        if (status.phase === 'complete' || status.phase === 'error') break;
+        await tab.waitForTimeout(200);
+      } while (Date.now() < deadline);
+      const stats = await (await tab.request.get(origin + '/stats')).json();
+      if (status.phase !== 'complete' || status.translated !== 32 || status.failed !== 0 || stats.maximumActive !== limit || stats.aborted !== 0 || errors.length) throw new Error(JSON.stringify({ limit, status, stats, errors }));
+      results.push({ limit, savedValue, status, calls: stats.calls, maximumActive: stats.maximumActive, aborted: stats.aborted, errors });
+      await tab.close();
+    }
+    await options.screenshot({ path: '/Users/jintao.xu/Documents/只是翻译/artifacts/concurrency/options.png' });
+    return results;
+  } finally { await context.close(); }
+}

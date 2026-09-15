@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
-  const [draft, setDraft] = useState<ReadingPreferences>(settings);
+  const [draft, setDraft] = useState<Omit<ReadingPreferences, 'translationConcurrency'>>(settings);
   const { feedback, save, clear } = useSettingsMutation();
   const previous = useRef(settings);
   useEffect(() => {
@@ -42,7 +42,7 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
   }, [settings]);
 
   /** Writes just the changed preference; failed input remains local and retryable. */
-  function change<K extends keyof ReadingPreferences>(key: K, value: ReadingPreferences[K]) {
+  function change<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
     clear(key);
     void save(key, { type: 'UPDATE_READING_PREFERENCES', patch: { [key]: value } }, (result) => {

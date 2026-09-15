@@ -17,6 +17,7 @@ beforeEach(() => {
     activeProfileId: 'p',
     targetLanguage: 'Chinese',
     displayMode: 'translation',
+    translationConcurrency: 6,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],

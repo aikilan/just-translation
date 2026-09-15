@@ -12,6 +12,7 @@ beforeEach(() => {
     activeProfileId: 'one',
     targetLanguage: 'English',
     displayMode: 'bilingual',
+    translationConcurrency: 6,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],

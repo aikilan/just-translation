@@ -30,6 +30,7 @@ export type PublicTranslatorSettings = Pick<
   | 'targetLanguage'
   | 'displayMode'
   | 'translateDynamicContent'
+  | 'translationConcurrency'
   | 'excludedSites'
   | 'activeProfileId'
   | 'autoTranslateSites'
@@ -81,7 +82,7 @@ export interface TranslationBatchProgress {
 
 export type ReadingPreferences = Pick<
   TranslatorSettings,
-  'targetLanguage' | 'displayMode' | 'translateDynamicContent'
+  'targetLanguage' | 'displayMode' | 'translateDynamicContent' | 'translationConcurrency'
 >;
 export interface SiteRuleUpdate {
   list: 'autoTranslateSites' | 'excludedSites';

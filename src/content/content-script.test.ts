@@ -35,6 +35,7 @@ const settings: PublicTranslatorSettings = {
   profiles: [{ id: 'p', name: 'AI', configured: true }],
   targetLanguage: 'Chinese',
   displayMode: 'bilingual',
+  translationConcurrency: 6,
   translateDynamicContent: true,
   autoTranslateSites: [location.hostname],
   excludedSites: [],

@@ -14,6 +14,7 @@ const PUBLIC_SETTINGS = {
   profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual' as const,
+  translationConcurrency: 6,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: [],
@@ -23,6 +24,8 @@ describe('TranslationController', () => {
   it.each([true, false])(
     'keeps failed stream items pending during one automatic retry (success: %s)',
     async (retrySucceeds) => {
+      // This protocol test requires both short sources in one batch; traversal budget has separate tests.
+      vi.spyOn(performance, 'now').mockReturnValue(0);
       document.body.innerHTML = '<main><p>First source.</p><p>Second source.</p></main>';
       const instance = new TranslationController();
       const batches: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>[] = [];
@@ -1029,7 +1032,7 @@ describe('TranslationController', () => {
     controller.restore();
   });
 
-  it('keeps strict order inside a reading window without letting it block later windows', async () => {
+  it('finishes and renders the current window before dispatching the next window', async () => {
     const viewportHeight = window.innerHeight || 768;
     document.body.innerHTML = `
       <main>
@@ -1070,19 +1073,16 @@ describe('TranslationController', () => {
     const controller = new TranslationController();
 
     const translation = controller.start();
+    await vi.waitFor(() => expect(pendingBatches).toHaveLength(1));
+    expect(pendingBatches[0].request.priority).toBe('visible');
+    expect(document.querySelector('#ahead [data-justranslate-state="pending"]')).toBeNull();
+    resolveBatch(pendingBatches[0], '当前屏译文');
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(2));
-    const visibleBatch = pendingBatches.find(({ request }) => request.priority === 'visible')!;
-    const aheadBatch = pendingBatches.find(({ request }) => request.priority === 'readAhead')!;
-
-    resolveBatch(aheadBatch, '下一屏译文');
-    await vi.waitFor(() =>
-      expect(
-        document.querySelector('#ahead [data-justranslate-state="translated"]'),
-      ).not.toBeNull(),
-    );
-    expect(document.querySelector('#visible [data-justranslate-state="translated"]')).toBeNull();
-
-    resolveBatch(visibleBatch, '当前屏译文');
+    expect(
+      document.querySelector('#visible [data-justranslate-state="translated"]'),
+    ).not.toBeNull();
+    expect(pendingBatches[1].request.priority).toBe('readAhead');
+    resolveBatch(pendingBatches[1], '下一屏译文');
     await translation;
     expect(document.querySelector('#visible [data-justranslate-translation]')?.textContent).toBe(
       '当前屏译文',

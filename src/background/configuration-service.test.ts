@@ -34,6 +34,22 @@ describe('configuration service', () => {
       },
     });
   });
+  it('persists and publicly exposes concurrency independently of AI configuration', async () => {
+    await expect(updateReadingPreferences({ translationConcurrency: 2 })).resolves.toMatchObject({
+      translationConcurrency: 2,
+    });
+    expect(stored.translationConcurrency).toBe(2);
+    await expect(readPublicSettings()).resolves.toMatchObject({ translationConcurrency: 2 });
+  });
+  it.each([0, -1, 7, 1.5, NaN, Infinity])(
+    'rejects invalid concurrency %s without writing',
+    async (value) => {
+      await expect(updateReadingPreferences({ translationConcurrency: value })).rejects.toThrow(
+        '并发数',
+      );
+      expect(storageSet).not.toHaveBeenCalled();
+    },
+  );
   it('saves a single profile, normalizes values and keeps secrets private', async () => {
     const result = await saveTranslationProfile({
       ...stored.profiles[0],

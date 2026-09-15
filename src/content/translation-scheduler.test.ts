@@ -1,8 +1,8 @@
+import { DEFAULT_SETTINGS } from '../shared/settings';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TranslationSegment } from '../shared/batching';
 import {
-  INTERNAL_TRANSLATION_CONCURRENCY,
   TRANSLATION_BATCH_PROFILES,
   TranslationScheduler,
   type ScheduledTranslationBatch,
@@ -10,7 +10,7 @@ import {
 } from './translation-scheduler';
 
 describe('TranslationScheduler', () => {
-  it('reserves one dispatch slot for new foreground work while background requests are waiting', async () => {
+  it('uses all six slots for background work and waits for a free slot for foreground', async () => {
     const releases: Array<() => void> = [];
     const priorities: string[] = [];
     const scheduler = new TranslationScheduler((batch) => {
@@ -18,13 +18,122 @@ describe('TranslationScheduler', () => {
       return new Promise<void>((resolve) => releases.push(resolve));
     });
     scheduler.enqueue(createUnits('background', 28, 100, 0));
-    expect(priorities).toEqual(Array<string>(5).fill('background'));
+    expect(priorities).toEqual(Array<string>(6).fill('background'));
     scheduler.enqueue(createUnits('visible', 4, 100, 100));
-    expect(priorities).toEqual([...Array<string>(5).fill('background'), 'visible']);
+    expect(priorities).toHaveLength(6);
+    releases.shift()!();
+    await vi.waitFor(() => expect(priorities[6]).toBe('visible'));
     scheduler.stop();
     releases.forEach((resolve) => resolve());
     await scheduler.waitForIdle();
   });
+
+  it('holds background work until every active foreground request settles', async () => {
+    const releases: Array<() => void> = [];
+    const batches: ScheduledTranslationBatch[] = [];
+    const scheduler = new TranslationScheduler((batch) => {
+      batches.push(batch);
+      return new Promise<void>((resolve) => releases.push(resolve));
+    });
+    scheduler.enqueue([
+      ...createUnits('visible', 5, 100, 0),
+      ...createUnits('background', 4, 100, 5),
+    ]);
+    const work = scheduler.waitForIdle();
+    expect(batches.map((batch) => batch.priority)).toEqual(['visible', 'visible']);
+    releases.shift()!();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(batches).toHaveLength(2);
+    releases.shift()!();
+    await vi.waitFor(() => expect(batches[2]?.priority).toBe('background'));
+    releases.shift()!();
+    await work;
+  });
+
+  it('waits for controller preflight and rendering before releasing background work', async () => {
+    let ready = false;
+    const worker = vi.fn().mockResolvedValue(undefined);
+    const scheduler = new TranslationScheduler(worker, { canDispatchBackground: () => ready });
+    scheduler.enqueue(createUnits('background', 4, 50, 0));
+    const work = scheduler.waitForIdle();
+    expect(worker).not.toHaveBeenCalled();
+    ready = true;
+    scheduler.refresh();
+    await work;
+    expect(worker).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces refreshes and reaches idle without creating more work from idle waiters', async () => {
+    let release!: () => void;
+    const refresh = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const worker = vi.fn().mockResolvedValue(undefined);
+    const scheduler = new TranslationScheduler(worker, { beforeDispatch: refresh });
+    scheduler.enqueue(createUnits('visible', 1, 50, 0));
+    scheduler.refresh();
+    const work = scheduler.waitForIdle();
+    expect(worker).not.toHaveBeenCalled();
+    release();
+    await work;
+    // Let any coalesced refresh complete; waiting itself must never enqueue another refresh.
+    await scheduler.waitForIdle();
+    expect(scheduler.isIdle).toBe(true);
+    expect(worker).toHaveBeenCalledTimes(1);
+    expect(refresh.mock.calls.length).toBeLessThan(6);
+  });
+
+  it('demotes stale queued viewport work and uses the latest visible reading order', async () => {
+    const batches: ScheduledTranslationBatch[] = [];
+    let release!: () => void;
+    const scheduler = new TranslationScheduler(
+      (batch) => {
+        batches.push(batch);
+        return batches.length === 1
+          ? new Promise<void>((resolve) => {
+              release = resolve;
+            })
+          : Promise.resolve();
+      },
+      { concurrency: 1 },
+    );
+    scheduler.enqueue(createUnits('background', 4, 100, 0));
+    const old = createUnits('visible', 1, 100, 10)[0];
+    const latest = { ...old, id: 'latest', order: 11, priority: 'background' as const };
+    scheduler.enqueue([old, latest]);
+    scheduler.updatePriorities([
+      { ...old, priority: 'background' },
+      { ...latest, priority: 'visible' },
+    ]);
+    release();
+    await scheduler.waitForIdle();
+    expect(batches[1].segments[0].unitId).toBe('latest');
+    expect(batches[1].priority).toBe('visible');
+    expect(batches[2].priority).toBe('background');
+  });
+
+  it('discards a pending viewport refresh after stop without dispatching its queued work', async () => {
+    let release!: () => void;
+    const worker = vi.fn().mockResolvedValue(undefined);
+    const scheduler = new TranslationScheduler(worker, {
+      beforeDispatch: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+    scheduler.enqueue(createUnits('visible', 4, 50, 0));
+    scheduler.stop();
+    release();
+    await scheduler.waitForIdle();
+    expect(worker).not.toHaveBeenCalled();
+  });
+
   it('starts the first item immediately but coalesces subsequent incremental arrivals', async () => {
     const sizes: number[] = [];
     const releases: Array<() => void> = [];
@@ -82,7 +191,7 @@ describe('TranslationScheduler', () => {
       readAhead: { maxCharacters: 1_800, maxItems: 4 },
       background: { maxCharacters: 2_400, maxItems: 4 },
     });
-    expect(INTERNAL_TRANSLATION_CONCURRENCY).toBe(6);
+    expect(DEFAULT_SETTINGS.translationConcurrency).toBe(6);
     for (const batch of dispatched) {
       const profile = TRANSLATION_BATCH_PROFILES[batch.priority];
       expect(batch.segments.length).toBeLessThanOrEqual(profile.maxItems);
@@ -115,23 +224,16 @@ describe('TranslationScheduler', () => {
       ...createUnits('readAhead', 17, 150, 100),
       ...createUnits('visible', 9, 200, 0),
     ]);
-    await vi.waitFor(() => expect(priorities).toHaveLength(6));
+    await vi.waitFor(() => expect(priorities).toHaveLength(3));
+    expect(priorities).toEqual(['visible', 'visible', 'visible']);
+    expect(maximumActive).toBe(3);
 
-    expect(priorities).toEqual([
-      'visible',
-      'visible',
-      'visible',
-      'readAhead',
-      'readAhead',
-      'readAhead',
-    ]);
-    expect(maximumActive).toBe(6);
-
-    while (releases.length > 0 || active > 0) {
-      releases.shift()?.();
-      await Promise.resolve();
+    const finished = scheduler.waitForIdle();
+    while (!scheduler.isIdle) {
+      releases.splice(0).forEach((release) => release());
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    await scheduler.waitForIdle();
+    await finished;
     expect(maximumActive).toBe(6);
     expect(priorities.indexOf('readAhead')).toBeLessThan(priorities.indexOf('background'));
   });

@@ -5,6 +5,7 @@ import { getSettings } from '../shared/settings-store';
 import { getErrorMessage, type PublicTranslatorSettings } from '../shared/messages';
 import type { TranslationProfile, TranslatorSettings } from '../shared/settings';
 import { AIConfiguration } from './ai-configuration';
+import { TranslationConcurrencySetting } from './translation-concurrency-setting';
 import { ReadingPreferencesPanel, SiteRulesPanel } from './preference-panels';
 
 type Section = 'api' | 'reading' | 'sites';
@@ -70,6 +71,7 @@ export function OptionsApp() {
           targetLanguage: value.targetLanguage,
           displayMode: value.displayMode,
           translateDynamicContent: value.translateDynamicContent,
+          translationConcurrency: value.translationConcurrency,
           autoTranslateSites: value.autoTranslateSites,
           excludedSites: value.excludedSites,
         },
@@ -158,6 +160,7 @@ export function OptionsApp() {
         ) : (
           <>
             <section hidden={section !== 'api'} aria-label="AI 配置">
+              <TranslationConcurrencySetting settings={settings} onSaved={acceptPublic} />
               <AIConfiguration
                 settings={settings}
                 onSaved={savedProfile}

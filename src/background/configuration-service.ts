@@ -5,6 +5,8 @@ import type {
 } from '../shared/messages';
 import {
   getActiveProfile,
+  isValidTranslationConcurrency,
+  MAX_TRANSLATION_CONCURRENCY,
   normalizeTranslationProfile,
   normalizeSiteRule,
   validateTranslationProfile,
@@ -93,6 +95,11 @@ export async function updateReadingPreferences(
         if (typeof patch.translateDynamicContent !== 'boolean') throw new Error('动态翻译设置无效');
         next.translateDynamicContent = patch.translateDynamicContent;
       }
+      if (patch.translationConcurrency !== undefined) {
+        if (!isValidTranslationConcurrency(patch.translationConcurrency))
+          throw new Error(`翻译并发数必须是 1–${MAX_TRANSLATION_CONCURRENCY} 的整数`);
+        next.translationConcurrency = patch.translationConcurrency;
+      }
       return next;
     }),
   );
@@ -144,6 +151,7 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
     targetLanguage: settings.targetLanguage,
     displayMode: settings.displayMode,
     translateDynamicContent: settings.translateDynamicContent,
+    translationConcurrency: settings.translationConcurrency,
     excludedSites: settings.excludedSites,
     autoTranslateSites: settings.autoTranslateSites,
   };

@@ -1,0 +1,53 @@
+{
+  "status": {
+    "mode": "segmented",
+    "phase": "complete",
+    "translated": 3,
+    "failed": 0,
+    "total": 3,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "fixture",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "needsRestart": false
+  },
+  "calls": 2,
+  "requests": [
+    {
+      "ids": [
+        "candidate-0:0"
+      ],
+      "texts": [
+        "Shared visible source."
+      ],
+      "streaming": true
+    },
+    {
+      "ids": [
+        "candidate-2:0"
+      ],
+      "texts": [
+        "Earlier background source."
+      ],
+      "streaming": true
+    }
+  ],
+  "maximumActive": 1,
+  "aborted": 0,
+  "records": [
+    {
+      "id": "background",
+      "text": "译文：Earlier background source."
+    },
+    {
+      "id": "duplicate",
+      "text": "译文：Shared visible source."
+    },
+    {
+      "id": "visible",
+      "text": "译文：Shared visible source."
+    }
+  ],
+  "errors": []
+}

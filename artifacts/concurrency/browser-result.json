@@ -1,0 +1,44 @@
+[
+  {
+    "limit": 1,
+    "savedValue": "1",
+    "status": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 32,
+      "failed": 0,
+      "total": 32,
+      "displayMode": "bilingual",
+      "context": {
+        "profileId": "fixture",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    },
+    "calls": 9,
+    "maximumActive": 1,
+    "aborted": 0,
+    "errors": []
+  },
+  {
+    "limit": 2,
+    "savedValue": "2",
+    "status": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 32,
+      "failed": 0,
+      "total": 32,
+      "displayMode": "bilingual",
+      "context": {
+        "profileId": "fixture",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    },
+    "calls": 9,
+    "maximumActive": 2,
+    "aborted": 0,
+    "errors": []
+  }
+]

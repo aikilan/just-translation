@@ -15,6 +15,54 @@ afterEach(() => {
   vi.mocked(testTranslatorConfiguration).mockReset();
 });
 describe('settings workspace', () => {
+  it('places concurrency only in AI settings and retains its saved value after reopening', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    await click(view.container, 'AI 配置');
+    const control = view.container.querySelector('[aria-label="单页翻译并发数"]');
+    expect(control?.closest('section[aria-label]')?.getAttribute('aria-label')).toBe('AI 配置');
+    expect(
+      view.container.querySelector('section[aria-label="阅读偏好"] [aria-label="单页翻译并发数"]'),
+    ).toBeNull();
+    await input(view.container, '模型', 'unsaved-model');
+    await input(view.container, '单页翻译并发数', '2');
+    expect(view.container.querySelector<HTMLInputElement>('[aria-label="模型"]')?.value).toBe(
+      'unsaved-model',
+    );
+    expect(send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'SAVE_TRANSLATION_PROFILE' }),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { translationConcurrency: 2 },
+    });
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="单页翻译并发数"]')?.value,
+    ).toBe('2');
+  });
+  it('retains a failed concurrency selection for retry in AI settings', async () => {
+    mockExtension();
+    view = await mount(<OptionsApp />);
+    await click(view.container, 'AI 配置');
+    vi.mocked<(request: RuntimeRequest) => Promise<unknown>>(
+      chrome.runtime.sendMessage,
+    ).mockResolvedValueOnce({ ok: false, error: '保存失败' });
+    await input(view.container, '单页翻译并发数', '1');
+    expect(
+      view.container.querySelector('section[aria-label="AI 配置"] [role="alert"]')?.textContent,
+    ).toContain('保存失败');
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="单页翻译并发数"]')?.value,
+    ).toBe('1');
+    await click(view.container, '重试保存');
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="单页翻译并发数"]')?.value,
+    ).toBe('1');
+  });
   it('retains the AI draft and gives reload guidance when the background returns null', async () => {
     const { storageSet } = mockExtension();
     view = await mount(<OptionsApp />);

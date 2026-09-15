@@ -1,0 +1,59 @@
+async (page) => {
+  const origin = 'http://127.0.0.1:54832';
+  const context = await page.context().browser().browserType().launchPersistentContext('/tmp/justranslate-viewport-acceptance-' + Date.now(), {
+    headless: true,
+    executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    args: ['--disable-extensions-except=/Users/jintao.xu/Documents/只是翻译/dist', '--load-extension=/Users/jintao.xu/Documents/只是翻译/dist'],
+    viewport: { width: 1100, height: 720 },
+  });
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await worker.evaluate(async (origin) => chrome.storage.local.set({ translatorSettings: {
+      profiles: [{ id: 'fixture', name: 'Local fixture', apiUrl: origin, apiKey: '', model: 'fixture', translationPrompt: 'Translate into {{targetLanguage}}.' }],
+      activeProfileId: 'fixture', targetLanguage: 'Simplified Chinese', displayMode: 'bilingual', translateDynamicContent: true, excludedSites: [], autoTranslateSites: [],
+    } }), origin);
+    const tab = await context.newPage();
+    const errors = [];
+    tab.on('pageerror', error => errors.push(error.message));
+    await tab.goto(origin + '/viewport');
+    await tab.evaluate(() => {
+      document.body.innerHTML = '<main>' + Array.from({ length: 100 }, (_, i) => '<p id="p' + i + '" style="min-height:120px;margin:0">Paragraph ' + i + ': readable technology text about solar energy and practical applications.</p>').join('') + '</main>';
+      document.querySelector('#p40').scrollIntoView();
+    });
+    const visible = () => tab.locator('p').evaluateAll(nodes => nodes.filter(n => n.getBoundingClientRect().bottom >= 0 && n.getBoundingClientRect().top <= innerHeight).map(n => Number(n.id.slice(1))));
+    const initialVisible = await visible();
+    const tabs = await worker.evaluate((origin) => chrome.tabs.query({ url: origin + '/*' }), origin);
+    const id = tabs[0].id;
+    const command = type => worker.evaluate(({ id, type }) => chrome.tabs.sendMessage(id, { type }), { id, type });
+    const stats = async () => (await tab.request.get(origin + '/stats')).json();
+    const pollStats = async (predicate) => {
+      const deadline = Date.now() + 45000;
+      while (Date.now() < deadline) {
+        const value = await stats();
+        if (predicate(value)) return value;
+        await tab.waitForTimeout(100);
+      }
+      throw new Error('Timed out: ' + JSON.stringify({ stats: await stats(), status: await command('GET_PAGE_STATUS') }));
+    };
+    await tab.request.get(origin + '/scenario?mode=slow');
+    await command('START_TRANSLATION');
+    const initial = await pollStats(value => value.calls >= 2);
+    const initialIds = initial.requests.flatMap(r => r.texts.map(t => Number(/Paragraph (\d+)/.exec(t)[1])));
+    if (!initialIds.every(i => initialVisible.includes(i))) throw new Error('Offscreen work dispatched before initial viewport settled: ' + JSON.stringify({ initialIds, initialVisible }));
+    const beforeScroll = await pollStats(value => value.active === 6);
+    await tab.evaluate(() => document.querySelector('#p80').scrollIntoView());
+    const scrolledVisible = await visible();
+    const afterScroll = await stats();
+    if (afterScroll.calls !== beforeScroll.calls) throw new Error('Scroll dispatched while all six slots were occupied');
+    const refilled = await pollStats(value => value.calls > beforeScroll.calls);
+    const refillIds = refilled.requests[beforeScroll.calls].texts.map(t => Number(/Paragraph (\d+)/.exec(t)[1]));
+    if (!refillIds.every(i => scrolledVisible.includes(i))) throw new Error('Released slot did not prefer the latest viewport: ' + JSON.stringify({ refillIds, scrolledVisible }));
+    await tab.waitForFunction(() => document.querySelectorAll('[data-justranslate-state="translated"]').length === 100, undefined, { timeout: 45000 });
+    const final = await stats();
+    const status = await command('GET_PAGE_STATUS');
+    await tab.screenshot({ path: '/Users/jintao.xu/Documents/只是翻译/artifacts/viewport-priority/translated-viewport.png' });
+    const allIds = final.requests.flatMap(r => r.texts.map(t => Number(/Paragraph (\d+)/.exec(t)[1])));
+    if (new Set(allIds).size !== 100 || allIds.length !== 100 || final.aborted !== 0 || final.maximumActive > 6 || errors.length) throw new Error('Completion invariant failed: ' + JSON.stringify({ final, errors }));
+    return { initialVisible, initialIds, beforeScroll: { calls: beforeScroll.calls, active: beforeScroll.active }, scrolledVisible, refillIds, final: { calls: final.calls, maximumActive: final.maximumActive, aborted: final.aborted, uniqueParagraphs: new Set(allIds).size }, status, errors };
+  } finally { await context.close(); }
+}

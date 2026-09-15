@@ -206,3 +206,16 @@ describe('isUrlAutoTranslated', () => {
     expect(isUrlAutoTranslated('https://www.ycombinator.com/', sites)).toBe(false);
   });
 });
+
+describe('translation concurrency preference', () => {
+  it('defaults to six and retains a saved limit', () => {
+    expect(mergeSettings(undefined).translationConcurrency).toBe(6);
+    expect(mergeSettings({ translationConcurrency: 2 }).translationConcurrency).toBe(2);
+  });
+  it.each([0, -1, 7, 1.5, '2', null, NaN, Infinity])(
+    'normalizes invalid stored concurrency %s',
+    (value) => {
+      expect(mergeSettings({ translationConcurrency: value }).translationConcurrency).toBe(6);
+    },
+  );
+});

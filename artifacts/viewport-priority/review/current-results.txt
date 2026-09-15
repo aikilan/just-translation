@@ -1,0 +1,66 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=true)
+{"dynamic":true,"waits":50,"guarded":true,"sent":[],"status":{"mode":"segmented","phase":"stopped","translated":0,"failed":0,"total":0,"displayMode":"bilingual","context":{"profileId":"one","targetLanguage":"Simplified Chinese"},"needsRestart":false}}
+
+ × src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=true) 78ms
+   → expected true to be false // Object.is equality
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=false)
+{"dynamic":false,"waits":50,"guarded":true,"sent":[],"status":{"mode":"segmented","phase":"stopped","translated":0,"failed":0,"total":0,"displayMode":"bilingual","context":{"profileId":"one","targetLanguage":"Simplified Chinese"},"needsRestart":false}}
+
+stdout | src/content/viewport-review.test.ts > viewport priority review reproductions > does not wait for an offscreen duplicate that is blocked behind deferred background text
+{"case":"offscreen duplicate","waits":50,"guarded":true,"sent":["Shared visible source."],"stuckStatus":{"mode":"segmented","phase":"translating","translated":1,"failed":0,"total":3,"displayMode":"bilingual","context":{"profileId":"one","targetLanguage":"Simplified Chinese"},"needsRestart":false}}
+
+ × src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=false) 56ms
+   → expected true to be false // Object.is equality
+ × src/content/viewport-review.test.ts > viewport priority review reproductions > does not wait for an offscreen duplicate that is blocked behind deferred background text 59ms
+   → expected true to be false // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=true)
+ FAIL  src/content/viewport-review.test.ts > viewport priority review reproductions > finishes after a visible source changes during candidate lookup (dynamic=false)
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/content/viewport-review.test.ts:115:21
+    113|     await work;
+    114|     console.log(JSON.stringify({ dynamic, waits, guarded, sent, status…
+    115|     expect(guarded).toBe(false);
+       |                     ^
+    116|     expect(instance.getStatus().phase).toBe('complete');
+    117|     expect(sent).toContain('Background source.');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/content/viewport-review.test.ts > viewport priority review reproductions > does not wait for an offscreen duplicate that is blocked behind deferred background text
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/content/viewport-review.test.ts:146:21
+    144|     await work;
+    145|     console.log(JSON.stringify({ case: 'offscreen duplicate', waits, g…
+    146|     expect(guarded).toBe(false);
+       |                     ^
+    147|     expect(instance.getStatus()).toMatchObject({ phase: 'complete', tr…
+    148|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  10:05:02
+   Duration  569ms (transform 66ms, setup 0ms, import 81ms, tests 194ms, environment 223ms)
+

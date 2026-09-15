@@ -15,6 +15,35 @@ import {
 } from './dom-translator';
 
 describe('DOM translation rendering', () => {
+  it('discovers viewport candidates without pruning offscreen parents or claiming their text', async () => {
+    document.body.innerHTML =
+      '<main><section><p id="offscreen">Deferred paragraph.</p><p id="visible">Visible paragraph.</p><p id="horizontal">Horizontally clipped paragraph.</p></section></main>';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return {
+        top: this.id === 'visible' || this.id === 'horizontal' ? 10 : -100,
+        bottom: this.id === 'visible' || this.id === 'horizontal' ? 40 : -50,
+        left: this.id === 'horizontal' ? 2000 : 0,
+        right: this.id === 'horizontal' ? 2200 : 300,
+      } as DOMRect;
+    });
+    try {
+      const elements: HTMLElement[] = [];
+      for await (const slice of discoverTranslatableElements(document.body, {
+        isVisible: () => true,
+        viewportOnly: true,
+      }))
+        elements.push(...slice);
+      expect(elements.map((e) => e.id)).toEqual(['visible']);
+      expect(
+        collectTranslatableElements(document.body, { isVisible: () => true }).map((e) => e.id),
+      ).toEqual(['offscreen', 'visible', 'horizontal']);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('rechecks original reading units while ignoring extension feedback', () => {
     document.body.innerHTML =
       '<main><p>First original paragraph.</p><p>Second original paragraph.</p></main>';

@@ -9,6 +9,7 @@ const SETTINGS: PublicTranslatorSettings = {
   profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
+  translationConcurrency: 6,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: ['news.ycombinator.com'],
