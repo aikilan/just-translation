@@ -27,9 +27,14 @@ import {
 
 type TranslationCommand = Extract<
   PageCommand['type'],
-  'START_TRANSLATION' | 'STOP_TRANSLATION' | 'RESTORE_PAGE' | 'RESTART_TRANSLATION'
+  | 'START_TRANSLATION'
+  | 'STOP_TRANSLATION'
+  | 'RESTORE_PAGE'
+  | 'RESTART_TRANSLATION'
+  | 'START_FULL_DOCUMENT_TRANSLATION'
 >;
 const IDLE: PageTranslationStatus = {
+  mode: 'segmented',
   phase: 'idle',
   total: 0,
   translated: 0,
@@ -166,34 +171,43 @@ export function PopupApp() {
   const needsRestart = status.context ? contextChanged : Boolean(status.needsRestart);
   const saving = Object.values(feedback).some((value) => value?.status === 'saving');
   const canTranslate = Boolean(page?.available && settings?.configured && !excluded);
+  const fullDocument = status.mode === 'full-document';
   const action = needsRestart
     ? '用新设置重新翻译'
     : status.phase === 'translating'
       ? '停止翻译'
-      : status.failed > 0
-        ? '返回网页重试'
-        : status.phase === 'stopped'
-          ? '继续翻译'
-          : status.phase === 'complete'
-            ? '翻译新内容'
-            : status.phase === 'error'
-              ? '重新翻译'
-              : '翻译此网页';
+      : fullDocument
+        ? '重新全文翻译'
+        : status.failed > 0
+          ? '返回网页重试'
+          : status.phase === 'stopped'
+            ? '继续翻译'
+            : status.phase === 'complete'
+              ? '翻译新内容'
+              : status.phase === 'error'
+                ? '重新翻译'
+                : '翻译此网页';
   const title = needsRestart
     ? '新设置已就绪'
     : status.phase === 'translating'
-      ? '正在翻译'
-      : status.failed > 0
-        ? '部分段落未完成'
-        : status.phase === 'complete'
-          ? status.total
-            ? '翻译完成'
-            : '未发现需要翻译的内容'
-          : status.phase === 'stopped'
-            ? '已停止'
-            : status.phase === 'error'
-              ? '暂时无法翻译'
-              : '准备翻译';
+      ? fullDocument
+        ? { collecting: '收集全文', requesting: '全文翻译中', applying: '回填译文' }[
+            status.stage ?? 'collecting'
+          ]
+        : '正在翻译'
+      : fullDocument && status.phase === 'error'
+        ? '全文翻译失败'
+        : !fullDocument && status.failed > 0
+          ? '部分段落未完成'
+          : status.phase === 'complete'
+            ? status.total
+              ? '翻译完成'
+              : '未发现需要翻译的内容'
+            : status.phase === 'stopped'
+              ? '已停止'
+              : status.phase === 'error'
+                ? '暂时无法翻译'
+                : '准备翻译';
 
   return (
     <main className="popup-shell">
@@ -275,13 +289,15 @@ export function PopupApp() {
             <p className="status-description" role="status">
               {needsRestart
                 ? `当前译文保留${status.context ? `（${languageLabel(status.context.targetLanguage)}）` : ''}，重新翻译后应用新设置。`
-                : status.total > 0
-                  ? `已翻译 ${status.translated} / ${status.total} 个段落${status.failed ? ` · ${status.failed} 个失败` : ''}`
-                  : status.phase === 'translating'
-                    ? '正在查找需要翻译的内容…'
-                    : '译文将显示在原文下方。'}
+                : fullDocument && status.phase === 'translating'
+                  ? `${status.total ? `共 ${status.total} 个段落，` : ''}全文完成后统一显示译文。`
+                  : status.total > 0
+                    ? `已翻译 ${status.translated} / ${status.total} 个段落${status.failed ? ` · ${status.failed} 个失败` : ''}`
+                    : status.phase === 'translating'
+                      ? '正在查找需要翻译的内容…'
+                      : '译文将显示在原文下方。'}
             </p>
-            {status.phase === 'translating' && status.total > 0 ? (
+            {!fullDocument && status.phase === 'translating' && status.total > 0 ? (
               <div
                 className="progress-track"
                 role="progressbar"
@@ -301,6 +317,7 @@ export function PopupApp() {
               onClick={() => {
                 if (needsRestart) void run('RESTART_TRANSLATION');
                 else if (status.phase === 'translating') void run('STOP_TRANSLATION');
+                else if (fullDocument) void run('START_FULL_DOCUMENT_TRANSLATION');
                 else if (status.failed > 0) window.close();
                 else void run('START_TRANSLATION');
               }}
@@ -315,7 +332,11 @@ export function PopupApp() {
               {action}
             </button>
             {status.failed ? (
-              <p className="retry-guidance">在网页中点击失败段落的“重试”，已完成的译文会保留。</p>
+              <p className="retry-guidance">
+                {fullDocument
+                  ? '原文已保留，重试会重新提交全文。'
+                  : '在网页中点击失败段落的“重试”，已完成的译文会保留。'}
+              </p>
             ) : null}
             {status.error ? (
               <details className="popup-error" open>

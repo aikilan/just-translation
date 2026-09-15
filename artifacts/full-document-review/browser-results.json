@@ -1,0 +1,56 @@
+{
+  "date": "2026-09-14",
+  "browser": "Chromium 153.0.8010.12",
+  "profile": "/tmp/just-translate-review-20260914",
+  "fixture": "http://127.0.0.1:61861",
+  "extension": "fdpjebbbgkidgmeneiclligmbibneelp",
+  "navigationInterval": {
+    "intervalMs": 4,
+    "ticks": 949,
+    "originalMainTextUnchanged": true,
+    "httpRequests": 1,
+    "requestUnitCounts": [106],
+    "phase": "error",
+    "error": "正文已变化，请重新全文翻译",
+    "translated": 0,
+    "hiddenOriginals": 0
+  },
+  "navigationAnimationFrame": {
+    "ticksOverFourSeconds": 240,
+    "httpRequests": 1,
+    "requestUnitCounts": [606],
+    "phase": "error",
+    "error": "正文已变化，请重新全文翻译",
+    "translated": 0,
+    "controlAfterStoppingAnimation": {
+      "httpRequests": 1,
+      "requestUnitCounts": [606],
+      "phase": "complete",
+      "translated": 606,
+      "failed": 0
+    }
+  },
+  "structuralChange": {
+    "initialText": "First paragraph. Second paragraph.",
+    "replacementHtml": "<p>First paragraph. </p><p>Second paragraph.</p>",
+    "httpRequests": 1,
+    "requestUnitCounts": [2],
+    "actualParagraphs": 3,
+    "phase": "complete",
+    "translated": 2,
+    "hiddenOriginals": 2,
+    "requestTexts": [
+      "First paragraph. Second paragraph.",
+      "Another reading paragraph."
+    ],
+    "controlAfterRestoreAndFreshCollection": {
+      "httpRequests": 1,
+      "requestUnitCounts": [3],
+      "requestTexts": [
+        "First paragraph.",
+        "Second paragraph.",
+        "Another reading paragraph."
+      ]
+    }
+  }
+}

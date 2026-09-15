@@ -1,0 +1,52 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/dom-translator.test.ts (28 tests | 3 failed) 402ms
+     × rechecks original reading units while ignoring extension feedback 34ms
+     × inspects unanchored prose without inserting wrappers or dropping excluded metadata 2ms
+     × re-evaluates child paragraphs inside a marked source and keeps inline wrappers transparent 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/dom-translator.test.ts > DOM translation rendering > rechecks original reading units while ignoring extension feedback
+TypeError: collectOriginalReadingUnits is not a function
+ ❯ src/content/dom-translator.test.ts:25:12
+     23|     renderTranslationPending(sources[0], 'first');
+     24|     renderTranslation(sources[1], '第二段译文。');
+     25|     expect(collectOriginalReadingUnits(document.body, options)).toEqua…
+       |            ^
+     26|     expect(collectTranslatableElements(document.body, { isVisible: () …
+     27|     expect(sources.map(getElementSourceText)).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/content/dom-translator.test.ts > DOM translation rendering > inspects unanchored prose without inserting wrappers or dropping excluded metadata
+TypeError: collectOriginalReadingUnits is not a function
+ ❯ src/content/dom-translator.test.ts:39:19
+     37|     const observer = new MutationObserver(() => {});
+     38|     observer.observe(document.body, {subtree:true,childList:true,attri…
+     39|     const units = collectOriginalReadingUnits(document.body, {isVisibl…
+       |                   ^
+     40|     expect(units).toHaveLength(3);
+     41|     expect(document.body.innerHTML).toBe(html);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/content/dom-translator.test.ts > DOM translation rendering > re-evaluates child paragraphs inside a marked source and keeps inline wrappers transparent
+TypeError: collectOriginalReadingUnits is not a function
+ ❯ src/content/dom-translator.test.ts:53:12
+     51|     source.querySelector('[data-justranslate-source-content]')!.innerH…
+     52|     const html = document.body.innerHTML;
+     53|     expect(collectOriginalReadingUnits(document.body, options)).toEqua…
+       |            ^
+     54|     expect(document.body.innerHTML).toBe(html);
+     55|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 25 passed (28)
+   Start at  14:20:32
+   Duration  787ms (transform 43ms, setup 0ms, import 54ms, tests 402ms, environment 244ms)
+

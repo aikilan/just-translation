@@ -1,4 +1,4 @@
-import { translateBatch } from '../shared/openai-client';
+import { translateBatch, translateFullDocument } from '../shared/openai-client';
 import { AbortableRequestRegistry } from './request-registry';
 import { ProviderRequestQueue } from './provider-request-queue';
 import { ensurePageTranslationMenu, handlePageTranslationMenuClick } from './context-menu';
@@ -132,10 +132,12 @@ async function handleRuntimeRequest(
         return { ok: true, data: await readPublicSettings() };
       }
       case 'BEGIN_TRANSLATION_SESSION': {
+        if (request.mode !== 'segmented' && request.mode !== 'full-document')
+          throw new Error('翻译模式无效');
         const identity = getSenderPageIdentity(sender, request.sessionId);
         const settings = await getConfiguredSettings(request.profileId);
         await assertCurrentDocument(identity);
-        await translationSessions.create({ ...identity, settings });
+        await translationSessions.create({ ...identity, settings, mode: request.mode });
         try {
           await assertCurrentDocument(identity);
         } catch (error) {
@@ -157,6 +159,7 @@ async function handleRuntimeRequest(
       }
       case 'RESOLVE_TRANSLATION_CANDIDATES': {
         const session = await getTranslationSession(sender, request.sessionId);
+        assertSessionMode(session, 'segmented');
         const context = getCacheContext(session);
         return {
           ok: true,
@@ -165,6 +168,7 @@ async function handleRuntimeRequest(
       }
       case 'STORE_TRANSLATION_CACHE': {
         const session = await getTranslationSession(sender, request.sessionId);
+        assertSessionMode(session, 'segmented');
         const context = getCacheContext(session);
         try {
           await translationCache.putMany(context, request.entries);
@@ -174,6 +178,47 @@ async function handleRuntimeRequest(
         }
         return { ok: true, data: undefined };
       }
+      case 'TRANSLATE_FULL_DOCUMENT': {
+        const identity = getSenderPageIdentity(sender, request.sessionId);
+        const requestKey = `${getRequestPrefix(identity)}full-document`;
+        // Register before asynchronous preflight: stop/navigation also cancel work awaiting storage.
+        const result = await activeRequests.run(
+          requestKey,
+          async (signal) => {
+            const session = await getTranslationSession(sender, request.sessionId);
+            signal.throwIfAborted();
+            assertSessionMode(session, 'full-document');
+            // One admitted attempt owns the entire document; queue time consumes no HTTP timeout.
+            const translations = await translateFullDocument(
+              session.settings,
+              request.units,
+              fetch,
+              signal,
+              {
+                scheduleAttempt: (attempt) =>
+                  providerRequests.run(
+                    session.settings.apiUrl,
+                    'visible',
+                    signal,
+                    120_000,
+                    async (attemptSignal) => {
+                      await assertCurrentDocument(session);
+                      attemptSignal.throwIfAborted();
+                      return attempt(attemptSignal);
+                    },
+                    requestKey,
+                  ),
+                onRateLimit: (delay) => providerRequests.defer(session.settings.apiUrl, delay),
+              },
+            );
+            await assertCurrentDocument(session);
+            signal.throwIfAborted();
+            return translations;
+          },
+          0,
+        );
+        return { ok: true, data: result };
+      }
       case 'TRANSLATE_BATCH': {
         const identity = getSenderPageIdentity(sender, request.sessionId);
         const requestKey = `${getRequestPrefix(identity)}${request.batchId}`;
@@ -181,6 +226,7 @@ async function handleRuntimeRequest(
         batchPriorities.set(requestKey, batchState);
         try {
           const session = await getTranslationSession(sender, request.sessionId);
+          assertSessionMode(session, 'segmented');
           if (batchState.cancelled) throw new Error('API 请求已取消');
           const documentId = session.documentId;
           const publish = (data: Pick<TranslationBatchProgress, 'translations' | 'timing'>) => {
@@ -297,6 +343,13 @@ async function getConfiguredSettings(profileId: string) {
     throw new Error('请先在设置页完成 API 配置');
   }
   return { ...profile, targetLanguage: settings.targetLanguage };
+}
+
+function assertSessionMode(
+  session: TranslationSessionContext,
+  mode: TranslationSessionContext['mode'],
+): void {
+  if (session.mode !== mode) throw new Error('翻译命令与当前会话模式不一致');
 }
 
 function getCacheContext(session: TranslationSessionContext): TranslationCacheContext {

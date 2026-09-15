@@ -134,16 +134,44 @@ export function collectTranslatableElements(
   return [...iterateReadingElements(root, options)].filter((element) => element !== null);
 }
 
+/** An added prose run has no original anchor yet; inspection must report it without writing DOM. */
+export interface UnanchoredReadingRun {
+  nodes: readonly Node[];
+}
+export type OriginalReadingUnit = HTMLElement | UnanchoredReadingRun;
+
+/** Reuses the same reading rules, but treats our content wrappers as transparent and never writes. */
+export function collectOriginalReadingUnits(
+  root: ParentNode,
+  options: CollectionOptions = {},
+): OriginalReadingUnit[] {
+  return [...iterateReadingElements(root, options, true)].filter((unit) => unit !== null);
+}
+
+export function discoverOriginalReadingUnits(
+  root: ParentNode,
+  options: DiscoveryOptions = {},
+): AsyncGenerator<OriginalReadingUnit[], void> {
+  return discoverReadingUnits(iterateReadingElements(root, options, true), options);
+}
+
 /** Emits a first microbatch without traversing the rest of the page; traversal itself is budgeted. */
-export async function* discoverTranslatableElements(
+export function discoverTranslatableElements(
   root: ParentNode,
   options: DiscoveryOptions = {},
 ): AsyncGenerator<HTMLElement[], void> {
-  let chunk: HTMLElement[] = [];
+  return discoverReadingUnits(iterateReadingElements(root, options), options);
+}
+
+async function* discoverReadingUnits<T>(
+  iterator: Generator<T | null>,
+  options: DiscoveryOptions,
+): AsyncGenerator<T[], void> {
+  let chunk: T[] = [];
   let startedAt = performance.now();
   let visited = 0;
   let maximum = 4;
-  for (const element of iterateReadingElements(root, options)) {
+  for (const element of iterator) {
     if (options.signal?.aborted) return;
     if (element) chunk.push(element);
     visited += 1;
@@ -163,10 +191,25 @@ export async function* discoverTranslatableElements(
 }
 
 /** Postorder traversal claims leaves before ancestors without materializing all reading candidates. */
+function iterateReadingElements(
+  root: ParentNode,
+  options: CollectionOptions,
+  readOnly?: false,
+): Generator<HTMLElement | null>;
+function iterateReadingElements(
+  root: ParentNode,
+  options: CollectionOptions,
+  readOnly: true,
+): Generator<OriginalReadingUnit | null>;
 function* iterateReadingElements(
   root: ParentNode,
   options: CollectionOptions,
-): Generator<HTMLElement | null> {
+  readOnly = false,
+): Generator<OriginalReadingUnit | null> {
+  // Inspection is a fresh observation. Arbitrary host attributes/CSS may change fragment
+  // eligibility without hitting the incremental cache's ordinary translation invalidators.
+  const ownerDocument = root instanceof Document ? root : root.ownerDocument;
+  if (readOnly && ownerDocument) getSourceAnalysisCache(ownerDocument).values = new WeakMap();
   const isVisible = options.isVisible ?? isElementVisible;
   const siteRule = getTranslationSiteRule(options.url);
   const scopes = siteRule ? [root] : findPreferredReadingScopes(root, isVisible);
@@ -204,14 +247,31 @@ function* iterateReadingElements(
             continue;
           }
           seen.add(element);
-          if (element.closest(`[${SOURCE_ATTRIBUTE}]`)) {
+          if (!readOnly && element.closest(`[${SOURCE_ATTRIBUTE}]`)) {
             stack.pop();
             if (stack.length) stack[stack.length - 1].owned = true;
             yield null;
             continue;
           }
-          if (!siteRule) wrapInlineReadingRuns(element);
-          current.children = Array.from(element.children);
+          if (readOnly) {
+            const children = originalChildNodes(element);
+            const runs = siteRule ? [] : inlineReadingRuns(element, children);
+            const runNodes = new Set(runs.flat());
+            for (const nodes of runs) {
+              const analysis = yield* analyzeFragments(element, nodes);
+              // Discovery would create a span for this run. Report the same unit without inserting it.
+              if (hasReadableText('SPAN', analysis.text)) {
+                current.owned = true;
+                yield { nodes };
+              }
+            }
+            current.children = children.filter(
+              (node): node is Element => node instanceof Element && !runNodes.has(node),
+            );
+          } else {
+            if (!siteRule) wrapInlineReadingRuns(element);
+            current.children = Array.from(element.children);
+          }
           yield null;
         }
         const child = current.children[current.next++];
@@ -234,8 +294,8 @@ function* iterateReadingElements(
         if (!matches || hasLayoutRisk(element)) continue;
         if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
         const analysis = yield* analyzeSourceFragments(element);
-        if (!hasReadableText(element, analysis.text)) {
-          unwrapReadingRun(element);
+        if (!hasReadableText(element.tagName, analysis.text)) {
+          if (!readOnly) unwrapReadingRun(element);
           continue;
         }
         if (stack.length) stack[stack.length - 1].owned = true;
@@ -267,19 +327,30 @@ function hasInlineReadingOwner(element: HTMLElement): boolean {
 /** Mixed containers need disjoint reading units: a nested paragraph must not swallow its
  * surrounding raw prose. Reversible anchors move the original nodes (never clone links/events). */
 function wrapInlineReadingRuns(container: HTMLElement): void {
+  for (const nodes of inlineReadingRuns(container, Array.from(container.childNodes))) {
+    const anchor = container.ownerDocument.createElement('span');
+    anchor.setAttribute(READING_RUN_ATTRIBUTE, '');
+    container.insertBefore(anchor, nodes[0]);
+    anchor.append(...nodes);
+  }
+}
+
+/** Grouping is shared by materializing discovery and read-only inspection, including raw prose. */
+function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
   if (
     !container.matches('main,article,section,div,li,td,th,blockquote') ||
     hasLayoutRisk(container)
   )
-    return;
+    return [];
   const blockSelector = `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,header,ul,ol,table,dl,[${READING_RUN_ATTRIBUTE}]`;
   const isBoundary = (node: Node) =>
     node instanceof Element &&
     (node.matches(blockSelector) || (shouldSkipElement(node) && !node.matches(PROTECTED_SELECTOR)));
-  if (!Array.from(container.children).some(isBoundary)) return;
+  if (!children.some(isBoundary)) return [];
+  const runs: Node[][] = [];
   let run: Node[] = [];
   const flush = () => {
-    // A lone link is already a reading node. Only create an anchor when prose would otherwise be lost.
+    // A lone link remains its own reading node; only prose needs a synthetic anchor.
     const ownsProse = run.some(
       (node) =>
         (node.nodeType === 3 && /\p{L}/u.test(node.textContent ?? '')) ||
@@ -288,20 +359,25 @@ function wrapInlineReadingRuns(container: HTMLElement): void {
           !node.matches(PROTECTED_SELECTOR) &&
           /\p{L}/u.test(node.textContent ?? '')),
     );
-    if (ownsProse) {
-      const anchor = container.ownerDocument.createElement('span');
-      anchor.setAttribute(READING_RUN_ATTRIBUTE, '');
-      container.insertBefore(anchor, run[0]);
-      anchor.append(...run);
-      // Fragment analysis is performed by the budgeted walker, never synchronously here.
-    }
+    if (ownsProse) runs.push(run);
     run = [];
   };
-  for (const node of Array.from(container.childNodes)) {
+  for (const node of children) {
     if (isBoundary(node)) flush();
     else run.push(node);
   }
   flush();
+  return runs;
+}
+
+/** Preserve host nodes and ignore only extension-owned feedback/container indirection. */
+function originalChildNodes(element: HTMLElement): Node[] {
+  return Array.from(element.childNodes).flatMap((node) => {
+    if (node instanceof HTMLElement && node.hasAttribute(TRANSLATION_ATTRIBUTE)) return [];
+    if (node instanceof HTMLElement && node.hasAttribute(SOURCE_CONTENT_ATTRIBUTE))
+      return originalChildNodes(node);
+    return [node];
+  });
 }
 
 function unwrapReadingRun(source: HTMLElement): void {
@@ -431,12 +507,27 @@ function* analyzeSourceFragments(element: HTMLElement): Generator<null, SourceAn
   const sourceContent = element.querySelector<HTMLElement>(
     `:scope > [${SOURCE_CONTENT_ATTRIBUTE}]`,
   );
-  const root = sourceContent ?? element;
+  const analysis = yield* analyzeFragments(
+    element,
+    Array.from((sourceContent ?? element).childNodes),
+    sourceContent ?? undefined,
+  );
+  cache.drain();
+  // Async discovery may overlap mutation; only cache a reading made at the current revision.
+  if (cache.revision === revision) cache.values.set(element, analysis);
+  return analysis;
+}
+
+function* analyzeFragments(
+  element: HTMLElement,
+  nodes: readonly Node[],
+  sourceContent?: HTMLElement,
+): Generator<null, SourceAnalysis> {
   const protectedText = new Map<string, string>();
   const characterCounts = new Map<HTMLElement, number>();
   const parts: string[] = [];
-  const stack = Array.from(root.childNodes).reverse();
-  const literalText = root.textContent ?? '';
+  const stack = [...nodes].reverse();
+  const literalText = nodes.map((node) => node.textContent ?? '').join('');
   let markerIndex = 0;
   while (stack.length) {
     const node = stack.pop()!;
@@ -484,10 +575,7 @@ function* analyzeSourceFragments(element: HTMLElement): Generator<null, SourceAn
     protectedText,
     dominant,
   };
-  cache.drain();
-  // An async walk can overlap a page mutation. Do not reuse that snapshot; the controller's
-  // source-current check performs a fresh analysis before dispatch/commit and triggers rescan.
-  if (cache.revision === revision) cache.values.set(element, analysis);
+
   return analysis;
 }
 
@@ -647,11 +735,11 @@ function getTranslationElement(source: HTMLElement): HTMLElement | null {
   return source.querySelector<HTMLElement>(`:scope > [${TRANSLATION_ATTRIBUTE}]`);
 }
 
-function hasReadableText(element: HTMLElement, text: string): boolean {
+function hasReadableText(tagName: string, text: string): boolean {
   text = text.replace(PROTECTED_MARKER_PATTERN, '').trim();
   if (!text || !/\p{L}/u.test(text)) return false;
   if (isMetadataOnly(text) || isCodeLikeText(text)) return false;
-  const minimumLength = ['DIV', 'ARTICLE', 'SECTION'].includes(element.tagName) ? 20 : 2;
+  const minimumLength = ['DIV', 'ARTICLE', 'SECTION'].includes(tagName) ? 20 : 2;
   return text.length >= minimumLength;
 }
 

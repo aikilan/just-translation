@@ -20,6 +20,7 @@ import {
   type TranslationSessionInfo,
 } from '../shared/messages';
 import { TranslationMetrics, type TranslationDiagnostics } from '../shared/translation-metrics';
+import { FullDocumentTranslationTask } from './full-document-task';
 import { RenderTasks } from './render-tasks';
 import { isUrlExcluded, type DisplayMode } from '../shared/settings';
 import {
@@ -153,7 +154,9 @@ interface ActiveTranslationPass {
 }
 
 export class TranslationController {
+  private fullDocument: FullDocumentTranslationTask | undefined;
   private status: PageTranslationStatus = {
+    mode: 'segmented',
     phase: 'idle',
     translated: 0,
     failed: 0,
@@ -187,7 +190,7 @@ export class TranslationController {
   >();
 
   getDiagnostics(): TranslationDiagnostics {
-    return this.metrics.snapshot();
+    return this.fullDocument?.getDiagnostics() ?? this.metrics.snapshot();
   }
 
   /** Accepts events only for an active request in this document's current translation session. */
@@ -236,17 +239,29 @@ export class TranslationController {
   }
 
   getStatus(): PageTranslationStatus {
-    return { ...this.status };
+    return this.fullDocument?.getStatus() ?? { ...this.status };
   }
 
   async start(): Promise<void> {
+    if (this.fullDocument) this.restore();
     return this.startTranslation();
+  }
+
+  /** Full mode always replaces the previous snapshot; repeated starts during work are ignored. */
+  async startFullDocument(): Promise<void> {
+    if (this.fullDocument?.getStatus().phase === 'translating') return;
+    this.restore();
+    const task = new FullDocumentTranslationTask(() => this.readValidSettings());
+    this.fullDocument = task;
+    await task.start();
   }
 
   /** Explicitly discards the old page session before translating with current preferences. */
   async restart(): Promise<void> {
+    const fullDocument = this.fullDocument !== undefined;
     this.restore();
-    await this.start();
+    if (fullDocument) await this.startFullDocument();
+    else await this.start();
   }
 
   private async startTranslation(scopeRoots?: readonly HTMLElement[]): Promise<void> {
@@ -342,6 +357,7 @@ export class TranslationController {
 
   /** Retries only the selected failed source and ignores duplicate activation while pending. */
   async retry(source: HTMLElement): Promise<void> {
+    if (this.fullDocument) return this.startFullDocument();
     const record = this.records.get(source);
     if (!record || record.phase !== 'error') return;
     if (!source.isConnected) {
@@ -502,6 +518,10 @@ export class TranslationController {
   }
 
   stop(): void {
+    if (this.fullDocument) {
+      this.fullDocument.stop();
+      return;
+    }
     const activeSessionIds = [
       ...(this.mainSessionId ? [this.mainSessionId] : []),
       ...this.retrySessionIds,
@@ -530,27 +550,34 @@ export class TranslationController {
   }
 
   restore(): void {
+    const displayMode = this.getStatus().displayMode;
     this.stop();
+    this.fullDocument = undefined;
     restoreDocument();
     this.records.clear();
     this.nextUnitNumber = 0;
     this.status = {
+      mode: 'segmented',
       phase: 'idle',
       translated: 0,
       failed: 0,
       total: 0,
-      displayMode: this.status.displayMode,
+      displayMode,
     };
   }
 
   toggle(): void {
-    if (this.status.phase === 'idle' || this.status.phase === 'stopped') void this.start();
-    else this.restore();
+    const status = this.getStatus();
+    if (status.phase === 'idle' || status.phase === 'stopped') {
+      if (this.fullDocument) void this.startFullDocument();
+      else void this.start();
+    } else this.restore();
   }
 
   setDisplayMode(displayMode: DisplayMode): void {
     this.status.displayMode = displayMode;
-    setDocumentDisplayMode(displayMode);
+    if (this.fullDocument) this.fullDocument.setDisplayMode(displayMode);
+    else setDocumentDisplayMode(displayMode);
   }
 
   private async translateUnprocessedElements(
@@ -1460,6 +1487,7 @@ export class TranslationController {
     const response = await sendPreflightMessage<TranslationSessionInfo>(
       {
         type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'segmented',
         sessionId,
         profileId,
       },

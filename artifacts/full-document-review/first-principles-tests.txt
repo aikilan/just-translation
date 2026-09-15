@@ -1,0 +1,122 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/full-document-protocol-review.test.ts (3 tests | 1 failed) 34ms
+   × rejects an ambiguous final payload: {"translations":[{"id":"p","text":"译文"}],"translations":[]} 31ms
+ ❯ src/content/full-document-review.test.ts (6 tests | 5 failed) 342ms
+     × keeps a user full-document task when the startup auto-translate settings response arrives late 77ms
+     × accepts an unchanged article while an excluded navigation element changes its class 69ms
+     × rejects a source which is split into distinct paragraphs without changing flattened text 59ms
+     × does not auto-start again after a user explicitly restored the page 68ms
+     × keeps a manual full-document intent before its own settings preflight finishes 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > keeps a user full-document task when the startup auto-translate settings response arrives late
+AssertionError: {"mode":"segmented","phase":"complete","translated":6,"failed":0,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"needsRestart":false}: expected 'segmented' to be 'full-document' // Object.is equality
+
+Expected: "full-document"
+Received: "segmented"
+
+ ❯ src/content/full-document-review.test.ts:100:81
+     98|     finish();
+     99|     await work;
+    100|     expect(controller.getStatus().mode, JSON.stringify(controller.getS…
+       |                                                                                 ^
+    101|     expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')…
+    102|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > accepts an unchanged article while an excluded navigation element changes its class
+AssertionError: {"mode":"full-document","phase":"error","translated":0,"failed":6,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"error":"正文已变化，请重新全文翻译","tick":4}: expected 'error' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "error"
+
+ ❯ src/content/full-document-review.test.ts:120:95
+    118|     after.querySelectorAll('[data-justranslate-translation]').forEach(…
+    119|     expect(after.textContent).toBe(original);
+    120|     expect(controller.getStatus().phase, JSON.stringify({ ...controlle…
+       |                                                                                               ^
+    121|     expect(resultNodes()).toHaveLength(6);
+    122|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > rejects a source which is split into distinct paragraphs without changing flattened text
+AssertionError: {"mode":"full-document","phase":"complete","translated":2,"failed":0,"total":2,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"}}: expected 'complete' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "complete"
+
+ ❯ src/content/full-document-review.test.ts:131:82
+    129|     finish();
+    130|     await work;
+    131|     expect(controller.getStatus().phase, JSON.stringify(controller.get…
+       |                                                                                  ^
+    132|     expect(resultNodes()).toHaveLength(0);
+    133|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/content/full-document-review.test.ts > first principles counterexamples and controls > does not auto-start again after a user explicitly restored the page
+AssertionError: {"mode":"segmented","phase":"complete","translated":6,"failed":0,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"needsRestart":false}: expected 'complete' to be 'idle' // Object.is equality
+
+Expected: "idle"
+Received: "complete"
+
+ ❯ src/content/full-document-review.test.ts:149:82
+    147|     finish();
+    148|     await work;
+    149|     expect(controller.getStatus().phase, JSON.stringify(controller.get…
+       |                                                                                  ^
+    150|     expect(resultNodes()).toHaveLength(0);
+    151|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/content/full-document-review.test.ts > first principles counterexamples and controls > keeps a manual full-document intent before its own settings preflight finishes
+AssertionError: {"mode":"segmented","phase":"complete","translated":6,"failed":0,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"needsRestart":false}: expected 'segmented' to be 'full-document' // Object.is equality
+
+Expected: "full-document"
+Received: "segmented"
+
+ ❯ src/content/full-document-review.test.ts:173:81
+    171|     resolveFullPreflight({ ok: true, data: settings });
+    172|     await work;
+    173|     expect(controller.getStatus().mode, JSON.stringify(controller.getS…
+       |                                                                                 ^
+    174|   });
+    175|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/shared/full-document-protocol-review.test.ts > rejects an ambiguous final payload: {"translations":[{"id":"p","text":"译文"}],"translations":[]}
+AssertionError: promise resolved "{ p: '译文' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "p": "译文",
+  }
+
+ ❯ src/shared/full-document-protocol-review.test.ts:11:94
+      9| ])('rejects an ambiguous final payload: %s', async (payload) => {
+     10|   const fetcher = vi.fn().mockResolvedValue(new Response(contentEvent(…
+     11|   await expect(translateFullDocument(settings, [{id:'p',text:'Source p…
+       |                                                                                              ^
+     12| });
+     13|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  6 failed | 36 passed (42)
+   Start at  10:59:16
+   Duration  2.89s (transform 281ms, setup 0ms, import 408ms, tests 2.80s, environment 843ms)
+

@@ -22,6 +22,7 @@ describe('tryStartAutomaticTranslation', () => {
       await tryStartAutomaticTranslation(
         { start },
         'https://news.ycombinator.com/news',
+        new AbortController().signal,
         vi.fn().mockResolvedValue({ ok: true, data: { ...SETTINGS, excludedSites: [rule] } }),
       );
       expect(start).not.toHaveBeenCalled();
@@ -33,6 +34,7 @@ describe('tryStartAutomaticTranslation', () => {
     await tryStartAutomaticTranslation(
       { start },
       'https://news.ycombinator.com/news?p=2',
+      new AbortController().signal,
       vi.fn().mockResolvedValue({ ok: true, data: SETTINGS }),
     );
 
@@ -45,11 +47,13 @@ describe('tryStartAutomaticTranslation', () => {
     await tryStartAutomaticTranslation(
       { start },
       'https://example.com/',
+      new AbortController().signal,
       vi.fn().mockResolvedValue({ ok: true, data: SETTINGS }),
     );
     await tryStartAutomaticTranslation(
       { start },
       'https://news.ycombinator.com/news',
+      new AbortController().signal,
       vi.fn().mockResolvedValue({ ok: false, error: 'worker unavailable' }),
     );
 

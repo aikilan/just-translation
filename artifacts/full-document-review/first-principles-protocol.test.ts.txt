@@ -1,0 +1,18 @@
+import { expect, it, vi } from 'vitest';
+import { translateFullDocument } from './openai-client';
+import { contentEvent, STREAM_END } from '../test-utils/sse';
+const settings = { apiUrl: 'https://api.example.com/v1', apiKey: 'test', model: 'test', targetLanguage: 'Chinese', translationPrompt: 'Translate.' };
+
+it.each([
+  '{"translations":[{"id":"p","text":"译文"}],"translations":[]}',
+  '{"translations":[{"id":"p","text":"译文"}]}{"translations":[]}',
+])('rejects an ambiguous final payload: %s', async (payload) => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(contentEvent(payload) + STREAM_END, { headers: { 'content-type': 'text/event-stream' } }));
+  await expect(translateFullDocument(settings, [{id:'p',text:'Source paragraph.'}], fetcher)).rejects.toThrow();
+});
+
+
+it('rejects an ordinary empty final translations array', async () => {
+  const response = new Response(contentEvent('{"translations":[]}') + STREAM_END, { headers: { 'content-type': 'text/event-stream' } });
+  await expect(translateFullDocument(settings, [{id:'p',text:'Source paragraph.'}], vi.fn().mockResolvedValue(response))).rejects.toThrow('全文译文不完整');
+});

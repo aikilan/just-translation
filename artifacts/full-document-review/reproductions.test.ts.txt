@@ -1,0 +1,134 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TranslationController } from './controller';
+import { tryStartAutomaticTranslation } from './auto-start';
+import type { RuntimeRequest, Result, PublicTranslatorSettings } from '../shared/messages';
+
+let controller: TranslationController;
+let settings: PublicTranslatorSettings;
+let send: ReturnType<typeof vi.fn<(request: RuntimeRequest) => Promise<Result<unknown>>>>;
+let finish: () => void;
+let failure: string | undefined;
+const resultNodes = () => document.querySelectorAll('[data-justranslate-state="translated"]');
+beforeEach(() => {
+  settings = {
+    configured: true,
+    profiles: [{ id: 'p', name: 'AI', configured: true }],
+    activeProfileId: 'p',
+    targetLanguage: 'Chinese',
+    displayMode: 'translation',
+    translateDynamicContent: true,
+    autoTranslateSites: [],
+    excludedSites: [],
+  };
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+  failure = undefined;
+  document.body.innerHTML =
+    '<nav>Skip this navigation.</nav><main><h1>A complete article title</h1><p>Same words.</p><p>They depend on the previous paragraph.</p><p>Same words.</p><p lang="zh">已经属于目标语言的上下文。</p><p>Keep <code>PRIVATE_TOKEN</code> here.</p></main>';
+  send = vi.fn(async (request) => {
+    await Promise.resolve();
+    if (request.type === 'GET_PUBLIC_SETTINGS') return { ok: true, data: settings };
+    if (request.type === 'BEGIN_TRANSLATION_SESSION')
+      return {
+        ok: true,
+        data: {
+          configurationId: 'config',
+          context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+        },
+      };
+    if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
+      return {
+        ok: true,
+        data: {
+          missIds: request.candidates.map((unit) => unit.id),
+          skippedIds: [],
+          cachedTranslations: {},
+        },
+      };
+    if (request.type === 'TRANSLATE_BATCH')
+      return {
+        ok: true,
+        data: {
+          translations: Object.fromEntries(
+            request.segments.map((unit) => [unit.requestId, `普通译文 ${unit.text}`]),
+          ),
+          failures: {},
+        },
+      };
+    if (request.type === 'TRANSLATE_FULL_DOCUMENT')
+      return new Promise((resolve) => {
+        finish = () =>
+          resolve(
+            failure
+              ? { ok: false, error: failure }
+              : {
+                  ok: true,
+                  data: Object.fromEntries(request.units.map((u) => [u.id, `译文 ${u.text}`])),
+                },
+          );
+      });
+    return { ok: true, data: undefined };
+  });
+  vi.stubGlobal('chrome', { runtime: { sendMessage: send } });
+  controller = new TranslationController();
+});
+afterEach(() => {
+  controller.restore();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+async function pending() {
+  const work = controller.startFullDocument();
+  await vi.waitFor(() =>
+    expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toBe(true),
+  );
+  return { work };
+}
+
+
+describe('independent review regressions', () => {
+  it('keeps a user full-document task when the startup auto-translate settings response arrives late', async () => {
+    let resolveAutomatic!: (value: Result<PublicTranslatorSettings>) => void;
+    const startup = tryStartAutomaticTranslation(controller, location.href, () =>
+      new Promise((resolve) => { resolveAutomatic = resolve; }),
+    );
+    const { work } = await pending();
+    resolveAutomatic({ ok: true, data: { ...settings, autoTranslateSites: [location.hostname] } });
+    await startup;
+    finish();
+    await work;
+    expect(controller.getStatus().mode, JSON.stringify(controller.getStatus())).toBe('full-document');
+    expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')).toBe(false);
+  });
+
+  it('accepts an unchanged article while an excluded navigation element changes its class', async () => {
+    const { work } = await pending();
+    const before = document.querySelector('main')!.cloneNode(true) as HTMLElement;
+    before.querySelectorAll('[data-justranslate-translation]').forEach((node) => node.remove());
+    const original = before.textContent;
+    const last = document.querySelector('main')!.lastElementChild;
+    let tick = 0;
+    vi.mocked(HTMLElement.prototype.getClientRects).mockImplementation(function (this: HTMLElement) {
+      if (this === last) document.querySelector('nav')!.className = `frame-${++tick}`;
+      return { length: 1 } as DOMRectList;
+    });
+    finish();
+    await work;
+    const after = document.querySelector('main')!.cloneNode(true) as HTMLElement;
+    after.querySelectorAll('[data-justranslate-translation]').forEach((node) => node.remove());
+    expect(after.textContent).toBe(original);
+    expect(controller.getStatus().phase, JSON.stringify({ ...controller.getStatus(), tick })).toBe('complete');
+    expect(resultNodes()).toHaveLength(6);
+  });
+
+  it('rejects a source which is split into distinct paragraphs without changing flattened text', async () => {
+    document.body.innerHTML = '<main><div class="article-text">First paragraph. Second paragraph.</div><p>Another reading paragraph.</p></main>';
+    const { work } = await pending();
+    const source = document.querySelector('.article-text')!;
+    source.innerHTML = '<p>First paragraph. </p><p>Second paragraph.</p>';
+    finish();
+    await work;
+    expect(controller.getStatus().phase, JSON.stringify(controller.getStatus())).toBe('error');
+    expect(resultNodes()).toHaveLength(0);
+  });
+});

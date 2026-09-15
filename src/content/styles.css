@@ -66,3 +66,9 @@ th > [data-justranslate-translation] {
     transform: rotate(360deg);
   }
 }
+
+/* Full-document writes are prepared across frames, then revealed together after source validation. */
+[data-justranslate-full-pending]
+  [data-justranslate-translation][data-justranslate-state='translated'] {
+  display: none !important;
+}

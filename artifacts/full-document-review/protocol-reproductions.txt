@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/full-document-protocol-review.test.ts (2 tests | 1 failed) 15ms
+   × rejects an ambiguous final payload: {"translations":[{"id":"p","text":"译文"}],"translations":[]} 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/shared/full-document-protocol-review.test.ts > rejects an ambiguous final payload: {"translations":[{"id":"p","text":"译文"}],"translations":[]}
+AssertionError: promise resolved "{ p: '译文' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "p": "译文",
+  }
+
+ ❯ src/shared/full-document-protocol-review.test.ts:11:94
+      9| ])('rejects an ambiguous final payload: %s', async (payload) => {
+     10|   const fetcher = vi.fn().mockResolvedValue(new Response(contentEvent(…
+     11|   await expect(translateFullDocument(settings, [{id:'p',text:'Source p…
+       |                                                                                              ^
+     12| });
+     13|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  10:45:57
+   Duration  137ms (transform 33ms, setup 0ms, import 46ms, tests 15ms, environment 0ms)
+

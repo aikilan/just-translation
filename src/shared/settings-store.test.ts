@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS, DEFAULT_TRANSLATION_PROMPT, SETTINGS_STORAGE_KEY } from './settings';
-import { getSettings, initializeSettings } from './settings-store';
+import { getSettings, initializeSettings, updateStoredSettings } from './settings-store';
 
 describe('settings store initialization', () => {
   let stored: Record<string, unknown>;
-  let storageSet: ReturnType<typeof vi.fn>;
+  let storageSet: ReturnType<typeof vi.fn<(values: Record<string, unknown>) => Promise<void>>>;
 
   beforeEach(() => {
     stored = {};
@@ -21,6 +21,28 @@ describe('settings store initialization', () => {
         },
       },
     });
+  });
+
+  it('confirms equal profile values regardless of runtime property order', async () => {
+    const profile = DEFAULT_SETTINGS.profiles[0];
+    const reordered = Object.fromEntries(Object.entries(profile).reverse()) as typeof profile;
+    await expect(
+      updateStoredSettings((settings) => ({
+        ...settings,
+        profiles: [{ ...reordered, model: 'test-model' }],
+      })),
+    ).resolves.toMatchObject({ profiles: [{ model: 'test-model' }] });
+  });
+
+  it('still rejects an actual field mismatch after a storage write', async () => {
+    storageSet.mockImplementation((values) => {
+      Object.assign(stored, structuredClone(values));
+      (stored[SETTINGS_STORAGE_KEY] as typeof DEFAULT_SETTINGS).targetLanguage = 'Wrong language';
+      return Promise.resolve();
+    });
+    await expect(
+      updateStoredSettings((settings) => ({ ...settings, targetLanguage: 'Japanese' })),
+    ).rejects.toThrow('回读不一致');
   });
 
   it('normalizes read values without writing from the reading context', async () => {

@@ -224,50 +224,76 @@ describe('TranslationController', () => {
   });
 
   it('commits validated partial results before the final batch response and ignores foreign or stopped progress', async () => {
+    // Force separate discovery slices; progress must address the actual batch, independent of CPU load.
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
     document.body.innerHTML =
       '<main><p>First successful paragraph.</p><p>Second missing paragraph.</p></main>';
-    let batch!: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
-    let finish!: (result: Result<TranslationBatchResult>) => void;
+    const batches: Array<{
+      request: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
+      finish: (result: Result<TranslationBatchResult>) => void;
+    }> = [];
     const sendMessage = vi.fn((request: RuntimeRequest): Promise<Result<unknown>> => {
       if (request.type === 'GET_PUBLIC_SETTINGS')
         return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
-      if (request.type === 'TRANSLATE_BATCH') {
-        batch = request;
+      if (request.type === 'TRANSLATE_BATCH')
         return new Promise((resolve) => {
-          finish = resolve;
+          batches.push({ request, finish: resolve });
         });
-      }
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
     const controller = new TranslationController();
     const work = controller.start();
-    await vi.waitFor(() => expect(batch).toBeDefined());
-    const progress = {
-      type: 'TRANSLATION_BATCH_PROGRESS' as const,
-      sessionId: batch.sessionId,
-      batchId: batch.batchId,
-      translations: { [batch.segments[0].requestId]: '首段已经成功' },
+    const settle = () => {
+      for (const { request, finish } of batches)
+        finish({ ok: true, data: successfulBatchData(request.segments, () => '最终结果') });
     };
-    controller.receiveBatchProgress({ ...progress, sessionId: 'foreign-session' });
-    expect(document.querySelector('[data-justranslate-state="translated"]')).toBeNull();
-    controller.receiveBatchProgress(progress);
-    await vi.waitFor(() =>
-      expect(document.querySelector('[data-justranslate-state="translated"]')?.textContent).toBe(
-        '首段已经成功',
-      ),
-    );
-    expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(1);
-    controller.stop();
-    controller.receiveBatchProgress({
-      ...progress,
-      translations: { [batch.segments[1].requestId]: '迟到结果' },
-    });
-    finish({ ok: true, data: successfulBatchData(batch.segments, () => '最终结果') });
-    await work;
-    expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(1);
-    expect(document.body.textContent).not.toContain('迟到结果');
-    controller.restore();
+    try {
+      await vi.waitFor(() =>
+        expect(batches.reduce((count, batch) => count + batch.request.segments.length, 0)).toBe(2),
+      );
+      const batch = batches.find(({ request }) =>
+        request.segments.some((segment) => segment.text === 'First successful paragraph.'),
+      )!.request;
+      const segment = batch.segments.find(
+        (segment) => segment.text === 'First successful paragraph.',
+      )!;
+      const progress = {
+        type: 'TRANSLATION_BATCH_PROGRESS' as const,
+        sessionId: batch.sessionId,
+        batchId: batch.batchId,
+        translations: { [segment.requestId]: '首段已经成功' },
+      };
+      controller.receiveBatchProgress({ ...progress, sessionId: 'foreign-session' });
+      expect(document.querySelector('[data-justranslate-state="translated"]')).toBeNull();
+      controller.receiveBatchProgress(progress);
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-justranslate-state="translated"]')?.textContent).toBe(
+          '首段已经成功',
+        ),
+      );
+      expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(1);
+      controller.stop();
+      for (const { request } of batches)
+        controller.receiveBatchProgress({
+          type: 'TRANSLATION_BATCH_PROGRESS',
+          sessionId: request.sessionId,
+          batchId: request.batchId,
+          translations: Object.fromEntries(
+            request.segments.map((segment) => [segment.requestId, '迟到结果']),
+          ),
+        });
+      settle();
+      await work;
+      expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(1);
+      expect(document.body.textContent).not.toContain('迟到结果');
+    } finally {
+      controller.stop();
+      settle();
+      await work;
+      controller.restore();
+    }
   });
 
   beforeEach(() => {

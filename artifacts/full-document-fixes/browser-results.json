@@ -1,0 +1,175 @@
+{
+  "browser": "153.0.8010.12",
+  "configurationSaved": true,
+  "animation": {
+    "status": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 606,
+      "failed": 0,
+      "total": 606,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    },
+    "frames": 109,
+    "httpRequests": 1,
+    "unitCounts": [
+      606
+    ],
+    "visibleCounts": [
+      0,
+      606
+    ],
+    "longTasksMs": [],
+    "hiddenOriginals": 606
+  },
+  "structural": {
+    "status": {
+      "mode": "full-document",
+      "phase": "error",
+      "translated": 0,
+      "failed": 2,
+      "total": 2,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "error": "正文已变化，请重新全文翻译"
+    },
+    "before": {
+      "translated": 0,
+      "hiddenOriginals": 0,
+      "feedback": "全文翻译失败 · 重试全文"
+    },
+    "retry": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 3,
+      "failed": 0,
+      "total": 3,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    },
+    "requests": 2,
+    "unitCounts": [
+      2,
+      3
+    ]
+  },
+  "protocol": {
+    "status": {
+      "mode": "full-document",
+      "phase": "error",
+      "translated": 0,
+      "failed": 6,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "error": "AI 必须返回唯一的 translations 数组"
+    },
+    "httpRequests": 1,
+    "dom": {
+      "translated": 0,
+      "hiddenOriginals": 0,
+      "feedback": "全文翻译失败 · 重试全文"
+    },
+    "threeUnits": {
+      "status": {
+        "mode": "full-document",
+        "phase": "error",
+        "translated": 0,
+        "failed": 3,
+        "total": 3,
+        "displayMode": "translation",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        },
+        "error": "AI 必须返回唯一的 translations 数组"
+      },
+      "httpRequests": 1
+    }
+  },
+  "startup": [
+    {
+      "command": "START_FULL_DOCUMENT_TRANSLATION",
+      "status": {
+        "mode": "full-document",
+        "phase": "complete",
+        "translated": 6,
+        "failed": 0,
+        "total": 6,
+        "displayMode": "translation",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        }
+      },
+      "httpRequests": 1,
+      "unitCounts": [
+        6
+      ]
+    },
+    {
+      "command": "RESTORE_PAGE",
+      "status": {
+        "mode": "segmented",
+        "phase": "idle",
+        "translated": 0,
+        "failed": 0,
+        "total": 0,
+        "displayMode": "bilingual"
+      },
+      "httpRequests": 0,
+      "unitCounts": []
+    }
+  ],
+  "regression": {
+    "ordinary": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    },
+    "ordinaryHttpRequests": 2,
+    "ordinaryUnitCounts": [
+      4,
+      2
+    ],
+    "cachedHttpRequests": 2,
+    "switched": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    },
+    "fullHttpRequests": 1,
+    "fullAborted": 1
+  },
+  "profile": "/tmp/just-translate-fixes-final-20260914",
+  "fixture": "http://127.0.0.1:64243"
+}

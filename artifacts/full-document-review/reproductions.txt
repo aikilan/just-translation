@@ -1,0 +1,64 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/full-document-review.test.ts (3 tests | 3 failed) 201ms
+     × keeps a user full-document task when the startup auto-translate settings response arrives late 75ms
+     × accepts an unchanged article while an excluded navigation element changes its class 68ms
+     × rejects a source which is split into distinct paragraphs without changing flattened text 57ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > keeps a user full-document task when the startup auto-translate settings response arrives late
+AssertionError: {"mode":"segmented","phase":"complete","translated":6,"failed":0,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"needsRestart":false}: expected 'segmented' to be 'full-document' // Object.is equality
+
+Expected: "full-document"
+Received: "segmented"
+
+ ❯ src/content/full-document-review.test.ts:100:81
+     98|     finish();
+     99|     await work;
+    100|     expect(controller.getStatus().mode, JSON.stringify(controller.getS…
+       |                                                                                 ^
+    101|     expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')…
+    102|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > accepts an unchanged article while an excluded navigation element changes its class
+AssertionError: {"mode":"full-document","phase":"error","translated":0,"failed":6,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"error":"正文已变化，请重新全文翻译","tick":4}: expected 'error' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "error"
+
+ ❯ src/content/full-document-review.test.ts:120:95
+    118|     after.querySelectorAll('[data-justranslate-translation]').forEach(…
+    119|     expect(after.textContent).toBe(original);
+    120|     expect(controller.getStatus().phase, JSON.stringify({ ...controlle…
+       |                                                                                               ^
+    121|     expect(resultNodes()).toHaveLength(6);
+    122|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/content/full-document-review.test.ts > independent review regressions > rejects a source which is split into distinct paragraphs without changing flattened text
+AssertionError: {"mode":"full-document","phase":"complete","translated":2,"failed":0,"total":2,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"}}: expected 'complete' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "complete"
+
+ ❯ src/content/full-document-review.test.ts:131:82
+    129|     finish();
+    130|     await work;
+    131|     expect(controller.getStatus().phase, JSON.stringify(controller.get…
+       |                                                                                  ^
+    132|     expect(resultNodes()).toHaveLength(0);
+    133|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  10:41:50
+   Duration  649ms (transform 74ms, setup 0ms, import 90ms, tests 201ms, environment 279ms)
+

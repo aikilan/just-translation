@@ -1,0 +1,285 @@
+{
+  "nativeMenu": {
+    "selectedText": "energy",
+    "calls": 1,
+    "sizes": [12],
+    "protectedTextLeaked": false,
+    "orderedIds": [
+      "full-0",
+      "full-1",
+      "full-2",
+      "full-3",
+      "full-4",
+      "full-5",
+      "full-6",
+      "full-7",
+      "full-8",
+      "full-9",
+      "full-10",
+      "full-11"
+    ],
+    "repeatedParagraphs": 2,
+    "longParagraphCharacters": 7039,
+    "includesBelowFold": true,
+    "includesChinese": true
+  },
+  "snapshot": {
+    "translated": 12,
+    "hidden": 12,
+    "leakedError": false,
+    "restoredProtected": "译文：Run npm install private-package with PRIVATE_TOKEN."
+  },
+  "atomic": {
+    "calls": 1,
+    "visibleCounts": [0, 12],
+    "hiddenCounts": [0, 12]
+  },
+  "partial": {
+    "calls": 1,
+    "sizes": [12],
+    "status": {
+      "mode": "full-document",
+      "phase": "error",
+      "translated": 0,
+      "failed": 12,
+      "total": 12,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "error": "全文译文不完整，请重新全文翻译"
+    },
+    "feedback": {
+      "text": "全文翻译失败 · 重试全文",
+      "translated": 0,
+      "hidden": 0
+    }
+  },
+  "keyboard": {
+    "key": "Space",
+    "calls": 2,
+    "sizes": [12, 12],
+    "status": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 12,
+      "failed": 0,
+      "total": 12,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    }
+  },
+  "stopped": {
+    "calls": 1,
+    "aborted": 1,
+    "status": {
+      "mode": "full-document",
+      "phase": "stopped",
+      "translated": 0,
+      "failed": 0,
+      "total": 12,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    },
+    "nodes": 0,
+    "hidden": 0
+  },
+  "changed": {
+    "calls": 1,
+    "status": {
+      "mode": "full-document",
+      "phase": "error",
+      "translated": 0,
+      "failed": 12,
+      "total": 12,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "error": "正文已变化，请重新全文翻译"
+    },
+    "translated": 0
+  },
+  "dynamic": {
+    "calls": 1,
+    "sizes": [13],
+    "translated": 13,
+    "newContentTranslated": 0
+  },
+  "link": {
+    "calls": 1,
+    "sizes": [12],
+    "url": "http://127.0.0.1:57229/article",
+    "status": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 12,
+      "failed": 0,
+      "total": 12,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    }
+  },
+  "display": {
+    "calls": 1,
+    "hidden": 0,
+    "translated": 12
+  },
+  "ordinary": {
+    "calls": 2,
+    "sizes": [4, 2],
+    "status": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    }
+  },
+  "cache": {
+    "callsBefore": 2,
+    "callsAfter": 2,
+    "status": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    }
+  },
+  "excluded": {
+    "calls": 0,
+    "status": {
+      "mode": "full-document",
+      "phase": "error",
+      "translated": 0,
+      "failed": 0,
+      "total": 0,
+      "displayMode": "bilingual",
+      "error": "当前站点已被排除"
+    },
+    "nodes": 0
+  },
+  "preference": {
+    "saved": true,
+    "originalContext": {
+      "profileId": "profile-default",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "restarted": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "translation",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Japanese"
+      }
+    },
+    "calls": 1
+  },
+  "navigation": {
+    "calls": 1,
+    "aborted": 1,
+    "status": {
+      "mode": "segmented",
+      "phase": "idle",
+      "translated": 0,
+      "failed": 0,
+      "total": 0,
+      "displayMode": "bilingual"
+    },
+    "nodes": 0
+  },
+  "errorPopup": {
+    "width": 380,
+    "height": 500,
+    "scrollWidth": 380,
+    "scrollHeight": 500,
+    "contentHeight": 399,
+    "contentScrollHeight": 507,
+    "text": "只是翻译\n\n127.0.0.1\n\n全文翻译失败\n\n已翻译 0 / 6 个段落 · 6 个失败\n\n重新全文翻译\n\n原文已保留，重试会重新提交全文。\n\n错误详情\n\n全文译文不完整，请重新全文翻译\n\n检查 AI 配置\n翻译为\n简体中文\n繁體中文\n英语\n日语\n韩语\n法语\n德语\n西班牙语\n自定义语言…\n显示方式\n双语\n仅译文\nAI 配置\n全文验收 AI · 这是用于检查超长配置名称显示效果的本地模拟服务\n此站自动翻译\n恢复原文\nAlt + T"
+  },
+  "shortcut": {
+    "status": {
+      "mode": "segmented",
+      "phase": "idle",
+      "translated": 0,
+      "failed": 0,
+      "total": 0,
+      "displayMode": "bilingual"
+    },
+    "nodes": 0
+  },
+  "fullAfterCache": {
+    "calls": 1,
+    "sizes": [6],
+    "typography": {
+      "original": {
+        "font": "Georgia",
+        "size": "30px",
+        "color": "rgb(232, 234, 237)"
+      },
+      "translation": {
+        "font": "Georgia",
+        "size": "30px",
+        "color": "rgb(232, 234, 237)"
+      }
+    },
+    "status": {
+      "mode": "full-document",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "bilingual",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      }
+    }
+  },
+  "modeSwitch": {
+    "calls": 1,
+    "aborted": 1,
+    "status": {
+      "mode": "segmented",
+      "phase": "complete",
+      "translated": 6,
+      "failed": 0,
+      "total": 6,
+      "displayMode": "bilingual",
+      "context": {
+        "profileId": "profile-default",
+        "targetLanguage": "Simplified Chinese"
+      },
+      "needsRestart": false
+    },
+    "translated": 6
+  }
+}

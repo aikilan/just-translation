@@ -16,6 +16,7 @@ export const READY_SETTINGS: TranslatorSettings = {
   ],
 };
 export const IDLE_STATUS: PageTranslationStatus = {
+  mode: 'segmented',
   phase: 'idle',
   total: 0,
   translated: 0,

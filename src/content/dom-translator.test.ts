@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   collectTranslatableElements,
+  collectOriginalReadingUnits,
   discoverTranslatableElements,
   getElementSourceText,
   renderTranslationError,
@@ -14,6 +15,57 @@ import {
 } from './dom-translator';
 
 describe('DOM translation rendering', () => {
+  it('rechecks original reading units while ignoring extension feedback', () => {
+    document.body.innerHTML =
+      '<main><p>First original paragraph.</p><p>Second original paragraph.</p></main>';
+    const options = { isVisible: () => true };
+    const sources = collectTranslatableElements(document.body, options);
+    renderTranslationPending(sources[0], 'first');
+    renderTranslation(sources[1], '第二段译文。');
+    expect(collectOriginalReadingUnits(document.body, options)).toEqual(sources);
+    expect(collectTranslatableElements(document.body, { isVisible: () => true })).toEqual([]);
+    expect(sources.map(getElementSourceText)).toEqual([
+      'First original paragraph.',
+      'Second original paragraph.',
+    ]);
+  });
+
+  it('inspects unanchored prose without inserting wrappers or dropping excluded metadata', () => {
+    document.body.innerHTML =
+      '<main>Opening raw prose.<p>A paragraph.</p>Closing raw prose.<aside>Excluded text.</aside><div>KYODO</div></main>';
+    const html = document.body.innerHTML;
+    const observer = new MutationObserver(() => {});
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    const units = collectOriginalReadingUnits(document.body, { isVisible: () => true });
+    expect(units).toHaveLength(3);
+    expect(document.body.innerHTML).toBe(html);
+    expect(observer.takeRecords()).toHaveLength(0);
+    observer.disconnect();
+  });
+
+  it('re-evaluates child paragraphs inside a marked source and keeps inline wrappers transparent', () => {
+    document.body.innerHTML = '<main><div>First paragraph. Second paragraph.</div></main>';
+    const options = { isVisible: () => true };
+    const [source] = collectTranslatableElements(document.body, options);
+    renderTranslationPending(source, 'p');
+    source.querySelector('[data-justranslate-source-content]')!.innerHTML =
+      '<p>First paragraph. </p><p>Second paragraph.</p>';
+    const html = document.body.innerHTML;
+    expect(collectOriginalReadingUnits(document.body, options)).toEqual([
+      ...source.querySelectorAll('p'),
+    ]);
+    expect(document.body.innerHTML).toBe(html);
+  });
+
+  it('does not reuse old fragment eligibility after a host data attribute changes CSS', () => {
+    document.body.innerHTML =
+      '<style>[data-state="hidden"] span {display:none}</style><main><p><span>Previously visible reading words.</span></p></main>';
+    const options = { isVisible: () => true };
+    expect(collectTranslatableElements(document.body, options)).toHaveLength(1);
+    document.querySelector('p')!.dataset.state = 'hidden';
+    expect(collectOriginalReadingUnits(document.body, options)).toHaveLength(0);
+  });
+
   it('keeps surrounding prose and inline links in one reading block without duplicate descendants', () => {
     document.body.innerHTML =
       '<main><div id="sentence">Before you start, <em><a href="/docs">read the documentation</a></em> to understand all required steps.</div><div><p>A separate paragraph.</p></div></main>';

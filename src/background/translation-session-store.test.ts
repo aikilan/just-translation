@@ -20,9 +20,9 @@ describe('TranslationSessionStore', () => {
       sessionId: 'old-session',
       origin: 'https://news.ycombinator.com',
     };
-    await store.create({ ...identity, settings: SETTINGS });
+    await store.create({ mode: 'segmented', ...identity, settings: SETTINGS });
     const current = { ...identity, documentId: 'new-document', sessionId: 'new-session' };
-    await store.create({ ...current, settings: SETTINGS });
+    await store.create({ mode: 'segmented', ...current, settings: SETTINGS });
     await expect(store.read({ ...identity, documentId: 'new-document' })).rejects.toThrow(
       /网页已变化/u,
     );
@@ -36,6 +36,7 @@ describe('TranslationSessionStore', () => {
     const mutableSettings = { ...SETTINGS };
 
     await store.create({
+      mode: 'segmented',
       tabId: 18,
       documentId: 'document',
       sessionId: 'page-session',
@@ -58,6 +59,7 @@ describe('TranslationSessionStore', () => {
   it('rejects a session from another tab or page origin', async () => {
     const store = new TranslationSessionStore(new InMemorySessionStorage());
     await store.create({
+      mode: 'segmented',
       tabId: 18,
       documentId: 'document',
       sessionId: 'page-session',
@@ -86,6 +88,7 @@ describe('TranslationSessionStore', () => {
   it('removes one finished session and all sessions owned by a closed tab', async () => {
     const store = new TranslationSessionStore(new InMemorySessionStorage());
     await store.create({
+      mode: 'segmented',
       tabId: 18,
       documentId: 'document',
       sessionId: 'first',
@@ -93,6 +96,7 @@ describe('TranslationSessionStore', () => {
       settings: SETTINGS,
     });
     await store.create({
+      mode: 'segmented',
       tabId: 18,
       documentId: 'document',
       sessionId: 'second',
@@ -100,6 +104,7 @@ describe('TranslationSessionStore', () => {
       settings: SETTINGS,
     });
     await store.create({
+      mode: 'segmented',
       tabId: 19,
       documentId: 'document',
       sessionId: 'third',

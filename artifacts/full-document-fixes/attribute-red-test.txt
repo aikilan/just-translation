@@ -1,0 +1,33 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/dom-translator.test.ts (29 tests | 1 failed) 357ms
+     × does not reuse old fragment eligibility after a host data attribute changes CSS 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/dom-translator.test.ts > DOM translation rendering > does not reuse old fragment eligibility after a host data attribute changes CSS
+AssertionError: expected [ <p data-state="hidden">…(1)</p> ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/content/dom-translator.test.ts:66:65
+     64|     expect(collectTranslatableElements(document.body, options)).toHave…
+     65|     document.querySelector('p')!.dataset.state = 'hidden';
+     66|     expect(collectOriginalReadingUnits(document.body, options)).toHave…
+       |                                                                 ^
+     67|   });
+     68|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 28 passed (29)
+   Start at  14:27:45
+   Duration  767ms (transform 40ms, setup 0ms, import 50ms, tests 357ms, environment 278ms)
+

@@ -1,10 +1,13 @@
-import type { TranslationSegment } from './batching';
+import type { TranslationSegment, TranslationUnit } from './batching';
 import type { DisplayMode, TranslationProfile, TranslatorSettings } from './settings';
 import type { TranslationRequestStage } from './translation-metrics';
 
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
+export type TranslationMode = 'segmented' | 'full-document';
 
 export interface PageTranslationStatus {
+  mode: TranslationMode;
+  stage?: 'collecting' | 'requesting' | 'applying';
   phase: TranslationPhase;
   translated: number;
   failed: number;
@@ -88,7 +91,13 @@ export interface SiteRuleUpdate {
 
 export type RuntimeRequest =
   | { type: 'GET_PUBLIC_SETTINGS' }
-  | { type: 'BEGIN_TRANSLATION_SESSION'; profileId: string; sessionId: string }
+  | {
+      type: 'BEGIN_TRANSLATION_SESSION';
+      profileId: string;
+      sessionId: string;
+      mode: TranslationMode;
+    }
+  | { type: 'TRANSLATE_FULL_DOCUMENT'; sessionId: string; units: TranslationUnit[] }
   | {
       type: 'RESOLVE_TRANSLATION_CANDIDATES';
       sessionId: string;
@@ -122,6 +131,7 @@ export type PageCommand =
   | TranslationBatchProgress
   | { type: 'GET_PAGE_DIAGNOSTICS' }
   | { type: 'START_TRANSLATION' }
+  | { type: 'START_FULL_DOCUMENT_TRANSLATION' }
   | { type: 'RESTART_TRANSLATION' }
   | { type: 'STOP_TRANSLATION' }
   | { type: 'RESTORE_PAGE' }

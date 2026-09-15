@@ -1,8 +1,10 @@
 import type { TranslationRequestConfig } from '../shared/openai-client';
+import type { TranslationMode } from '../shared/messages';
 
 const SESSION_STORAGE_PREFIX = 'translation-session:';
 
 export interface TranslationSessionContext extends TranslationSessionIdentity {
+  mode: TranslationMode;
   settings: TranslationRequestConfig;
 }
 
@@ -88,8 +90,9 @@ function assertIdentity(identity: TranslationSessionIdentity): void {
 
 function parseStoredContext(value: unknown): TranslationSessionContext | undefined {
   if (!isRecord(value) || !isRecord(value.settings)) return undefined;
-  const { tabId, documentId, sessionId, origin, settings } = value;
+  const { tabId, documentId, sessionId, origin, settings, mode } = value;
   if (
+    (mode !== 'segmented' && mode !== 'full-document') ||
     typeof tabId !== 'number' ||
     !Number.isInteger(tabId) ||
     typeof sessionId !== 'string' ||
@@ -100,6 +103,7 @@ function parseStoredContext(value: unknown): TranslationSessionContext | undefin
     return undefined;
   }
   return {
+    mode,
     tabId,
     documentId,
     sessionId,

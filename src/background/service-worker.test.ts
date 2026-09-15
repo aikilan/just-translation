@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Result, RuntimeRequest } from '../shared/messages';
 import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY } from '../shared/settings';
-import { contentEvent, STREAM_END } from '../test-utils/sse';
+import { contentEvent, STREAM_END, completionResponse } from '../test-utils/sse';
 
 type MessageListener = (
   request: RuntimeRequest,
@@ -16,6 +16,7 @@ describe('background document lifecycle', () => {
   let documentId: string;
   let session: Record<string, unknown>;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let holdSessionRead: (() => Promise<void>) | undefined;
   let holdSettings: (() => Promise<void>) | undefined;
   const sender = (id: string): chrome.runtime.MessageSender => ({
     tab: { id: 18, url: 'https://news.ycombinator.com/news' } as chrome.tabs.Tab,
@@ -30,6 +31,7 @@ describe('background document lifecycle', () => {
     documentId = 'old-document';
     session = {};
     holdSettings = undefined;
+    holdSessionRead = undefined;
     const settings = {
       ...DEFAULT_SETTINGS,
       profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile, model: 'test-model' })),
@@ -54,8 +56,11 @@ describe('background document lifecycle', () => {
         },
         session: {
           setAccessLevel: vi.fn(),
-          get: (key: string | null) =>
-            Promise.resolve(structuredClone(key === null ? session : { [key]: session[key] })),
+          get: async (key: string | null) => {
+            const value = structuredClone(key === null ? session : { [key]: session[key] });
+            await holdSessionRead?.();
+            return value;
+          },
           set: (entries: Record<string, unknown>) => {
             Object.assign(session, structuredClone(entries));
             return Promise.resolve();
@@ -100,6 +105,116 @@ describe('background document lifecycle', () => {
     ).resolves.toEqual({ ok: false, error: '设置只能由扩展页面修改' });
   });
 
+  it('executes a full-document session once without partial publication or access to paragraph cache commands', async () => {
+    fetchMock.mockResolvedValue(
+      completionResponse([
+        { id: 'a', text: '第一段' },
+        { id: 'b', text: '第二段' },
+      ]),
+    );
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'full-document',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'full',
+    });
+    expect(Object.values(session)[0]).toMatchObject({ mode: 'full-document' });
+    await expect(
+      send({
+        type: 'TRANSLATE_FULL_DOCUMENT',
+        sessionId: 'full',
+        units: [
+          { id: 'a', text: 'First' },
+          { id: 'b', text: 'Second' },
+        ],
+      }),
+    ).resolves.toEqual({ ok: true, data: { a: '第一段', b: '第二段' } });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    await expect(
+      send({ type: 'RESOLVE_TRANSLATION_CANDIDATES', sessionId: 'full', candidates: [] }),
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      send({ type: 'STORE_TRANSLATION_CACHE', sessionId: 'full', entries: [] }),
+    ).resolves.toMatchObject({ ok: false });
+  });
+
+  it('cancels a full-document request on navigation and never retries it', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'full-document',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'full',
+    });
+    const work = send({
+      type: 'TRANSLATE_FULL_DOCUMENT',
+      sessionId: 'full',
+      units: [{ id: 'a', text: 'First' }],
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    documentId = 'next-document';
+    committed({ tabId: 18, frameId: 0, documentId });
+    expect((await work).ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a full request while its document preflight is still waiting', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'full-document',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'full',
+    });
+    let release!: () => void;
+    holdSessionRead = () =>
+      new Promise((resolve) => {
+        release = resolve;
+      });
+    const work = send({
+      type: 'TRANSLATE_FULL_DOCUMENT',
+      sessionId: 'full',
+      units: [{ id: 'a', text: 'First' }],
+    });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await send({ type: 'CANCEL_TRANSLATION_REQUESTS', sessionId: 'full' });
+    release();
+    expect((await work).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('uses a 120 second HTTP deadline for full-document mode without retrying', async () => {
+    vi.useFakeTimers();
+    try {
+      await send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'full-document',
+        profileId: DEFAULT_SETTINGS.activeProfileId,
+        sessionId: 'deadline',
+      });
+      let settled = false;
+      const work = send({
+        type: 'TRANSLATE_FULL_DOCUMENT',
+        sessionId: 'deadline',
+        units: [{ id: 'a', text: 'First' }],
+      }).then((result) => {
+        settled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await work;
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('Expected timeout');
+      expect(result.error).toContain('超时');
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns an explicit error for an unsupported runtime command', async () => {
     const request = JSON.parse('{"type":"UNSUPPORTED_COMMAND"}') as RuntimeRequest;
     await expect(send(request)).resolves.toEqual({
@@ -137,6 +252,7 @@ describe('background document lifecycle', () => {
     );
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'segmented',
       profileId: DEFAULT_SETTINGS.activeProfileId,
       sessionId: 'stream',
     });
@@ -183,6 +299,7 @@ describe('background document lifecycle', () => {
       (
         await send({
           type: 'BEGIN_TRANSLATION_SESSION',
+          mode: 'segmented',
           profileId: DEFAULT_SETTINGS.activeProfileId,
           sessionId: 'old',
         })
@@ -199,6 +316,7 @@ describe('background document lifecycle', () => {
     documentId = 'new-document';
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'segmented',
       profileId: DEFAULT_SETTINGS.activeProfileId,
       sessionId: 'new',
     });
@@ -211,6 +329,7 @@ describe('background document lifecycle', () => {
         await send(
           {
             type: 'BEGIN_TRANSLATION_SESSION',
+            mode: 'segmented',
             profileId: DEFAULT_SETTINGS.activeProfileId,
             sessionId: 'late',
           },
@@ -229,6 +348,7 @@ describe('background document lifecycle', () => {
       });
     const work = send({
       type: 'BEGIN_TRANSLATION_SESSION',
+      mode: 'segmented',
       profileId: DEFAULT_SETTINGS.activeProfileId,
       sessionId: 'late',
     });

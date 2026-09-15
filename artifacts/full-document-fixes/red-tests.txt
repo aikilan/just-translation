@@ -1,0 +1,151 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/full-document-client.test.ts (17 tests | 3 failed) 114ms
+     × rejects repeated root fields across SSE chunks of 1 characters 3ms
+     × rejects repeated root fields across SSE chunks of 47 characters 2ms
+     × rejects repeated root fields across SSE chunks of 10000 characters 1ms
+ ❯ src/content/content-script.test.ts (8 tests | 7 failed) 97ms
+   × retires startup auto-translation after the user command START_TRANSLATION, even if the page is idle 33ms
+   × retires startup auto-translation after the user command START_FULL_DOCUMENT_TRANSLATION, even if the page is idle 2ms
+   × retires startup auto-translation after the user command RESTART_TRANSLATION, even if the page is idle 2ms
+   × retires startup auto-translation after the user command STOP_TRANSLATION, even if the page is idle 2ms
+   × retires startup auto-translation after the user command RESTORE_PAGE, even if the page is idle 2ms
+   × retires startup auto-translation after the user command TOGGLE_TRANSLATION, even if the page is idle 2ms
+   × stops startup on pagehide and resumes only an already running segmented BFCache page 3ms
+ ❯ src/content/full-document-task.test.ts (26 tests | 3 failed) 2737ms
+     × accepts an unchanged article while an excluded navigation element changes its class 76ms
+     × rejects a source which is split into distinct paragraphs without changing flattened text 59ms
+     × rejects changed reading membership: layout 66ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command START_TRANSLATION, even if the page is idle
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/content/content-script.test.ts:49:27
+     47|     release({ ok: true, data: settings });
+     48|     await new Promise((resolve) => setTimeout(resolve, 0));
+     49|     expect(actions.start).toHaveBeenCalledTimes(manualStarts);
+       |                           ^
+     50|   },
+     51| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command START_FULL_DOCUMENT_TRANSLATION, even if the page is idle
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command RESTART_TRANSLATION, even if the page is idle
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command STOP_TRANSLATION, even if the page is idle
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command RESTORE_PAGE, even if the page is idle
+ FAIL  src/content/content-script.test.ts > retires startup auto-translation after the user command TOGGLE_TRANSLATION, even if the page is idle
+AssertionError: expected "vi.fn()" to be called +0 times, but got 1 times
+ ❯ src/content/content-script.test.ts:49:27
+     47|     release({ ok: true, data: settings });
+     48|     await new Promise((resolve) => setTimeout(resolve, 0));
+     49|     expect(actions.start).toHaveBeenCalledTimes(manualStarts);
+       |                           ^
+     50|   },
+     51| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  src/content/content-script.test.ts > stops startup on pagehide and resumes only an already running segmented BFCache page
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array []
+
+
+Number of calls: 1
+
+ ❯ src/content/content-script.test.ts:66:29
+     64|   release({ ok: true, data: settings });
+     65|   await new Promise((resolve) => setTimeout(resolve, 0));
+     66|   expect(actions.start).not.toHaveBeenCalled();
+       |                             ^
+     67|   window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted…
+     68|   expect(actions.start).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  src/content/full-document-task.test.ts > full document lifecycle > accepts an unchanged article while an excluded navigation element changes its class
+AssertionError: {"mode":"full-document","phase":"error","translated":0,"failed":6,"total":6,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"},"error":"正文已变化，请重新全文翻译","tick":4}: expected 'error' to be 'complete' // Object.is equality
+
+Expected: "complete"
+Received: "error"
+
+ ❯ src/content/full-document-task.test.ts:349:95
+    347|     after.querySelectorAll('[data-justranslate-translation]').forEach(…
+    348|     expect(after.textContent).toBe(original);
+    349|     expect(controller.getStatus().phase, JSON.stringify({ ...controlle…
+       |                                                                                               ^
+    350|     expect(resultNodes()).toHaveLength(6);
+    351|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  src/content/full-document-task.test.ts > full document lifecycle > rejects a source which is split into distinct paragraphs without changing flattened text
+AssertionError: {"mode":"full-document","phase":"complete","translated":2,"failed":0,"total":2,"displayMode":"translation","context":{"profileId":"p","targetLanguage":"Chinese"}}: expected 'complete' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "complete"
+
+ ❯ src/content/full-document-task.test.ts:360:82
+    358|     finish();
+    359|     await work;
+    360|     expect(controller.getStatus().phase, JSON.stringify(controller.get…
+       |                                                                                  ^
+    361|     expect(resultNodes()).toHaveLength(0);
+    362|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  src/content/full-document-task.test.ts > full document lifecycle > rejects changed reading membership: layout
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/content/full-document-task.test.ts:380:44
+    378|       finish();
+    379|       await work;
+    380|       expect(controller.getStatus().error).toContain('正文已变化');
+       |                                            ^
+    381|       expect(resultNodes()).toHaveLength(0);
+    382|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  src/shared/full-document-client.test.ts > full document request > rejects repeated root fields across SSE chunks of 1 characters
+ FAIL  src/shared/full-document-client.test.ts > full document request > rejects repeated root fields across SSE chunks of 47 characters
+ FAIL  src/shared/full-document-client.test.ts > full document request > rejects repeated root fields across SSE chunks of 10000 characters
+AssertionError: promise resolved "{ p0: '译文。', p1: '译文。', …(4) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "p0": "译文。",
++   "p1": "译文。",
++   "p2": "译文。",
++   "p3": "译文。",
++   "p4": "译文。",
++   "p5": "译文。",
+  }
+
+ ❯ src/shared/full-document-client.test.ts:81:66
+     79|     for (let i = 0; i < payload.length; i += size) body += contentEven…
+     80|     const fetcher = vi.fn().mockResolvedValue(stream(body + STREAM_END…
+     81|     await expect(translateFullDocument(settings, units, fetcher)).reje…
+       |                                                                  ^
+     82|     expect(fetcher).toHaveBeenCalledOnce();
+     83|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  13 failed | 38 passed (51)
+   Start at  14:18:58
+   Duration  3.25s (transform 141ms, setup 0ms, import 171ms, tests 2.95s, environment 701ms)
+

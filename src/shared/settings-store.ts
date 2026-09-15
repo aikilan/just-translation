@@ -18,7 +18,8 @@ export function updateStoredSettings(
     const next = update(await getSettings());
     await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: next });
     const stored = await getSettings();
-    if (JSON.stringify(stored) !== JSON.stringify(next)) {
+    // Compare the same canonical schema: Chrome message/storage dictionaries may reorder keys.
+    if (JSON.stringify(stored) !== JSON.stringify(mergeSettings(next))) {
       throw new Error('设置写入后回读不一致，请重新加载扩展后重试');
     }
     return stored;

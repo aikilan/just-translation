@@ -11,10 +11,23 @@ export class StreamProtocolError extends Error {}
 
 /** An unfinished transport can retry only the IDs not already accepted by its caller. */
 export class StreamInterruptedError extends Error {}
+export class StreamOutputLimitError extends StreamInterruptedError {}
 
-const MAX_STREAM_BYTES = 1_048_576;
-const MAX_EVENT_CHARACTERS = 262_144;
-const MAX_JSON_CHARACTERS = 262_144;
+export interface TranslationStreamLimits {
+  maxStreamBytes: number;
+  maxEventCharacters: number;
+  maxJsonCharacters: number;
+}
+const BATCH_STREAM_LIMITS: TranslationStreamLimits = {
+  maxStreamBytes: 1_048_576,
+  maxEventCharacters: 262_144,
+  maxJsonCharacters: 262_144,
+};
+export const FULL_DOCUMENT_STREAM_LIMITS: TranslationStreamLimits = {
+  maxStreamBytes: 16 * 1_048_576,
+  maxEventCharacters: 1_048_576,
+  maxJsonCharacters: 2 * 1_048_576,
+};
 
 /**
  * Decodes one Chat Completions SSE body. Only complete JSON items reach onItem;
@@ -26,6 +39,7 @@ export async function readTranslationStream(
   onItem: (item: StreamTranslationItem) => void,
   signal?: AbortSignal,
   onContent?: () => void,
+  limits: TranslationStreamLimits = BATCH_STREAM_LIMITS,
 ): Promise<void> {
   if (!response.body) throw new StreamProtocolError('API 未返回流式响应体');
   const reader = response.body.getReader();
@@ -45,12 +59,12 @@ export async function readTranslationStream(
     const payload = new TranslationPayloadDecoder((item) => {
       signal?.throwIfAborted();
       onItem(item);
-    });
+    }, limits.maxJsonCharacters);
     let done = false;
     let finished = false;
     let bytes = 0;
     const events = createParser({
-      maxBufferSize: MAX_EVENT_CHARACTERS,
+      maxBufferSize: limits.maxEventCharacters,
       onError(error) {
         throw new StreamProtocolError(
           error.type === 'max-buffer-size-exceeded'
@@ -60,6 +74,8 @@ export async function readTranslationStream(
       },
       onEvent(event) {
         signal?.throwIfAborted();
+        if (event.data.length > limits.maxEventCharacters)
+          throw new StreamProtocolError('API 流式事件超过大小上限');
         if (done) return;
         if (event.data.trim() === '[DONE]') {
           if (!finished) throw new StreamInterruptedError('API 流式响应缺少正常结束标记');
@@ -105,7 +121,7 @@ export async function readTranslationStream(
         }
         const reason: unknown = choice.finish_reason;
         if (reason === 'length')
-          throw new StreamInterruptedError('API 输出被截断，剩余段落尚未完成');
+          throw new StreamOutputLimitError('API 输出被截断，剩余段落尚未完成');
         if (reason !== undefined && reason !== null) {
           if (reason !== 'stop') throw new StreamProtocolError('API 未正常完成翻译');
           finished = true;
@@ -128,7 +144,7 @@ export async function readTranslationStream(
         break;
       }
       bytes += next.value.byteLength;
-      if (bytes > MAX_STREAM_BYTES) throw new StreamProtocolError('API 流式响应超过大小上限');
+      if (bytes > limits.maxStreamBytes) throw new StreamProtocolError('API 流式响应超过大小上限');
       let text: string;
       try {
         text = textDecoder.decode(next.value, { stream: true });
@@ -159,8 +175,12 @@ class TranslationPayloadDecoder {
   private complete = false;
   private characters = 0;
 
-  constructor(onItem: (item: StreamTranslationItem) => void) {
+  constructor(
+    onItem: (item: StreamTranslationItem) => void,
+    private readonly maxCharacters: number,
+  ) {
     let depth = 0;
+    let translationsFields = 0;
     this.parser.onToken = ({ token }) => {
       if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) depth += 1;
       if (token === TokenType.RIGHT_BRACE || token === TokenType.RIGHT_BRACKET) depth -= 1;
@@ -182,6 +202,11 @@ class TranslationPayloadDecoder {
           throw new StreamProtocolError('AI 返回了无效的译文项');
         }
         onItem({ id: value.id, text: value.text });
+      } else if (stack.length === 1 && key === 'translations') {
+        // Item callbacks are provisional: a second root array must not overwrite their meaning.
+        translationsFields += 1;
+        if (translationsFields !== 1 || !Array.isArray(value))
+          throw new StreamProtocolError('AI 必须返回唯一的 translations 数组');
       } else if (stack.length === 0) {
         if (!isRecord(value) || !Array.isArray(value.translations))
           throw new StreamProtocolError('AI 返回的 translations 格式无效');
@@ -192,7 +217,7 @@ class TranslationPayloadDecoder {
 
   write(content: string): void {
     this.characters += content.length;
-    if (this.characters > MAX_JSON_CHARACTERS)
+    if (this.characters > this.maxCharacters)
       throw new StreamProtocolError('AI 译文 JSON 超过大小上限');
     if (!this.started) {
       this.prefix += content;

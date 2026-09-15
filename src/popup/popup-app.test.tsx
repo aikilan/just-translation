@@ -19,6 +19,33 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('popup reading controls', () => {
+  it.each([
+    ['translating', 'collecting', '收集全文', '停止翻译', 'STOP_TRANSLATION'],
+    ['translating', 'requesting', '全文翻译中', '停止翻译', 'STOP_TRANSLATION'],
+    ['translating', 'applying', '回填译文', '停止翻译', 'STOP_TRANSLATION'],
+    ['stopped', undefined, '已停止', '重新全文翻译', 'START_FULL_DOCUMENT_TRANSLATION'],
+    ['error', undefined, '全文翻译失败', '重新全文翻译', 'START_FULL_DOCUMENT_TRANSLATION'],
+    ['complete', undefined, '翻译完成', '重新全文翻译', 'START_FULL_DOCUMENT_TRANSLATION'],
+  ] as const)(
+    'shows full-document %s/%s with a full retry',
+    async (phase, stage, title, action, command) => {
+      const { tabSend } = mockExtension(READY_SETTINGS, {
+        ...IDLE_STATUS,
+        mode: 'full-document',
+        phase,
+        stage,
+        total: 6,
+        failed: phase === 'error' ? 6 : 0,
+      });
+      view = await mount(<PopupApp />);
+      expect(view.container.textContent).toContain(title);
+      expect(view.container.textContent).not.toContain('部分段落未完成');
+      expect(view.container.textContent).not.toContain('返回网页重试');
+      await click(view.container, action);
+      expect(tabSend).toHaveBeenCalledWith(7, { type: command });
+    },
+  );
+
   it('exposes the primary action and preferences without an accordion', async () => {
     const { openOptionsPage } = mockExtension();
     view = await mount(<PopupApp />);

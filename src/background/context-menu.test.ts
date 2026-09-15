@@ -2,11 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   PAGE_TRANSLATION_MENU_ID,
+  FULL_DOCUMENT_TRANSLATION_MENU_ID,
   ensurePageTranslationMenu,
   handlePageTranslationMenuClick,
 } from './context-menu';
 
 describe('page translation context menu', () => {
+  it('routes the independent full-document action to the clicked page', async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    expect(await handlePageTranslationMenuClick(FULL_DOCUMENT_TRANSLATION_MENU_ID, 42, send)).toBe(
+      true,
+    );
+    expect(send).toHaveBeenCalledWith(42, { type: 'START_FULL_DOCUMENT_TRANSLATION' });
+  });
   it('starts translation for the clicked tab without toggling an existing translation off', async () => {
     const sendTabMessage = vi.fn().mockResolvedValue(undefined);
 
@@ -33,9 +41,7 @@ describe('page translation context menu', () => {
         contexts: ['all'],
       }),
     );
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ id: PAGE_TRANSLATION_MENU_ID }),
-    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ id: PAGE_TRANSLATION_MENU_ID }));
   });
 
   it('updates an existing menu without creating a duplicate', async () => {
@@ -44,7 +50,11 @@ describe('page translation context menu', () => {
 
     await ensurePageTranslationMenu({ update, create });
 
-    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenCalledWith(
+      FULL_DOCUMENT_TRANSLATION_MENU_ID,
+      expect.objectContaining({ title: '全文完整翻译（保留上下文）' }),
+    );
     expect(create).not.toHaveBeenCalled();
   });
 
