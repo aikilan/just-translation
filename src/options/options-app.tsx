@@ -1,4 +1,11 @@
-import { BookOpen, Globe2, LoaderCircle, Settings2 } from 'lucide-react';
+import {
+  BookOpen,
+  Globe2,
+  LoaderCircle,
+  Settings2,
+  SlidersHorizontal,
+  ShieldCheck,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import packageJson from '../../package.json' with { type: 'json' };
 import { getSettings } from '../shared/settings-store';
@@ -6,6 +13,7 @@ import { getErrorMessage, type PublicTranslatorSettings } from '../shared/messag
 import type { TranslationProfile, TranslatorSettings } from '../shared/settings';
 import { AIConfiguration } from './ai-configuration';
 import { TranslationConcurrencySetting } from './translation-concurrency-setting';
+import { TranslationRetrySetting } from './translation-retry-setting';
 import { ReadingPreferencesPanel, SiteRulesPanel } from './preference-panels';
 
 type Section = 'api' | 'reading' | 'sites';
@@ -72,6 +80,7 @@ export function OptionsApp() {
           displayMode: value.displayMode,
           translateDynamicContent: value.translateDynamicContent,
           translationConcurrency: value.translationConcurrency,
+          translationRetryCount: value.translationRetryCount,
           autoTranslateSites: value.autoTranslateSites,
           excludedSites: value.excludedSites,
         },
@@ -159,19 +168,48 @@ export function OptionsApp() {
           </p>
         ) : (
           <>
-            <section hidden={section !== 'api'} aria-label="AI 配置">
-              <TranslationConcurrencySetting settings={settings} onSaved={acceptPublic} />
-              <AIConfiguration
-                settings={settings}
-                onSaved={savedProfile}
-                onDeleted={deletedProfile}
-                onActivated={acceptPublic}
-              />
+            <section className="ai-workspace" hidden={section !== 'api'} aria-label="AI 配置">
+              <div className="configuration-editor" role="region" aria-label="配置编辑器">
+                <AIConfiguration
+                  settings={settings}
+                  onSaved={savedProfile}
+                  onDeleted={deletedProfile}
+                  onActivated={acceptPublic}
+                />
+              </div>
+              <aside className="translation-preferences" aria-label="翻译偏好">
+                <div className="inspector-heading">
+                  <SlidersHorizontal aria-hidden="true" />
+                  <h2>翻译偏好</h2>
+                </div>
+                <p className="inspector-description">
+                  所有 AI 配置共用，修改后自动保存。
+                  <br />
+                  下次翻译生效。
+                </p>
+                <TranslationConcurrencySetting settings={settings} onSaved={acceptPublic} />
+                <TranslationRetrySetting settings={settings} onSaved={acceptPublic} />
+                <div className="privacy-note">
+                  <ShieldCheck aria-hidden="true" />
+                  <div>
+                    <strong>只在你的浏览器中保存</strong>
+                    <p>密钥保存在本地，翻译请求直接发送到你配置的 API。</p>
+                  </div>
+                </div>
+              </aside>
             </section>
-            <section hidden={section !== 'reading'} aria-label="阅读偏好">
+            <section
+              className="preference-workspace"
+              hidden={section !== 'reading'}
+              aria-label="阅读偏好"
+            >
               <ReadingPreferencesPanel settings={settings} onSaved={acceptPublic} />
             </section>
-            <section hidden={section !== 'sites'} aria-label="站点规则">
+            <section
+              className="preference-workspace"
+              hidden={section !== 'sites'}
+              aria-label="站点规则"
+            >
               <SiteRulesPanel settings={settings} onSaved={acceptPublic} />
             </section>
           </>

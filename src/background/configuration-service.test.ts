@@ -1,3 +1,4 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_SETTINGS,
@@ -20,7 +21,7 @@ describe('configuration service', () => {
     typeof vi.fn<(values: Record<string, TranslatorSettings>) => Promise<void>>
   >;
   beforeEach(() => {
-    stored = structuredClone(DEFAULT_SETTINGS);
+    stored = structuredClone({...DEFAULT_SETTINGS, profiles:[TEST_PROFILE]});
     storageSet = vi.fn((values: Record<string, TranslatorSettings>) => {
       stored = structuredClone(values[SETTINGS_STORAGE_KEY]);
       return Promise.resolve();
@@ -41,6 +42,40 @@ describe('configuration service', () => {
     expect(stored.translationConcurrency).toBe(2);
     await expect(readPublicSettings()).resolves.toMatchObject({ translationConcurrency: 2 });
   });
+  it('persists disabled thinking and rejects a malformed preference without writing', async () => {
+    await saveTranslationProfile({
+      ...stored.profiles[0],
+      model: 'mimo-v2.5',
+      thinkingEnabled: false,
+    });
+    expect(stored.profiles[0].thinkingEnabled).toBe(false);
+    storageSet.mockClear();
+    await expect(
+      saveTranslationProfile({
+        ...stored.profiles[0],
+        // @ts-expect-error exercise the untrusted runtime-message boundary
+        thinkingEnabled: 'false',
+      }),
+    ).rejects.toThrow('思考');
+    expect(storageSet).not.toHaveBeenCalled();
+  });
+  it.each([0, 3, 5])(
+    'persists and publicly exposes retry count %i',
+    async (translationRetryCount) => {
+      await expect(updateReadingPreferences({ translationRetryCount })).resolves.toMatchObject({
+        translationRetryCount,
+      });
+      expect(stored.translationRetryCount).toBe(translationRetryCount);
+      await expect(readPublicSettings()).resolves.toMatchObject({ translationRetryCount });
+    },
+  );
+  it.each([-1, 6, 1.5, NaN, Infinity])(
+    'rejects invalid retry count %s without writing',
+    async (translationRetryCount) => {
+      await expect(updateReadingPreferences({ translationRetryCount })).rejects.toThrow('重试次数');
+      expect(storageSet).not.toHaveBeenCalled();
+    },
+  );
   it.each([0, -1, 7, 1.5, NaN, Infinity])(
     'rejects invalid concurrency %s without writing',
     async (value) => {
@@ -131,7 +166,7 @@ describe('configuration service', () => {
     }
     await expect(setSiteAutoTranslation('*.example.com', true)).rejects.toThrow();
     await expect(updateReadingPreferences({ targetLanguage: '' })).rejects.toThrow();
-    expect(stored).toEqual(DEFAULT_SETTINGS);
+    expect(stored).toEqual({...DEFAULT_SETTINGS, profiles:[TEST_PROFILE]});
   });
   it('deduplicates rules and retains exclusion conflicts', async () => {
     await setSiteAutoTranslation('News.Example.com', true);

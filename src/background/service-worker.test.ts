@@ -1,7 +1,12 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Result, RuntimeRequest } from '../shared/messages';
-import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY } from '../shared/settings';
+import {
+  DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
+  type TranslationProfile,
+} from '../shared/settings';
 import { contentEvent, STREAM_END, completionResponse } from '../test-utils/sse';
 
 type MessageListener = (
@@ -18,10 +23,15 @@ describe('background document lifecycle', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let holdSessionRead: (() => Promise<void>) | undefined;
   let holdSettings: (() => Promise<void>) | undefined;
+  let translationRetryCount: number;
+  let activeProfile: TranslationProfile;
+  let activeTabs: chrome.tabs.Tab[];
+  let menuStatus: unknown;
   const sender = (id: string): chrome.runtime.MessageSender => ({
     tab: { id: 18, url: 'https://news.ycombinator.com/news' } as chrome.tabs.Tab,
     documentId: id,
     frameId: 0,
+    url: 'https://news.ycombinator.com/news',
   });
   const send = (request: RuntimeRequest, id = documentId) =>
     new Promise<Result<unknown>>((resolve) => message(request, sender(id), resolve));
@@ -29,12 +39,16 @@ describe('background document lifecycle', () => {
   beforeEach(async () => {
     vi.resetModules();
     documentId = 'old-document';
+    activeTabs = [];
+    menuStatus = undefined;
     session = {};
     holdSettings = undefined;
+    translationRetryCount = 1;
     holdSessionRead = undefined;
+    activeProfile = { ...TEST_PROFILE, model: 'test-model' };
     const settings = {
       ...DEFAULT_SETTINGS,
-      profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile, model: 'test-model' })),
+      profiles: [activeProfile],
     };
     const event = () => ({ addListener: vi.fn() });
     fetchMock = vi.fn(
@@ -50,7 +64,7 @@ describe('background document lifecycle', () => {
           setAccessLevel: vi.fn(),
           get: async () => {
             await holdSettings?.();
-            return { [SETTINGS_STORAGE_KEY]: settings };
+            return { [SETTINGS_STORAGE_KEY]: { ...settings, translationRetryCount } };
           },
           set: vi.fn(),
         },
@@ -84,13 +98,21 @@ describe('background document lifecycle', () => {
       alarms: { get: () => Promise.resolve({ name: 'cleanup' }), onAlarm: event() },
       contextMenus: {
         removeAll: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
         create: vi.fn((_properties, callback: () => void) => {
           callback();
         }),
         onClicked: event(),
       },
       commands: { onCommand: event() },
-      tabs: { onRemoved: event(), sendMessage: vi.fn().mockResolvedValue(undefined) },
+      windows: { onFocusChanged: event() },
+      tabs: {
+        onRemoved: event(),
+        onActivated: event(),
+        onUpdated: event(),
+        query: vi.fn(() => Promise.resolve(activeTabs)),
+        sendMessage: vi.fn(() => Promise.resolve(menuStatus)),
+      },
       webNavigation: {
         getFrame: () => Promise.resolve({ documentId, frameId: 0 }),
         onCommitted: {
@@ -105,13 +127,180 @@ describe('background document lifecycle', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('registers exactly one menu on worker evaluation without repeating it for startup events', async () => {
+  it('executes selection requests through the real queue without creating page sessions', async () => {
+    fetchMock.mockResolvedValue(completionResponse([{ id: 'selection', text: '选区译文' }]));
+    const response = await send({
+      type: 'TRANSLATE_SELECTION',
+      requestId: 'selected',
+      text: 'Only this paragraph',
+    });
+    expect(response).toEqual({
+      ok: true,
+      data: { text: '选区译文', targetLanguage: DEFAULT_SETTINGS.targetLanguage },
+    });
+    expect(Object.keys(session)).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
+      messages: { content: string }[];
+    };
+    expect(JSON.parse(body.messages[1].content)).toEqual({
+      segments: [{ id: 'selection', group: 'selection', part: 0, text: 'Only this paragraph' }],
+    });
+  });
+
+  it('closing a selection does not cancel concurrent page translation', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'page',
+      mode: 'segmented',
+    });
+    const page = send({
+      type: 'TRANSLATE_BATCH',
+      sessionId: 'page',
+      batchId: 'batch',
+      priority: 'visible',
+      segments: [{ requestId: 'p:0', unitId: 'p', partIndex: 0, text: 'Page paragraph' }],
+    });
+    const selection = send({
+      type: 'TRANSLATE_SELECTION',
+      requestId: 'selected',
+      text: 'Selected paragraph',
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await send({ type: 'CANCEL_SELECTION_TRANSLATION', requestId: 'selected' });
+    expect(await selection).toMatchObject({ ok: false });
+    const pageInit = fetchMock.mock.calls.find(([, init]) =>
+      ((init as RequestInit).body as string).includes('Page paragraph'),
+    )![1] as RequestInit;
+    expect(pageInit.signal!.aborted).toBe(false);
+    await send({ type: 'CANCEL_TRANSLATION_REQUESTS', sessionId: 'page' });
+    await page;
+  });
+
+  it('snapshots thinking for requests and changes configuration identity for the next session', async () => {
+    activeProfile.provider = 'mimo';
+    activeProfile.apiUrl = 'https://api.xiaomimimo.com/v1';
+    activeProfile.model = 'mimo-v2.5';
+    activeProfile.thinkingEnabled = false;
+    const begin = (sessionId: string) =>
+      send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'segmented',
+        profileId: DEFAULT_SETTINGS.activeProfileId,
+        sessionId,
+      });
+    const first = await begin('thinking-off');
+    activeProfile.thinkingEnabled = true;
+    const second = await begin('thinking-on');
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(first).not.toEqual(second);
+    fetchMock
+      .mockResolvedValueOnce(completionResponse([{ id: 'a:0', text: '你好' }]))
+      .mockResolvedValueOnce(completionResponse([{ id: 'a:0', text: '你好' }]));
+    for (const sessionId of ['thinking-off', 'thinking-on']) {
+      expect(
+        (
+          await send({
+            type: 'TRANSLATE_BATCH',
+            sessionId,
+            batchId: 'batch',
+            priority: 'visible',
+            segments: [{ requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'Hello' }],
+          })
+        ).ok,
+      ).toBe(true);
+    }
+    expect(
+      fetchMock.mock.calls.map((call) => {
+        const init = call[1] as RequestInit;
+        const body = JSON.parse(init.body as string) as { thinking: { type: string } };
+        return body.thinking.type;
+      }),
+    ).toEqual(['disabled', 'enabled']);
+  });
+
+  it.each([0, 3, 5])(
+    'snapshots retry count %i at session start and enforces it for HTTP failures',
+    async (count) => {
+      translationRetryCount = count;
+      await send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'segmented',
+        profileId: DEFAULT_SETTINGS.activeProfileId,
+        sessionId: 'retry-budget',
+      });
+      translationRetryCount = count === 0 ? 5 : 0;
+      fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
+      vi.useFakeTimers();
+      try {
+        const work = send({
+          type: 'TRANSLATE_BATCH',
+          sessionId: 'retry-budget',
+          batchId: 'batch',
+          priority: 'visible',
+          segments: [{ requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'First paragraph' }],
+        });
+        await vi.advanceTimersByTimeAsync(5000);
+        expect((await work).ok).toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(count + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('registers context-specific translation menus once on worker evaluation without repeating it for startup events', async () => {
     for (const event of [chrome.runtime.onInstalled, chrome.runtime.onStartup]) {
       const listener = vi.mocked(event).addListener.mock.calls[0][0];
       (listener as () => void)();
     }
-    await vi.waitFor(() => expect(chrome.contextMenus.create).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(chrome.contextMenus.create).toHaveBeenCalledTimes(2));
     expect(chrome.contextMenus.removeAll).toHaveBeenCalledOnce();
+  });
+
+  it('creates retry only for failures and removes it on recovery and tab/window changes', async () => {
+    await vi.waitFor(() => expect(chrome.contextMenus.create).toHaveBeenCalledTimes(2));
+    expect(chrome.contextMenus.remove).not.toHaveBeenCalled();
+    activeTabs = [{ id: 18 }] as chrome.tabs.Tab[];
+    for (const event of [
+      undefined,
+      chrome.tabs.onActivated,
+      chrome.tabs.onUpdated,
+      chrome.windows.onFocusChanged,
+    ]) {
+      menuStatus = { mode: 'segmented', failed: 2 };
+      await send({ type: 'PAGE_RETRY_STATE_CHANGED' });
+      expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+        18,
+        { type: 'GET_PAGE_STATUS' },
+        { frameId: 0 },
+      );
+      expect(chrome.contextMenus.create).toHaveBeenLastCalledWith(
+        {
+          id: 'just-translate-retry-failed',
+          title: '重试全部失败',
+          contexts: ['all'],
+          documentUrlPatterns: ['http://*/*', 'https://*/*'],
+        },
+        expect.any(Function),
+      );
+      const count = vi.mocked(chrome.contextMenus.create).mock.calls.length;
+      await send({ type: 'PAGE_RETRY_STATE_CHANGED' });
+      expect(chrome.contextMenus.create).toHaveBeenCalledTimes(count);
+      vi.mocked(chrome.contextMenus.remove).mockClear();
+      menuStatus = { mode: 'segmented', failed: 0 };
+      if (event) {
+        const listener = vi.mocked(event).addListener.mock.calls[0][0];
+        (listener as (...args: unknown[]) => void)(18, { status: 'loading' });
+      } else {
+        await send({ type: 'PAGE_RETRY_STATE_CHANGED' });
+      }
+      await vi.waitFor(() =>
+        expect(chrome.contextMenus.remove).toHaveBeenCalledWith('just-translate-retry-failed'),
+      );
+    }
   });
 
   it('rejects settings mutations from a web content script', async () => {
@@ -198,6 +387,7 @@ describe('background document lifecycle', () => {
   });
 
   it('uses a 120 second HTTP deadline for full-document mode without retrying', async () => {
+    translationRetryCount = 5;
     vi.useFakeTimers();
     try {
       await send({

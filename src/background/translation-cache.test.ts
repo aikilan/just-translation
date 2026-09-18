@@ -1,3 +1,4 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import 'fake-indexeddb/auto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,8 @@ import {
 } from './translation-cache';
 
 const BASE_CONTEXT: TranslationCacheContext = {
+  ...TEST_PROFILE,
+  thinkingEnabled: true,
   origin: 'https://news.example.com',
   apiUrl: 'https://gateway.example.com/v1',
   model: 'translation-model',
@@ -34,6 +37,17 @@ afterEach(async () => {
 });
 
 describe('TranslationCache', () => {
+  it('does not reuse a translation after changing thinking mode', async () => {
+    const enabled = {
+      ...BASE_CONTEXT,
+      thinkingControl: 'thinking' as const,
+      thinkingEnabled: true,
+    };
+    const disabled = { ...enabled, thinkingEnabled: false };
+    expect(await createTranslationCacheKey(enabled, 'Hello')).not.toBe(
+      await createTranslationCacheKey(disabled, 'Hello'),
+    );
+  });
   it('uses readonly transactions for lookups and rejects blank cached results', async () => {
     const cache = createCache(() => 1_000);
     await cache.putMany(BASE_CONTEXT, [{ sourceText: 'Valid output', translatedText: '有效译文' }]);
@@ -178,3 +192,40 @@ function createCache(now: () => number): TranslationCache {
   databaseNames.push(databaseName);
   return new TranslationCache({ databaseName, now });
 }
+
+it('isolates protocols, endpoints and effective thinking fields, ignoring inactive fields', async () => {
+  const { DEFAULT_PROVIDER_OPTIONS } = await import('../shared/providers');
+  const context = {
+    ...DEFAULT_PROVIDER_OPTIONS,
+    origin: 'https://page.test',
+    apiUrl: 'https://gateway.test/prefix',
+    provider: 'mimo' as const,
+    protocol: 'openai' as const,
+    model: 'mimo-v2.5',
+    thinkingEnabled: true,
+    targetLanguage: 'Chinese',
+    translationPrompt: 'Translate',
+  };
+  const key = await createTranslationCacheKey(context, 'Hello');
+  expect(await createTranslationCacheKey({ ...context, protocol: 'anthropic' }, 'Hello')).not.toBe(
+    key,
+  );
+  expect(
+    await createTranslationCacheKey({ ...context, apiUrl: 'https://gateway.test/other' }, 'Hello'),
+  ).not.toBe(key);
+  expect(await createTranslationCacheKey({ ...context, thinkingBudgetTokens: 4096 }, 'Hello')).toBe(
+    key,
+  );
+  const manual = { ...context, thinkingControl: 'anthropic-budget' as const };
+  expect(await createTranslationCacheKey(manual, 'Hello')).not.toBe(
+    await createTranslationCacheKey({ ...manual, thinkingBudgetTokens: 4096 }, 'Hello'),
+  );
+  const effort = {
+    ...context,
+    thinkingControl: 'reasoning_effort' as const,
+    reasoningEffort: 'low' as const,
+  };
+  expect(await createTranslationCacheKey(effort, 'Hello')).not.toBe(
+    await createTranslationCacheKey({ ...effort, reasoningEffort: 'high' }, 'Hello'),
+  );
+});

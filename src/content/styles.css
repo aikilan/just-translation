@@ -3,7 +3,7 @@
   display: none !important;
 }
 
-[data-justranslate-source-content]:not([hidden]) {
+[data-justranslate-source-text]:not([hidden]) {
   display: contents !important;
 }
 
@@ -14,6 +14,8 @@
   padding: 0 !important;
   border: 0 !important;
   white-space: normal !important;
+  flex-basis: 100% !important;
+  grid-column: 1 / -1 !important;
 }
 
 [data-justranslate-translation][data-justranslate-state='pending'] {

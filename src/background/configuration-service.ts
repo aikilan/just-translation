@@ -6,6 +6,8 @@ import type {
 import {
   getActiveProfile,
   isValidTranslationConcurrency,
+  isValidTranslationRetryCount,
+  MAX_TRANSLATION_RETRY_COUNT,
   MAX_TRANSLATION_CONCURRENCY,
   normalizeTranslationProfile,
   normalizeSiteRule,
@@ -100,6 +102,11 @@ export async function updateReadingPreferences(
           throw new Error(`翻译并发数必须是 1–${MAX_TRANSLATION_CONCURRENCY} 的整数`);
         next.translationConcurrency = patch.translationConcurrency;
       }
+      if (patch.translationRetryCount !== undefined) {
+        if (!isValidTranslationRetryCount(patch.translationRetryCount))
+          throw new Error(`翻译失败重试次数必须是 0–${MAX_TRANSLATION_RETRY_COUNT} 的整数`);
+        next.translationRetryCount = patch.translationRetryCount;
+      }
       return next;
     }),
   );
@@ -152,6 +159,7 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
     displayMode: settings.displayMode,
     translateDynamicContent: settings.translateDynamicContent,
     translationConcurrency: settings.translationConcurrency,
+    translationRetryCount: settings.translationRetryCount,
     excludedSites: settings.excludedSites,
     autoTranslateSites: settings.autoTranslateSites,
   };

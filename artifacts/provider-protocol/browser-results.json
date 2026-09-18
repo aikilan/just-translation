@@ -1,0 +1,92 @@
+{
+  "results": [
+    {
+      "protocol": "openai",
+      "mode": "segmented",
+      "status": {
+        "mode": "segmented",
+        "phase": "complete",
+        "translated": 3,
+        "failed": 0,
+        "total": 3,
+        "displayMode": "bilingual",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        },
+        "needsRestart": false
+      },
+      "rendered": 3
+    },
+    {
+      "protocol": "openai",
+      "mode": "full",
+      "status": {
+        "mode": "full-document",
+        "phase": "complete",
+        "translated": 3,
+        "failed": 0,
+        "total": 3,
+        "displayMode": "bilingual",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        }
+      },
+      "rendered": 3
+    },
+    {
+      "protocol": "openai",
+      "mode": "selection",
+      "selection": {
+        "ok": true
+      }
+    },
+    {
+      "protocol": "anthropic",
+      "mode": "segmented",
+      "status": {
+        "mode": "segmented",
+        "phase": "complete",
+        "translated": 3,
+        "failed": 0,
+        "total": 3,
+        "displayMode": "bilingual",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        },
+        "needsRestart": false
+      },
+      "rendered": 3
+    },
+    {
+      "protocol": "anthropic",
+      "mode": "full",
+      "status": {
+        "mode": "full-document",
+        "phase": "complete",
+        "translated": 3,
+        "failed": 0,
+        "total": 3,
+        "displayMode": "bilingual",
+        "context": {
+          "profileId": "profile-default",
+          "targetLanguage": "Simplified Chinese"
+        }
+      },
+      "rendered": 3
+    },
+    {
+      "protocol": "anthropic",
+      "mode": "selection",
+      "selection": {
+        "ok": true
+      }
+    },
+    {
+      "popupText": "只是翻译\n\n127.0.0.1\n\n翻译完成\n\n已翻译 3 / 3 个段落\n\n重新全文翻译\n翻译为\n简体中文\n繁體中文\n英语\n日语\n韩语\n法语\n德语\n西班牙语\n自定义语言…\n显示方式\n双语\n仅译文\nAI 配置\n默认配置\n此站自动翻译\n恢复原文\nAlt + T"
+    }
+  ],
+  "errors": []
+}

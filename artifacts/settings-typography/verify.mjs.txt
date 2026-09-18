@@ -1,0 +1,73 @@
+import { chromium } from '/Users/jintao.xu/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const root = process.cwd();
+const profile = await mkdtemp(path.join(tmpdir(), 'jt-type-'));
+const context = await chromium.launchPersistentContext(profile, {
+  headless: true,
+  executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  args: [`--disable-extensions-except=${root}/dist`, `--load-extension=${root}/dist`],
+  viewport: { width: 1440, height: 1400 }, reducedMotion: 'reduce',
+});
+const results = [], errors = [];
+try {
+  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const page = await context.newPage();
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`chrome-extension://${worker.url().split('/')[2]}/src/options/index.html`);
+  await page.getByLabel('供应商', { exact: true }).selectOption('mimo');
+  await page.getByLabel('配置名称', { exact: true }).fill('小米 MiMo');
+  await page.getByLabel('模型', { exact: true }).fill('mimo-v2.5');
+  await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  await page.locator('.ai-actions .is-saved').waitFor();
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1400 });
+      for (const section of ['AI 配置', '阅读偏好', '站点规则']) {
+        await page.getByRole('navigation').getByRole('button', { name: section, exact: true }).click();
+        await page.getByRole('navigation').locator('button[aria-current=page]').filter({ hasText: section }).waitFor();
+        const sample = await page.evaluate(section => {
+          const surface = document.querySelector(`section[aria-label="${section}"]`);
+          const styles = selector => {
+            const element = surface.querySelector(selector);
+            const css = getComputedStyle(element);
+            return { color: css.color, size: parseFloat(css.fontSize), weight: Number(css.fontWeight) };
+          };
+          const heading = styles(section === 'AI 配置' ? 'legend' : 'h2');
+          const body = styles(section === 'AI 配置' ? '[aria-label="API 地址"]' : section === '阅读偏好' ? '.reading-preview p' : '.site-rule-section > p');
+          const label = section === '站点规则' ? null : styles(section === 'AI 配置' ? '.field > span' : '.setting-copy > span');
+          const note = styles(section === 'AI 配置' ? '.field small' : section === '阅读偏好' ? '.setting-copy small' : '.site-rule-section > p');
+          return { heading, body, label, note, surface: getComputedStyle(section === 'AI 配置' ? surface.querySelector('.configuration-editor') : surface).backgroundColor, overflow: document.documentElement.scrollWidth > innerWidth };
+        }, section);
+        const luminance = color => {
+          const values = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; });
+          return values[0] * .2126 + values[1] * .7152 + values[2] * .0722;
+        };
+        const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
+        assert.equal(sample.overflow, false, `${scheme}/${width}/${section}: overflow`);
+        if (sample.label) {
+          assert.ok(sample.heading.size >= sample.label.size + 2, 'Module headings must be visibly larger than field labels');
+          assert.notEqual(sample.heading.color, sample.label.color, 'Module headings and field labels must have separate tones');
+          assert.notEqual(sample.label.color, sample.body.color, 'Field labels and entered content must have separate tones');
+          assert.ok(sample.heading.weight > sample.label.weight, 'Module headings must be heavier than field labels');
+        }
+        for (const item of [sample.heading, sample.body, sample.label, sample.note].filter(Boolean)) {
+          assert.ok(contrast(item.color, sample.surface) >= 4.5, `Insufficient text contrast: ${JSON.stringify(item)}`);
+        }
+        const headingContrast = contrast(sample.heading.color, sample.surface);
+        assert.ok(headingContrast > contrast(sample.body.color, sample.surface), 'Heading must have stronger contrast than body');
+        results.push({ scheme, width, section, ...sample });
+        if (width !== 320) await page.screenshot({ path: `${root}/artifacts/settings-typography/${section}-${scheme}-${width}.png`, fullPage: true, animations: 'disabled' });
+      }
+    }
+  }
+  assert.deepEqual(errors, []);
+  await writeFile(`${root}/artifacts/settings-typography/results.json`, JSON.stringify({ results, errors }, null, 2));
+  console.log('PASS: 18 page/theme/viewport checks, typography hierarchy and text contrast >= 4.5:1.');
+} finally {
+  await context.close();
+  await rm(profile, { recursive: true, force: true });
+}

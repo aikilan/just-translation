@@ -1,0 +1,27 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { OptionsApp } from './options-app';
+import { mount,mockExtension,input,click,READY_SETTINGS } from '../test-utils/ui';
+let view:Awaited<ReturnType<typeof mount>>;
+afterEach(()=>{view?.unmount();vi.unstubAllGlobals();vi.restoreAllMocks();});
+it('switching back to auto restores the required enabled state for an always-thinking model',async()=>{
+ const {send}=mockExtension(); view=await mount(<OptionsApp/>);
+ await input(view.container,'供应商','grok'); await input(view.container,'模型','grok-4.6');
+ await input(view.container,'思考控制方式','reasoning_effort');
+ act(()=>{view.container.querySelector<HTMLInputElement>('[aria-label="开启思考"]')!.click();});
+ await input(view.container,'思考控制方式','auto');
+ const checkbox=view.container.querySelector<HTMLInputElement>('[aria-label="开启思考"]')!;
+ expect(checkbox.checked).toBe(true); expect(checkbox.disabled).toBe(true);
+ await click(view.container,'保存配置');
+ expect(view.container.textContent).toContain('此模型始终思考，无法关闭');
+ expect(send.mock.calls.some(([r])=>r.type==='SAVE_TRANSLATION_PROFILE')).toBe(true);
+});
+it('discarding a URL edit restores the original preset ownership',async()=>{
+ mockExtension({...READY_SETTINGS,profiles:[{...READY_SETTINGS.profiles[0],provider:'mimo',apiUrl:'https://api.xiaomimimo.com/v1',model:'mimo-v2.5'}]});
+ view=await mount(<OptionsApp/>);
+ await input(view.container,'API 地址','https://relay.test/v1');
+ await click(view.container,'放弃修改');
+ await input(view.container,'接入协议','anthropic');
+ expect(view.container.querySelector<HTMLInputElement>('[aria-label="API 地址"]')!.value).toBe('https://api.xiaomimimo.com/anthropic');
+});

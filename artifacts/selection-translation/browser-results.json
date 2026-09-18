@@ -1,0 +1,64 @@
+{
+  "nativeMenu": [
+    "main document",
+    "textarea",
+    "same-origin iframe",
+    "cross-origin iframe"
+  ],
+  "checks": [
+    {
+      "longSelection": {
+        "x": 142.5,
+        "y": 12,
+        "width": 380,
+        "height": 480,
+        "scrollHeight": 1493,
+        "clientHeight": 374,
+        "footerBottom": 475,
+        "viewportHeight": 820
+      }
+    },
+    "automatic retry succeeds on second attempt",
+    "manual retry succeeds after terminal failure",
+    "closing aborts in-flight HTTP",
+    "replacement cancels old selection and only displays the new result",
+    "provider output remains plain text",
+    "missing configuration never sends HTTP",
+    "removing anchor closes popup",
+    "navigation aborts active request"
+  ],
+  "frames": [
+    {
+      "documentId": "878CD2E18BECBE7F7049DF22ED7C4FE4",
+      "documentLifecycle": "active",
+      "errorOccurred": false,
+      "frameId": 0,
+      "frameType": "outermost_frame",
+      "parentFrameId": -1,
+      "processId": 7,
+      "url": "http://127.0.0.1:50037/selection"
+    },
+    {
+      "documentId": "D147C5B7365B2A4CD8D120ACA9A7D9A6",
+      "documentLifecycle": "active",
+      "errorOccurred": false,
+      "frameId": 4,
+      "frameType": "sub_frame",
+      "parentDocumentId": "878CD2E18BECBE7F7049DF22ED7C4FE4",
+      "parentFrameId": 0,
+      "processId": 7,
+      "url": "http://127.0.0.1:50037/frame"
+    },
+    {
+      "documentId": "B490BF6DD68C37543A7BF1D63C3F7211",
+      "documentLifecycle": "active",
+      "errorOccurred": false,
+      "frameId": 5,
+      "frameType": "sub_frame",
+      "parentDocumentId": "878CD2E18BECBE7F7049DF22ED7C4FE4",
+      "parentFrameId": 0,
+      "processId": 8,
+      "url": "http://localhost:50037/frame"
+    }
+  ]
+}

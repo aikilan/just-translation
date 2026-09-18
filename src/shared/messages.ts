@@ -31,6 +31,7 @@ export type PublicTranslatorSettings = Pick<
   | 'displayMode'
   | 'translateDynamicContent'
   | 'translationConcurrency'
+  | 'translationRetryCount'
   | 'excludedSites'
   | 'activeProfileId'
   | 'autoTranslateSites'
@@ -82,7 +83,11 @@ export interface TranslationBatchProgress {
 
 export type ReadingPreferences = Pick<
   TranslatorSettings,
-  'targetLanguage' | 'displayMode' | 'translateDynamicContent' | 'translationConcurrency'
+  | 'targetLanguage'
+  | 'displayMode'
+  | 'translateDynamicContent'
+  | 'translationConcurrency'
+  | 'translationRetryCount'
 >;
 export interface SiteRuleUpdate {
   list: 'autoTranslateSites' | 'excludedSites';
@@ -91,6 +96,9 @@ export interface SiteRuleUpdate {
 }
 
 export type RuntimeRequest =
+  | { type: 'PAGE_RETRY_STATE_CHANGED' }
+  | { type: 'TRANSLATE_SELECTION'; requestId: string; text: string }
+  | { type: 'CANCEL_SELECTION_TRANSLATION'; requestId: string }
   | { type: 'GET_PUBLIC_SETTINGS' }
   | {
       type: 'BEGIN_TRANSLATION_SESSION';
@@ -129,11 +137,13 @@ export type RuntimeRequest =
   | { type: 'SET_SITE_AUTO_TRANSLATE'; hostname: string; enabled: boolean };
 
 export type PageCommand =
+  | { type: 'START_SELECTION_TRANSLATION'; text: string }
   | TranslationBatchProgress
   | { type: 'GET_PAGE_DIAGNOSTICS' }
   | { type: 'START_TRANSLATION' }
   | { type: 'START_FULL_DOCUMENT_TRANSLATION' }
   | { type: 'RESTART_TRANSLATION' }
+  | { type: 'RETRY_FAILED_TRANSLATIONS' }
   | { type: 'STOP_TRANSLATION' }
   | { type: 'RESTORE_PAGE' }
   | { type: 'TOGGLE_TRANSLATION' }
@@ -141,6 +151,12 @@ export type PageCommand =
   | { type: 'GET_PAGE_STATUS' };
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/** Only display data crosses back to the selected document; provider credentials stay trusted. */
+export interface SelectionTranslationResult {
+  text: string;
+  targetLanguage: string;
+}
 
 export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '发生未知错误';

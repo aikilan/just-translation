@@ -1,0 +1,96 @@
+async (page) => {
+  const origin = 'http://127.0.0.1:61031';
+  const root = '/Users/jintao.xu/Documents/只是翻译';
+  const context = await page.context().browser().browserType().launchPersistentContext('/tmp/justranslate-context-retry-' + Date.now(), {
+    headless: true,
+    executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    args: ['--disable-extensions-except=' + root + '/dist', '--load-extension=' + root + '/dist'],
+    viewport: { width: 1000, height: 760 },
+  });
+  try {
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+    await worker.evaluate(() => {
+      self.menuVisibility = [];
+      const update = chrome.contextMenus.update.bind(chrome.contextMenus);
+      chrome.contextMenus.update = (id, properties, callback) => update(id, properties, () => {
+        if (!chrome.runtime.lastError && id === 'just-translate-retry-failed') self.menuVisibility.push(properties.visible);
+        callback?.();
+      });
+    });
+    const waitMenu = async visible => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const states = await worker.evaluate(() => self.menuVisibility);
+        if (states.length && states.at(-1) === visible) return;
+        await page.waitForTimeout(50);
+      }
+      throw new Error('Menu visibility did not become ' + visible);
+    };
+    await worker.evaluate(async (origin) => chrome.storage.local.set({ translatorSettings: {
+      profiles: [{ id: 'fixture', name: '批量重试验收', apiUrl: origin, apiKey: '', model: 'fixture', translationPrompt: 'Translate into {{targetLanguage}}.' }],
+      activeProfileId: 'fixture', targetLanguage: 'Simplified Chinese', displayMode: 'bilingual',
+      translationConcurrency: 2, translationRetryCount: 0, translateDynamicContent: false,
+      excludedSites: [], autoTranslateSites: [],
+    } }), origin);
+    const article = await context.newPage();
+    const errors = [];
+    article.on('pageerror', error => errors.push(error.message));
+    await article.goto(origin + '/bulk');
+    await article.evaluate(() => {
+      document.body.innerHTML = '<main><p id="success">This paragraph has already been translated successfully.</p></main>';
+    });
+    const tabs = await worker.evaluate((origin) => chrome.tabs.query({ url: origin + '/*' }), origin);
+    const id = tabs[0].id;
+    const command = type => worker.evaluate(({ id, type }) => chrome.tabs.sendMessage(id, { type }), { id, type });
+    const until = async predicate => {
+      for (let i = 0; i < 180; i++) {
+        const status = await command('GET_PAGE_STATUS');
+        if (predicate(status)) return status;
+        await article.waitForTimeout(100);
+      }
+      throw new Error('Status timeout: ' + JSON.stringify(await command('GET_PAGE_STATUS')));
+    };
+    await command('START_TRANSLATION');
+    await until(status => status.phase === 'complete' && status.translated === 1);
+    await article.evaluate(() => {
+      window.preservedTranslation = document.querySelector('#success [data-justranslate-translation]');
+      document.querySelector('main').insertAdjacentHTML('beforeend', '<p id="first">First paragraph that needs a retry.</p><p id="second">Second paragraph that needs a retry.</p>');
+    });
+    await article.request.get(origin + '/scenario?mode=fail');
+    await command('START_TRANSLATION');
+    const before = await until(status => status.phase === 'error' && status.failed === 2);
+    await waitMenu(true);
+    const healthy = await context.newPage();
+    await healthy.goto(origin + '/healthy');
+    await healthy.bringToFront();
+    await waitMenu(false);
+    await article.bringToFront();
+    await waitMenu(true);
+    await article.request.get(origin + '/scenario?mode=slow');
+    await command('RETRY_FAILED_TRANSLATIONS');
+    await waitMenu(false);
+    const after = await until(status => status.phase === 'complete' && status.translated === 3);
+    const stats = await (await article.request.get(origin + '/stats')).json();
+    const preserved = await article.evaluate(() => window.preservedTranslation === document.querySelector('#success [data-justranslate-translation]'));
+    await article.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>Another failed paragraph before navigation.</p>'));
+    await article.request.get(origin + '/scenario?mode=fail');
+    await command('START_TRANSLATION');
+    await until(status => status.phase === 'error' && status.failed === 1);
+    await waitMenu(true);
+    await command('RESTORE_PAGE');
+    await waitMenu(false);
+    await command('START_TRANSLATION');
+    await until(status => status.phase === 'error' && status.failed > 0);
+    await waitMenu(true);
+    await article.goto(origin + '/fresh');
+    await waitMenu(false);
+    const visibility = await worker.evaluate(() => self.menuVisibility);
+    if (!preserved || stats.requests.flatMap(r => r.texts).length !== 2 || errors.length) {
+      throw new Error(JSON.stringify({ preserved, stats, errors }));
+    }
+    return { before, after, preserved, visibility, retryTexts: stats.requests.flatMap(r => r.texts), errors,
+      coverage: 'Actual Chrome contextMenus.update acknowledgements; tab switching, retry, restore and navigation. Native menu click routing is covered by unit tests.' };
+
+  } finally {
+    await context.close();
+  }
+}

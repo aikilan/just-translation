@@ -1,3 +1,5 @@
+import { isSourcePresentationMutation, synchronizeSourcePresentation } from './source-presentation';
+import PQueue from 'p-queue';
 import { getElementTranslationPriority } from './viewport';
 import {
   createTranslationBatches,
@@ -27,6 +29,7 @@ import { isUrlExcluded, type DisplayMode } from '../shared/settings';
 import {
   cleanupReadingRuns,
   discoverTranslatableElements,
+  getOriginalSourceText,
   getElementDeclaredLanguage,
   getElementSourceText,
   renderTranslation,
@@ -170,11 +173,28 @@ export class TranslationController {
     total: 0,
     displayMode: 'bilingual',
   };
+  private reportedFailures = false;
+
+  constructor(private readonly onFailuresChanged?: () => void) {}
+
   private mainSessionId: string | null = null;
   private readonly retrySessionIds = new Set<string>();
+  private bulkRetry: {
+    queue: PQueue;
+    cancellation: AbortController;
+    requiresRescan: boolean;
+  } | null = null;
   private readonly sessionConfigurations = new Map<string, string>();
   private readonly sessionCacheWrites = new Map<string, Set<Promise<void>>>();
   private observer: MutationObserver | null = null;
+  /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
+  private readonly onPresentationChanged = (event: Event): void => {
+    const element = event.target;
+    if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
+      return;
+    this.addDynamicRoot(element);
+    this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
+  };
   private observerTimer: number | undefined;
   private readonly dynamicRoots = new Map<HTMLElement, number>();
   private dynamicContentEnabled = false;
@@ -362,13 +382,56 @@ export class TranslationController {
     }
   }
 
+  /** Retries a snapshot of failed paragraphs; all their missing parts share one request budget. */
+  async retryAllFailed(): Promise<void> {
+    if (this.fullDocument || this.bulkRetry) return;
+    this.purgeDisconnectedRecords();
+    const failedRecords = [...this.records.values()].filter((record) => record.phase === 'error');
+    if (failedRecords.length === 0) return;
+    if (!this.hasActiveOperation()) this.metrics = new TranslationMetrics();
+    // Claim the operation before any await so duplicate popup commands cannot start another run.
+    const operation = {
+      queue: new PQueue({ concurrency: 1 }),
+      cancellation: new AbortController(),
+      requiresRescan: false,
+    };
+    this.bulkRetry = operation;
+    this.status.phase = 'translating';
+    this.status.error = undefined;
+    this.syncStatusCounts();
+    let error: string | undefined;
+    try {
+      const settings = await this.readValidSettings();
+      if (this.bulkRetry !== operation) return;
+      operation.queue.concurrency = settings.translationConcurrency;
+      await Promise.all(
+        failedRecords.map(async (record) => {
+          // A source can be removed, replaced, or individually retried during preflight.
+          if (this.records.get(record.element) !== record || record.phase !== 'error') return;
+          await this.retry(record.element);
+        }),
+      );
+    } catch (cause) {
+      error = getErrorMessage(cause);
+    } finally {
+      if (this.bulkRetry === operation) {
+        this.bulkRetry = null;
+        this.settleStatus(error);
+        if (operation.requiresRescan && !this.hasActiveOperation()) await this.start();
+        else this.resumeDynamicObserver();
+        if (!this.hasActiveOperation()) this.metrics.finish();
+      }
+    }
+  }
+
   /** Retries only the selected failed source and ignores duplicate activation while pending. */
   async retry(source: HTMLElement): Promise<void> {
     if (this.fullDocument) return this.startFullDocument();
     const record = this.records.get(source);
     if (!record || record.phase !== 'error') return;
+    const bulkRetry = this.bulkRetry;
     if (!source.isConnected) {
-      this.discardRecord(record, false);
+      this.discardRecord(record);
       this.settleStatus();
       return;
     }
@@ -391,6 +454,7 @@ export class TranslationController {
 
     try {
       const settings = await this.readValidSettings();
+      if (!this.isCurrentRetry(record, sessionId, generation)) return;
       if (isUrlExcluded(location.href, settings.excludedSites)) {
         throw new Error('当前站点已被排除');
       }
@@ -429,13 +493,13 @@ export class TranslationController {
       ]);
       if (!this.isCurrentRetry(record, sessionId, generation)) return;
       if (resolution.skippedIds.includes(record.id)) {
-        this.discardRecord(record, true);
+        this.discardRecord(record);
         return;
       }
       const cached = resolution.cachedTranslations[record.id];
       if (cached !== undefined) {
         if (getElementSourceText(source) !== record.sourceText) {
-          this.discardRecord(record, true);
+          this.discardRecord(record);
           requiresRescan = true;
           return;
         }
@@ -476,7 +540,16 @@ export class TranslationController {
               if (text !== undefined) checkpoint.translatedParts[segment.partIndex] = text;
             }
           };
-          const response = await this.sendBatch(sessionId, 'visible', batch, publish);
+          const request = () => {
+            // Check again when a queued batch is admitted, including after stop/restore.
+            if (!this.isCurrentRetry(record, sessionId, generation)) {
+              throw new Error('翻译已停止');
+            }
+            return this.sendBatch(sessionId, 'visible', batch, publish);
+          };
+          const response = bulkRetry
+            ? await bulkRetry.queue.add(request, { signal: bulkRetry.cancellation.signal })
+            : await request();
           if (response.ok) publish(response.data.translations);
           return response;
         },
@@ -490,7 +563,7 @@ export class TranslationController {
         if (firstFailure) throw new Error(firstFailure);
       }
       if (getElementSourceText(source) !== record.sourceText) {
-        this.discardRecord(record, true);
+        this.discardRecord(record);
         requiresRescan = true;
         return;
       }
@@ -517,6 +590,9 @@ export class TranslationController {
       if (sessionStarted) void this.closeSessionAfterCacheWrites(sessionId);
       if (wasActive) {
         this.settleStatus();
+        if (requiresRescan && bulkRetry && this.bulkRetry === bulkRetry) {
+          bulkRetry.requiresRescan = true;
+        }
         if (requiresRescan && !this.hasActiveOperation()) await this.start();
         else this.resumeDynamicObserver();
       }
@@ -534,6 +610,9 @@ export class TranslationController {
       ...this.retrySessionIds,
     ];
     this.mainSessionId = null;
+    const bulkRetry = this.bulkRetry;
+    this.bulkRetry = null;
+    bulkRetry?.cancellation.abort();
     this.retrySessionIds.clear();
     this.discoveryAbort.abort();
     this.batchReceivers.clear();
@@ -547,7 +626,7 @@ export class TranslationController {
     }
     for (const record of [...this.records.values()]) {
       if (record.phase === 'queued' || record.phase === 'pending') {
-        this.discardRecord(record, true);
+        this.discardRecord(record);
       }
     }
     cleanupReadingRuns();
@@ -572,6 +651,7 @@ export class TranslationController {
       total: 0,
       displayMode,
     };
+    this.syncStatusCounts();
   }
 
   toggle(): void {
@@ -932,7 +1012,7 @@ export class TranslationController {
     return cacheEntries;
   }
 
-  /** Commits each reading window independently while preserving strict order inside that window. */
+  /** Commits network outcomes in reading order; cache hits bypass this lane. */
   private flushOrderedRenderQueue(queue: ReadingWindowRenderCoordinator): void {
     for (const priority of TRANSLATION_PRIORITIES) {
       this.flushOrderedRenderLane(queue.lanes[priority], queue.tasks);
@@ -955,57 +1035,62 @@ export class TranslationController {
       if (!record.outcome) break;
 
       const outcome = record.outcome;
-      const generation = record.generation;
-      const readyAt = record.outcomeAt ?? performance.now();
-      const pass = this.activePass;
       record.outcome = undefined;
       queue.nextIndex += 1;
-      tasks.enqueue(() => {
-        if (this.records.get(record.element) !== record || record.generation !== generation) return;
-        this.metrics.record('orderedWait', performance.now() - readyAt);
-        const finishRender = this.metrics.start('render');
-        const current = this.isRecordSourceCurrent(record);
-        // Guard synchronous source edits without layout reads between this slice's DOM writes.
-        const sourceContent =
-          record.element.querySelector(':scope > [data-justranslate-source-content]') ??
-          record.element;
-        const rawSourceText = sourceContent.textContent;
-        let commit: (() => HTMLElement) | undefined;
-        let renderError: string | undefined;
-        if (current && outcome.kind === 'translated') {
-          try {
-            commit = prepareTranslationRender(record.element, outcome.translatedText);
-          } catch (error) {
-            renderError = getErrorMessage(error);
-          }
-        }
-        return () => {
-          if (this.records.get(record.element) !== record || record.generation !== generation)
-            return;
-          if (
-            !current ||
-            !sourceContent.isConnected ||
-            sourceContent.textContent !== rawSourceText
-          ) {
-            this.discardRecord(record, record.element.isConnected);
-            if (record.element.isConnected) pass?.markStale();
-          } else if (commit) {
-            commit();
-            record.phase = 'translated';
-            this.metrics.markFirstTranslation();
-            record.checkpoint = undefined;
-            record.error = undefined;
-          } else {
-            this.markRecordError(
-              record,
-              renderError ?? (outcome.kind === 'error' ? outcome.error : '译文渲染失败'),
-            );
-          }
-          setSourceDisplayMode(record.element, this.status.displayMode);
-          finishRender();
-        };
-      });
+      this.enqueueRecordRender(record, outcome, tasks);
     }
+  }
+
+  /** Shares sliced DOM commits and stale/cancellation guards across cache and network results. */
+  private enqueueRecordRender(
+    record: TranslationRecord,
+    outcome: TranslationRecordOutcome,
+    tasks: RenderTasks,
+  ): void {
+    const generation = record.generation;
+    const readyAt = record.outcomeAt ?? performance.now();
+    const pass = this.activePass;
+    tasks.enqueue(() => {
+      if (this.records.get(record.element) !== record || record.generation !== generation) return;
+      this.metrics.record('orderedWait', performance.now() - readyAt);
+      const finishRender = this.metrics.start('render');
+      const current = this.isRecordSourceCurrent(record);
+      // Guard synchronous source edits without layout reads between this slice's DOM writes.
+      const rawSourceText = getOriginalSourceText(record.element);
+      let commit: (() => HTMLElement) | undefined;
+      let renderError: string | undefined;
+      if (current && outcome.kind === 'translated') {
+        try {
+          commit = prepareTranslationRender(record.element, outcome.translatedText);
+        } catch (error) {
+          renderError = getErrorMessage(error);
+        }
+      }
+      return () => {
+        if (this.records.get(record.element) !== record || record.generation !== generation) return;
+        if (
+          !current ||
+          !record.element.isConnected ||
+          getOriginalSourceText(record.element) !== rawSourceText
+        ) {
+          this.discardRecord(record);
+          if (record.element.isConnected) pass?.markStale();
+        } else if (commit) {
+          commit();
+          record.phase = 'translated';
+          this.metrics.markFirstTranslation();
+          record.checkpoint = undefined;
+          record.error = undefined;
+        } else {
+          this.markRecordError(
+            record,
+            renderError ?? (outcome.kind === 'error' ? outcome.error : '译文渲染失败'),
+          );
+        }
+        setSourceDisplayMode(record.element, this.status.displayMode);
+        finishRender();
+      };
+    });
   }
 
   private createOrderedRenderQueue(
@@ -1124,7 +1209,7 @@ export class TranslationController {
         const existingRecord = this.records.get(element);
         if (existingRecord) {
           if (!element.isConnected || getElementSourceText(element) !== group.sourceText) {
-            this.discardRecord(existingRecord, element.isConnected);
+            this.discardRecord(existingRecord);
             slot.skipped = true;
             markStale();
             continue;
@@ -1265,7 +1350,7 @@ export class TranslationController {
         for (const element of group.members) {
           const slot = this.ensureOrderedRenderSlot(renderQueue, element);
           const record = this.records.get(element);
-          if (record) this.discardRecord(record, true);
+          if (record) this.discardRecord(record);
           slot.record = undefined;
           slot.skipped = true;
         }
@@ -1284,7 +1369,7 @@ export class TranslationController {
           // source's record so it cannot block foreground completion or a later rescan.
           const staleRecord = this.records.get(element);
           if (staleRecord?.sourceText === group.sourceText) {
-            this.discardRecord(staleRecord, element.isConnected);
+            this.discardRecord(staleRecord);
           }
           // A dynamic scan may already own a newer record/slot for the same DOM element.
           if (!this.records.has(element)) {
@@ -1298,14 +1383,20 @@ export class TranslationController {
         slot.record = record;
         records.push(record);
         if (cached !== undefined) {
-          record.outcome = { kind: 'translated', translatedText: cached };
+          // Cache hits are already complete: bypass network ordering, but retain guarded rendering.
+          slot.skipped = true;
+          record.outcomeAt = performance.now();
+          this.enqueueRecordRender(
+            record,
+            { kind: 'translated', translatedText: cached },
+            renderQueue.tasks,
+          );
         }
       }
 
       if (cached !== undefined) {
         completedTranslationsBySourceText.set(group.sourceText, cached);
         this.metrics.recordCacheHits(records.length);
-        for (const record of records) record.outcomeAt = performance.now();
         continue;
       }
       if (records.length === 0) continue;
@@ -1423,8 +1514,15 @@ export class TranslationController {
       // A late duplicate shares settled parts, but keeps its own DOM retry lifecycle.
       if (translatedText === undefined) record.checkpoint = activeGroup?.checkpoint;
       if (translatedText !== undefined) {
-        record.outcome = { kind: 'translated', translatedText };
         record.outcomeAt = performance.now();
+        const outcome: TranslationRecordOutcome = { kind: 'translated', translatedText };
+        // Only cache misses create active network groups; late cache duplicates bypass ordering too.
+        if (!activeGroup) {
+          slot.skipped = true;
+          this.enqueueRecordRender(record, outcome, pass.renderQueue.tasks);
+        } else {
+          record.outcome = outcome;
+        }
       } else if (failedError !== undefined) {
         record.outcome = { kind: 'error', error: failedError };
         record.outcomeAt = performance.now();
@@ -1682,13 +1780,14 @@ export class TranslationController {
   private observeDynamicContent(): void {
     this.observer?.disconnect();
     this.observer = new MutationObserver((mutations) => this.handlePageMutations(mutations));
-    this.observer.observe(document.body, {
+    this.observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'lang', 'translate'],
     });
+    for (const event of ['transitionend', 'animationend', 'toggle'])
+      document.addEventListener(event, this.onPresentationChanged, true);
   }
 
   /** Drain without dropping page-authored changes sharing a task with our rendering. */
@@ -1703,14 +1802,10 @@ export class TranslationController {
     for (const mutation of mutations) {
       const targetElement = getMutationTargetElement(mutation.target);
       if (targetElement?.closest('[data-justranslate-translation]')) continue;
-      if (
-        mutation.type === 'attributes' &&
-        targetElement?.hasAttribute('data-justranslate-source-content')
-      ) {
-        continue;
-      }
+      if (isSourcePresentationMutation(mutation)) continue;
       const source = targetElement?.closest<HTMLElement>('[data-justranslate-source]') ?? null;
-      if (source && mutation.type !== 'attributes') {
+      if (source) {
+        synchronizeSourcePresentation(source);
         const record = this.records.get(source);
         // Wrapping/moving the original nodes and replacing only the translation
         // does not change the source. Never discard unrelated records to suppress it.
@@ -1722,7 +1817,7 @@ export class TranslationController {
           continue;
         const parent = source.parentElement;
         if (source.isConnected) this.activePass?.markStale();
-        if (record) this.discardRecord(record, true);
+        if (record) this.discardRecord(record);
         else restoreSourceElement(source);
         // Restoring a raw-prose anchor unwraps it. Rescan its still-connected owner, not the
         // detached anchor; otherwise the changed original text would never be discovered again.
@@ -1755,7 +1850,7 @@ export class TranslationController {
         const removedElement = removedNode as Element;
         for (const record of [...this.records.values()]) {
           if (removedElement === record.element || removedElement.contains(record.element)) {
-            this.discardRecord(record, false);
+            this.discardRecord(record);
             removedRecord = true;
           }
         }
@@ -1839,6 +1934,8 @@ export class TranslationController {
   private disconnectObserver(clearPending = true): void {
     this.observer?.disconnect();
     this.observer = null;
+    for (const event of ['transitionend', 'animationend', 'toggle'])
+      document.removeEventListener(event, this.onPresentationChanged, true);
     window.clearTimeout(this.observerTimer);
     if (clearPending) this.dynamicRoots.clear();
   }
@@ -1923,16 +2020,17 @@ export class TranslationController {
     return record.element.isConnected && getElementSourceText(record.element) === record.sourceText;
   }
 
-  private discardRecord(record: TranslationRecord, restoreSource: boolean): void {
+  private discardRecord(record: TranslationRecord): void {
     if (this.records.get(record.element) !== record) return;
     this.records.delete(record.element);
     record.generation += 1;
-    if (restoreSource && record.element.isConnected) restoreSourceElement(record.element);
+    // Removed sources can be reinserted by the host; always release our presentation first.
+    restoreSourceElement(record.element);
   }
 
   private purgeDisconnectedRecords(): void {
     for (const record of this.records.values()) {
-      if (!record.element.isConnected) this.discardRecord(record, false);
+      if (!record.element.isConnected) this.discardRecord(record);
     }
   }
 
@@ -1950,7 +2048,7 @@ export class TranslationController {
   }
 
   private hasActiveOperation(): boolean {
-    return this.mainSessionId !== null || this.retrySessionIds.size > 0;
+    return this.mainSessionId !== null || this.retrySessionIds.size > 0 || this.bulkRetry !== null;
   }
 
   private settleStatus(fallbackError?: string): void {
@@ -1982,6 +2080,11 @@ export class TranslationController {
     this.status.translated = translated;
     this.status.failed = failed;
     this.status.total = this.records.size;
+    const hasFailures = failed > 0;
+    if (hasFailures !== this.reportedFailures) {
+      this.reportedFailures = hasFailures;
+      this.onFailuresChanged?.();
+    }
   }
 }
 

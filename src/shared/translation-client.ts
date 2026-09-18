@@ -1,19 +1,24 @@
+import { buildProtocolRequest } from './protocol-request';
 import type { TranslationSegment, TranslationUnit } from './batching';
 import type { TranslationBatchResult } from './messages';
-import { normalizeApiUrl } from './settings';
+import { DEFAULT_SETTINGS } from './settings';
+import { type ModelOptions, type ProviderId, type ApiProtocol } from './providers';
 import { preservesProtectedMarkers } from './protected-markers';
 import {
   readTranslationStream,
   StreamProtocolError,
   StreamOutputLimitError,
   FULL_DOCUMENT_STREAM_LIMITS,
-} from './openai-stream';
+} from './translation-stream';
 import type { TranslationRequestStage } from './translation-metrics';
 
-export interface TranslationRequestConfig {
+export interface TranslationRequestConfig extends Omit<ModelOptions, 'provider' | 'protocol'> {
+  provider: ProviderId;
+  protocol: ApiProtocol;
   apiUrl: string;
   apiKey: string;
   model: string;
+  thinkingEnabled: boolean;
   targetLanguage: string;
   translationPrompt: string;
 }
@@ -22,8 +27,8 @@ export interface TranslationRequestOptions {
   /** Each ID is published once, after its complete JSON item and protected markers are validated. */
   onTranslations?: (translations: Record<string, string>) => void;
   onTiming?: (stage: TranslationRequestStage, durationMs: number) => void;
-  /** A logical batch has at most one retry, shared by every failure and missing-item repair. */
-  maxRetries?: 0 | 1;
+  /** Additional attempts shared by every failure and missing-item repair in a logical batch. */
+  maxRetries?: number;
   baseRetryDelayMs?: number;
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
   /** Background admission applies to every HTTP attempt, not just the first batch. */
@@ -44,7 +49,6 @@ class ProviderHttpError extends Error {
   }
 }
 
-const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_DELAY_MS = 400;
 
 /** One whole-document attempt: no cache, subdivision, partial publish or automatic repair. */
@@ -92,7 +96,7 @@ export async function translateFullDocument(
 
 /**
  * Sends one ordered batch to an OpenAI-compatible Chat Completions endpoint.
- * Valid IDs are retained; one shared retry handles failed or omitted items only.
+ * Valid IDs are retained; the shared retry budget handles failed or omitted items only.
  */
 export async function translateBatch(
   settings: TranslationRequestConfig,
@@ -138,7 +142,7 @@ async function translateBatchWithRetries(
   options: TranslationRequestOptions,
   translations: Record<string, string>,
 ): Promise<void> {
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxRetries = options.maxRetries ?? DEFAULT_SETTINGS.translationRetryCount;
   const baseRetryDelayMs = options.baseRetryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const sleep = options.sleep ?? sleepWithSignal;
 
@@ -219,41 +223,26 @@ async function translateBatchOnce(
   onContent?: () => void,
   fullDocument = false,
 ): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (settings.apiKey.trim()) {
-    headers.Authorization = `Bearer ${settings.apiKey.trim()}`;
-  }
-
-  const body = JSON.stringify({
-    model: settings.model.trim(),
-    stream: true,
-    messages: [
-      {
-        role: 'system',
-        content: buildSystemPrompt(
-          settings.targetLanguage,
-          settings.translationPrompt,
-          fullDocument,
-        ),
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          segments: segments.map(({ requestId, unitId, partIndex, text }) => ({
-            id: requestId,
-            group: unitId,
-            part: partIndex,
-            text,
-          })),
-        }),
-      },
-    ],
+  const system = buildSystemPrompt(
+    settings.targetLanguage,
+    settings.translationPrompt,
+    fullDocument,
+  );
+  const content = JSON.stringify({
+    segments: segments.map(({ requestId, unitId, partIndex, text }) => ({
+      id: requestId,
+      group: unitId,
+      part: partIndex,
+      text,
+    })),
   });
+  const request = buildProtocolRequest(settings, system, content, fullDocument);
+  const body = JSON.stringify(request.body);
   if (fullDocument && new TextEncoder().encode(body).byteLength > 1_048_576)
     throw new Error('全文请求超过 1 MiB 上限，请缩小正文范围后重试；未发送或拆分正文');
-  const response = await fetcher(normalizeApiUrl(settings.apiUrl), {
+  const response = await fetcher(request.url, {
     method: 'POST',
-    headers,
+    headers: request.headers,
     signal,
     body,
   });
@@ -293,6 +282,7 @@ async function translateBatchOnce(
   const result: Record<string, string> = {};
   await readTranslationStream(
     response,
+    settings.protocol,
     (item) => {
       if (!expected.has(item.id) || seen.has(item.id))
         throw new StreamProtocolError('AI 返回的段落 id 与请求不匹配');

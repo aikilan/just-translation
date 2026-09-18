@@ -1,9 +1,9 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { completionResponse, contentEvent, sseEvent, STREAM_END } from '../test-utils/sse';
-import { translateBatch, type TranslationRequestOptions } from './openai-client';
-import { DEFAULT_SETTINGS } from './settings';
+import { translateBatch, type TranslationRequestOptions } from './translation-client';
 
-const settings = { ...DEFAULT_SETTINGS.profiles[0], model: 'test', targetLanguage: 'Chinese' };
+const settings = { ...TEST_PROFILE, model: 'test', targetLanguage: 'Chinese' };
 const segments = ['a', 'b', 'c'].map((id) => ({
   requestId: `${id}:0`,
   unitId: id,
@@ -299,14 +299,46 @@ describe('incremental Chat Completions translation', () => {
     },
   );
 
+  it.each([
+    { totalBytes: 10 * 1_048_576, accepted: true },
+    { totalBytes: 10 * 1_048_576 + 1, accepted: false },
+  ])(
+    'enforces the 10 MiB batch stream limit at $totalBytes bytes',
+    async ({ totalBytes, accepted }) => {
+      const stream = controlledStream();
+      const items = segments.map(({ requestId }) => ({ id: requestId, text: '译文' }));
+      const completion = contentEvent(JSON.stringify({ translations: items })) + STREAM_END;
+      let remainingBytes = totalBytes - encoder.encode(completion).byteLength;
+
+      // Small SSE comments exercise cumulative wire bytes without exceeding event or JSON limits.
+      while (remainingBytes > 65_536) {
+        stream.push(`:${'x'.repeat(65_533)}\n\n`);
+        remainingBytes -= 65_536;
+      }
+      stream.push(`:${'x'.repeat(remainingBytes - 3)}\n\n`);
+      stream.push(completion);
+
+      const result = request(stream.response);
+      if (accepted) {
+        await expect(result).resolves.toEqual({
+          translations: Object.fromEntries(items.map(({ id, text }) => [id, text])),
+          failures: {},
+        });
+      } else {
+        await expect(result).rejects.toThrow('API 流式响应超过大小上限');
+      }
+      expect(stream.cancel).toHaveBeenCalledOnce();
+    },
+  );
+
   it('bounds buffered events instead of accumulating unbounded provider output', async () => {
     await expect(
       request(
-        new Response(`data: ${'x'.repeat(1_048_577)}`, {
+        new Response(`data: ${'x'.repeat(262_145)}`, {
           headers: { 'content-type': 'text/event-stream' },
         }),
       ),
-    ).rejects.toThrow(/上限|过大/u);
+    ).rejects.toThrow('API 流式响应超过缓冲上限');
   });
 
   it('retries incomplete UTF-8 only once and retains its diagnostic', async () => {

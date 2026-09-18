@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
-import { normalizeApiUrl } from '../shared/settings';
+import { normalizeEndpoint, resolveProviderOptions, type ModelOptions } from '../shared/providers';
 
 const CACHE_DATABASE_NAME = 'just-translate-cache';
 const CACHE_DATABASE_VERSION = 1;
@@ -9,10 +9,11 @@ const CACHE_POLICY_VERSION = 'translation-cache-v1:prompt-v2';
 
 export const CACHE_TTL_MS = 72 * 60 * 60 * 1_000;
 
-export interface TranslationCacheContext {
+export interface TranslationCacheContext extends ModelOptions {
   origin: string;
   apiUrl: string;
   model: string;
+  thinkingEnabled: boolean;
   targetLanguage: string;
   translationPrompt: string;
 }
@@ -193,8 +194,13 @@ export async function createTranslationCacheKey(
   const canonical = [
     CACHE_POLICY_VERSION,
     new URL(context.origin).origin,
-    normalizeApiUrl(context.apiUrl),
+    context.provider,
+    context.protocol,
+    normalizeEndpoint(context.apiUrl, context.protocol!),
     context.model.trim(),
+    // Reasoning changes generated output and must also change the session configuration fingerprint.
+    JSON.stringify(resolveProviderOptions(context).parameters),
+    String(resolveProviderOptions(context).maxOutputTokens),
     context.targetLanguage.trim(),
     context.translationPrompt.normalize('NFC').trim(),
     normalizeSourceText(sourceText),

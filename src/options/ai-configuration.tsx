@@ -1,3 +1,5 @@
+import { DEFAULT_PROVIDER_OPTIONS, getModelCapability } from '../shared/providers';
+import { ProviderFields, ThinkingFields, ModelSuggestions } from './provider-fields';
 import { Check, Eye, EyeOff, LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -44,6 +46,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
   const deleteTrigger = useRef<HTMLButtonElement>(null);
   const { feedback, save, clear } = useSettingsMutation();
   const idPrefix = useId();
+  const editedAddresses = useRef(new Set<string>());
   const profile = drafts.find((item) => item.id === selectedId);
   const persisted = settings.profiles.find((item) => item.id === selectedId);
   const dirty = !sameProfile(profile, persisted);
@@ -137,17 +140,21 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
     setDrafts((existing) => [
       ...existing,
       {
+        ...DEFAULT_PROVIDER_OPTIONS,
         id,
         name: `配置 ${number}`,
-        apiUrl: 'https://api.openai.com/v1',
+        apiUrl: '',
         apiKey: '',
         model: '',
+        thinkingEnabled: false,
         translationPrompt: DEFAULT_TRANSLATION_PROMPT,
       },
     ]);
     select(id);
   }
   function discard() {
+    // Discard URL ownership together with its draft; saved custom URLs remain protected by value comparison.
+    editedAddresses.current.delete(selectedId);
     if (persisted)
       setDrafts((existing) => existing.map((item) => (item.id === selectedId ? persisted : item)));
     else {
@@ -246,190 +253,235 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
           </ol>
         </div>
       ) : null}
-      <div className="profile-toolbar">
-        <label className="profile-picker">
-          <span>正在编辑的配置</span>
-          <select
-            aria-label="正在编辑的配置"
-            value={selectedId}
-            disabled={busy}
-            onChange={(event) => select(event.target.value)}
-          >
-            {drafts.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name || '未命名配置'}
-                {item.id === settings.activeProfileId ? ' · 当前使用' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="button" type="button" disabled={busy} onClick={add}>
-          <Plus aria-hidden="true" />
-          新增配置
-        </button>
-      </div>
-      <div className="profile-state">
-        <span>
-          {current ? (
-            <>
-              <Check aria-hidden="true" />
-              当前使用
-            </>
-          ) : (
-            '未启用'
-          )}
-          <span className="separator">·</span>
-          {dirty ? '未保存' : '已保存'}
-        </span>
-        {!current ? (
-          <button
-            type="button"
-            className="text-button"
-            disabled={dirty || busy || Object.keys(validation).length > 0}
-            onClick={() => {
-              void save('ai', { type: 'SET_ACTIVE_PROFILE', profileId: selectedId }, onActivated);
-            }}
-          >
-            设为当前使用
+      <div className="profile-header">
+        <div className="profile-toolbar">
+          <label className="profile-picker">
+            <span>正在编辑的配置</span>
+            <select
+              aria-label="正在编辑的配置"
+              value={selectedId}
+              disabled={busy}
+              onChange={(event) => select(event.target.value)}
+            >
+              {drafts.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name || '未命名配置'}
+                  {item.id === settings.activeProfileId ? ' · 当前使用' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="button" type="button" disabled={busy} onClick={add}>
+            <Plus aria-hidden="true" />
+            新增配置
           </button>
-        ) : null}
+        </div>
+        <div className="profile-state">
+          <span>
+            {current ? (
+              <>
+                <Check aria-hidden="true" />
+                当前使用
+              </>
+            ) : (
+              '未启用'
+            )}
+            <span className="separator">·</span>
+            {dirty ? '未保存' : '已保存'}
+          </span>
+          {!current ? (
+            <button
+              type="button"
+              className="text-button"
+              disabled={dirty || busy || Object.keys(validation).length > 0}
+              onClick={() => {
+                void save('ai', { type: 'SET_ACTIVE_PROFILE', profileId: selectedId }, onActivated);
+              }}
+            >
+              设为当前使用
+            </button>
+          ) : null}
+        </div>
       </div>
       <form onSubmit={submit} noValidate>
-        <div className="form-section">
-          <label className="field">
-            <span>配置名称</span>
-            <input
-              aria-label="配置名称"
-              {...errorProps('name')}
-              value={profile.name}
+        <fieldset className="editor-section" aria-label="连接信息">
+          <legend>连接信息</legend>
+          <p className="editor-section-description">选择服务商，填写接口与模型。</p>
+          <div className="form-section">
+            <ProviderFields
+              profile={profile}
               disabled={busy}
-              onBlur={() => blur('name')}
-              onChange={(event) => edit({ name: event.target.value })}
+              onChange={edit}
+              addressEdited={editedAddresses.current.has(selectedId)}
             />
-            {fieldError('name')}
-          </label>
-          <label className="field">
-            <span>API 地址</span>
-            <input
-              aria-label="API 地址"
-              {...errorProps('apiUrl')}
-              type="url"
-              spellCheck={false}
-              placeholder="https://api.example.com/v1"
-              value={profile.apiUrl}
-              disabled={busy}
-              onBlur={() => blur('apiUrl')}
-              onChange={(event) => edit({ apiUrl: event.target.value })}
-            />
-            <small>支持 OpenAI 兼容接口，包含 /v1 的地址也可直接使用。</small>
-            {fieldError('apiUrl')}
-          </label>
-          <div className="credential-grid">
+            {fieldError('provider')}
+            {fieldError('protocol')}
             <label className="field">
-              <span>API Key</span>
-              <span className="secret-input">
+              <span>配置名称</span>
+              <input
+                aria-label="配置名称"
+                {...errorProps('name')}
+                value={profile.name}
+                disabled={busy}
+                onBlur={() => blur('name')}
+                onChange={(event) => edit({ name: event.target.value })}
+              />
+              {fieldError('name')}
+            </label>
+            <label className="field">
+              <span>API 地址</span>
+              <input
+                aria-label="API 地址"
+                {...errorProps('apiUrl')}
+                type="url"
+                spellCheck={false}
+                placeholder="https://api.example.com/v1"
+                value={profile.apiUrl}
+                disabled={busy}
+                onBlur={() => blur('apiUrl')}
+                onChange={(event) => {
+                  editedAddresses.current.add(selectedId);
+                  edit({ apiUrl: event.target.value });
+                }}
+              />
+              <small>支持所选协议的基础地址或完整请求地址，保留自定义路径。</small>
+              {fieldError('apiUrl')}
+            </label>
+            <div className="credential-grid">
+              <label className="field">
+                <span>API Key</span>
+                <span className="secret-input">
+                  <input
+                    aria-label="API Key"
+                    type={showKey ? 'text' : 'password'}
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={profile.apiKey}
+                    placeholder="本地服务可留空"
+                    disabled={busy}
+                    onChange={(event) => edit({ apiKey: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                    onClick={() => setShowKey((value) => !value)}
+                  >
+                    {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                  </button>
+                </span>
+              </label>
+              <label className="field">
+                <span>模型</span>
                 <input
-                  aria-label="API Key"
-                  type={showKey ? 'text' : 'password'}
-                  autoComplete="off"
+                  aria-label="模型"
+                  list={`${idPrefix}-models`}
+                  {...errorProps('model')}
+                  value={profile.model}
                   spellCheck={false}
-                  value={profile.apiKey}
-                  placeholder="本地服务可留空"
+                  placeholder="服务商提供的模型名称"
                   disabled={busy}
-                  onChange={(event) => edit({ apiKey: event.target.value })}
+                  onBlur={() => blur('model')}
+                  onChange={(event) => {
+                    const capability = getModelCapability(
+                      profile.provider,
+                      event.target.value,
+                      profile.protocol ?? 'openai',
+                    );
+                    edit({
+                      model: event.target.value,
+                      reasoningEffort: 'default',
+                      ...(capability?.capability === 'always' ? { thinkingEnabled: true } : {}),
+                    });
+                  }}
                 />
+                <datalist id={`${idPrefix}-models`}>
+                  <ModelSuggestions provider={profile.provider} />
+                </datalist>
+                {fieldError('model')}
+              </label>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset className="editor-section behavior-section" aria-label="模型行为">
+          <legend>模型行为</legend>
+          <ThinkingFields profile={profile} disabled={busy} onChange={edit} />
+          {fieldError('thinkingControl')}
+          <details className="prompt-details">
+            <summary>
+              高级设置<span>自定义翻译 Prompt</span>
+            </summary>
+            <div className="prompt-editor">
+              <div className="prompt-heading">
+                <label htmlFor={`${idPrefix}-translationPrompt`}>翻译 Prompt</label>
                 <button
                   type="button"
-                  className="icon-button"
-                  aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
-                  onClick={() => setShowKey((value) => !value)}
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => edit({ translationPrompt: DEFAULT_TRANSLATION_PROMPT })}
                 >
-                  {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                  恢复默认 Prompt
                 </button>
-              </span>
-            </label>
-            <label className="field">
-              <span>模型</span>
-              <input
-                aria-label="模型"
-                {...errorProps('model')}
-                value={profile.model}
-                spellCheck={false}
-                placeholder="服务商提供的模型名称"
+              </div>
+              <textarea
+                aria-label="自定义翻译 Prompt"
+                {...errorProps('translationPrompt')}
+                rows={6}
+                maxLength={MAX_TRANSLATION_PROMPT_CHARACTERS}
+                value={profile.translationPrompt}
                 disabled={busy}
-                onBlur={() => blur('model')}
-                onChange={(event) => edit({ model: event.target.value })}
+                onBlur={() => blur('translationPrompt')}
+                onChange={(event) => edit({ translationPrompt: event.target.value })}
               />
-              {fieldError('model')}
-            </label>
-          </div>
-        </div>
-        <details className="prompt-details">
-          <summary>
-            高级设置<span>自定义翻译 Prompt</span>
-          </summary>
-          <div className="prompt-editor">
-            <div className="prompt-heading">
-              <label htmlFor={`${idPrefix}-translationPrompt`}>翻译 Prompt</label>
-              <button
-                type="button"
-                className="text-button"
-                disabled={busy}
-                onClick={() => edit({ translationPrompt: DEFAULT_TRANSLATION_PROMPT })}
-              >
-                恢复默认 Prompt
-              </button>
+              <div className="prompt-hint">
+                <small>用 {'{{targetLanguage}}'} 表示目标语言。</small>
+                <small>
+                  {profile.translationPrompt.length} / {MAX_TRANSLATION_PROMPT_CHARACTERS}
+                </small>
+              </div>
+              {fieldError('translationPrompt')}
             </div>
-            <textarea
-              aria-label="自定义翻译 Prompt"
-              {...errorProps('translationPrompt')}
-              rows={6}
-              maxLength={MAX_TRANSLATION_PROMPT_CHARACTERS}
-              value={profile.translationPrompt}
-              disabled={busy}
-              onBlur={() => blur('translationPrompt')}
-              onChange={(event) => edit({ translationPrompt: event.target.value })}
-            />
-            <div className="prompt-hint">
-              <small>用 {'{{targetLanguage}}'} 表示目标语言。</small>
-              <small>
-                {profile.translationPrompt.length} / {MAX_TRANSLATION_PROMPT_CHARACTERS}
-              </small>
-            </div>
-            {fieldError('translationPrompt')}
-          </div>
-        </details>
-        <div
-          className={`connection-result test-${state.status}`}
-          role={state.status === 'failed' ? 'alert' : 'status'}
-        >
-          <div className="connection-heading">
-            <span className="status-dot" />
-            {state.status === 'testing'
-              ? '测试中'
-              : state.status === 'passed'
-                ? '测试通过'
-                : state.status === 'failed'
-                  ? '测试失败'
-                  : '未测试'}
-            {state.status === 'passed' ? <span className="latency">{state.latency} ms</span> : null}
-          </div>
-          {state.status === 'passed' ? (
-            <>
-              <p className="test-translation">{state.text}</p>
-              <small>接口响应有效，请根据测试译文确认翻译质量。</small>
-            </>
-          ) : state.status === 'failed' ? (
-            <p>{state.message}</p>
-          ) : (
-            <p>
+          </details>
+        </fieldset>
+        <div className="connection-check">
+          <div
+            className={`connection-result test-${state.status}`}
+            role={state.status === 'failed' ? 'alert' : 'status'}
+          >
+            <div className="connection-heading">
+              <span className="status-dot" />
               {state.status === 'testing'
-                ? '正在请求你的 API…'
-                : '测试会直接请求你的 API，不会保存或启用配置。'}
-            </p>
-          )}
+                ? '测试中'
+                : state.status === 'passed'
+                  ? '测试通过'
+                  : state.status === 'failed'
+                    ? '测试失败'
+                    : '未测试'}
+              {state.status === 'passed' ? (
+                <span className="latency">{state.latency} ms</span>
+              ) : null}
+            </div>
+            {state.status === 'passed' ? (
+              <>
+                <p className="test-translation">{state.text}</p>
+                <small>接口响应有效，请根据测试译文确认翻译质量。</small>
+              </>
+            ) : state.status === 'failed' ? (
+              <p>{state.message}</p>
+            ) : (
+              <p>
+                {state.status === 'testing'
+                  ? '正在请求你的 API…'
+                  : '测试会直接请求你的 API，不会保存或启用配置。'}
+              </p>
+            )}
+          </div>
         </div>
         <div className="ai-actions">
+          <div className="action-state" role="status">
+            {dirty ? '有未保存的修改' : feedback.ai ? null : '配置已保存'}
+            <SaveFeedback state={feedback.ai} />
+          </div>
           <div className="action-buttons">
             <button className="button button-primary" type="submit" disabled={busy}>
               {busy ? <LoaderCircle className="spin" aria-hidden="true" /> : null}保存配置
@@ -448,11 +500,10 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
               </button>
             ) : null}
           </div>
-          <SaveFeedback state={feedback.ai} />
         </div>
       </form>
       <div className="configuration-footer">
-        <p>密钥仅保存在当前浏览器，翻译请求直接发送到你的 API。</p>
+        <p>{current ? '当前正在使用此配置' : '此配置尚未启用'}</p>
         <button
           ref={deleteTrigger}
           className="text-button danger-text"

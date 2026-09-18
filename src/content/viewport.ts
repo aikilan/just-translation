@@ -16,6 +16,8 @@ export function getElementTranslationPriority(element: HTMLElement): Translation
     parent = parent.parentElement
   ) {
     const style = getComputedStyle(parent);
+    // contents contributes children to layout but establishes no clipping rectangle.
+    if (style.display === 'contents') continue;
     const clipsX = /^(auto|scroll|hidden|clip)$/.test(style.overflowX || style.overflow);
     const clipsY = /^(auto|scroll|hidden|clip)$/.test(style.overflowY || style.overflow);
     if (!clipsX && !clipsY) continue;

@@ -2,10 +2,12 @@
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 import type { PageCommand, PublicTranslatorSettings, Result } from '../shared/messages';
 
+const observer = vi.hoisted(() => ({ notify: undefined as (() => void) | undefined }));
 const actions = vi.hoisted(() => ({
   start: vi.fn().mockResolvedValue(undefined),
   startFullDocument: vi.fn().mockResolvedValue(undefined),
   restart: vi.fn().mockResolvedValue(undefined),
+  retryAllFailed: vi.fn().mockResolvedValue(undefined),
   restore: vi.fn(),
   stop: vi.fn(),
   toggle: vi.fn(),
@@ -14,9 +16,13 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock('./controller', () => ({
   TranslationController: class {
+    constructor(notify?: () => void) {
+      observer.notify = notify;
+    }
     start = actions.start;
     startFullDocument = actions.startFullDocument;
     restart = actions.restart;
+    retryAllFailed = actions.retryAllFailed;
     restore = actions.restore;
     stop = actions.stop;
     toggle = actions.toggle;
@@ -36,6 +42,7 @@ const settings: PublicTranslatorSettings = {
   targetLanguage: 'Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,
+  translationRetryCount: 1,
   translateDynamicContent: true,
   autoTranslateSites: [location.hostname],
   excludedSites: [],
@@ -75,6 +82,7 @@ it.each([
   'START_TRANSLATION',
   'START_FULL_DOCUMENT_TRANSLATION',
   'RESTART_TRANSLATION',
+  'RETRY_FAILED_TRANSLATIONS',
   'STOP_TRANSLATION',
   'RESTORE_PAGE',
   'TOGGLE_TRANSLATION',
@@ -92,6 +100,14 @@ it.each([
 it('still auto-starts when only status and display preferences changed', async () => {
   message({ type: 'GET_PAGE_STATUS' }, {}, vi.fn());
   message({ type: 'SET_DISPLAY_MODE', displayMode: 'translation' }, {}, vi.fn());
+  release({ ok: true, data: settings });
+  await vi.waitFor(() => expect(actions.start).toHaveBeenCalledOnce());
+});
+
+it('does not answer selection commands or interrupt automatic page translation', async () => {
+  const respond = vi.fn();
+  message({ type: 'START_SELECTION_TRANSLATION', text: 'selected' }, {}, respond);
+  expect(respond).not.toHaveBeenCalled();
   release({ ok: true, data: settings });
   await vi.waitFor(() => expect(actions.start).toHaveBeenCalledOnce());
 });
@@ -114,4 +130,20 @@ it('stops startup on pagehide and resumes only an already running segmented BFCa
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   }
   expect(actions.start).toHaveBeenCalledTimes(1);
+});
+
+it('dispatches bulk retry and immediately returns page status', () => {
+  const respond = vi.fn();
+  message({ type: 'RETRY_FAILED_TRANSLATIONS' }, {}, respond);
+  expect(actions.retryAllFailed).toHaveBeenCalledOnce();
+  expect(actions.restart).not.toHaveBeenCalled();
+  expect(respond).toHaveBeenCalledWith(actions.getStatus());
+});
+
+it('notifies the background when retry availability changes', async () => {
+  const sendMessage = vi.fn<() => Promise<Result<void>>>().mockResolvedValue({ ok: true, data: undefined });
+  vi.stubGlobal('chrome', { ...chrome, runtime: { ...chrome.runtime, sendMessage } });
+  observer.notify?.();
+  await Promise.resolve();
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'PAGE_RETRY_STATE_CHANGED' });
 });

@@ -1,0 +1,51 @@
+{
+  "before": {
+    "mode": "segmented",
+    "phase": "error",
+    "translated": 1,
+    "failed": 2,
+    "total": 3,
+    "displayMode": "bilingual",
+    "error": "API 请求失败 (400 Bad Request): {\"error\":\"local fixture rejection: SSE required\"}",
+    "context": {
+      "profileId": "fixture",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "needsRestart": false
+  },
+  "after": {
+    "mode": "segmented",
+    "phase": "complete",
+    "translated": 3,
+    "failed": 0,
+    "total": 3,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "fixture",
+      "targetLanguage": "Simplified Chinese"
+    },
+    "needsRestart": false
+  },
+  "preserved": true,
+  "visibility": [
+    false,
+    false,
+    false,
+    false,
+    true,
+    false,
+    false,
+    true,
+    false,
+    true,
+    false,
+    true,
+    false
+  ],
+  "retryTexts": [
+    "First paragraph that needs a retry.",
+    "Second paragraph that needs a retry."
+  ],
+  "errors": [],
+  "coverage": "Actual Chrome contextMenus.update acknowledgements; tab switching, retry, restore and navigation. Native menu click routing is covered by unit tests."
+}

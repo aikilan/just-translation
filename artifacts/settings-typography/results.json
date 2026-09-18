@@ -1,0 +1,467 @@
+{
+  "results": [
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(102, 102, 102)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(68, 68, 68)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(34, 34, 34)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(112, 112, 112)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(255, 255, 255)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "AI 配置",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "阅读偏好",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(184, 184, 184)",
+        "size": 14,
+        "weight": 400
+      },
+      "label": {
+        "color": "rgb(208, 208, 208)",
+        "size": 13,
+        "weight": 500
+      },
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "站点规则",
+      "heading": {
+        "color": "rgb(242, 242, 242)",
+        "size": 18,
+        "weight": 600
+      },
+      "body": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "label": null,
+      "note": {
+        "color": "rgb(160, 160, 160)",
+        "size": 12,
+        "weight": 400
+      },
+      "surface": "rgb(30, 31, 36)",
+      "overflow": false
+    }
+  ],
+  "errors": []
+}

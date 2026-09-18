@@ -1,0 +1,46 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ artifacts/substack-diagnosis/review/controller-repro.test.ts (2 tests | 2 failed) 2061ms
+   × controller restores a moved original after dynamic rediscovery 1045ms
+   × controller hides same-text replacement originals after processing mutations 1016ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  artifacts/substack-diagnosis/review/controller-repro.test.ts > controller restores a moved original after dynamic rediscovery
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ artifacts/substack-diagnosis/review/controller-repro.test.ts:93:24
+     91|   await new Promise((resolve) => setTimeout(resolve, 1000));
+     92|   instance.restore();
+     93|   expect(moved.hidden).toBe(false);
+       |                        ^
+     94|   expect(moved.hasAttribute('data-justranslate-source-content')).toBe(…
+     95| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  artifacts/substack-diagnosis/review/controller-repro.test.ts > controller hides same-text replacement originals after processing mutations
+AssertionError: expected null not to be null
+ ❯ artifacts/substack-diagnosis/review/controller-repro.test.ts:107:47
+    105|   await new Promise((resolve) => setTimeout(resolve, 1000));
+    106|   instance.setDisplayMode('translation');
+    107|   expect(replacement.closest('[hidden]')).not.toBeNull();
+       |                                               ^
+    108| });
+    109|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  15:46:16
+   Duration  2.47s (transform 81ms, setup 0ms, import 101ms, tests 2.06s, environment 235ms)
+

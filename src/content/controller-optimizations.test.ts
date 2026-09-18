@@ -1041,3 +1041,96 @@ describe('translation pipeline regressions', () => {
     }
   });
 });
+
+describe('style-driven dynamic discovery', () => {
+  it('retranslates after page styles change the readable text of an existing original child', async () => {
+    document.body.innerHTML = '<main><p>Visible <em>extra words</em>.</p></main>';
+    installRuntime(() => undefined);
+    const instance = controller();
+    await instance.start();
+    document.querySelector('em')!.style.display = 'none';
+    await vi.waitFor(
+      () => {
+        expect(document.querySelector('[data-justranslate-translation]')?.textContent).toBe(
+          '译文 Visible .',
+        );
+      },
+      { timeout: 1800 },
+    );
+  });
+  it.each(['data-state', 'open', 'transitionend', 'animationend'] as const)(
+    'discovers newly readable content after %s',
+    async (trigger) => {
+      document.head.innerHTML = '<style>[data-state="closed"] {display:none}</style>';
+      document.body.innerHTML =
+        trigger === 'open'
+          ? '<main><p>Initial reading paragraph.</p><details><summary>Toggle</summary><p id="late">Newly visible reading paragraph.</p></details></main>'
+          : '<main><p>Initial reading paragraph.</p><section data-state="closed"><p id="late">Newly visible reading paragraph.</p></section></main>';
+      installRuntime(() => undefined);
+      const instance = controller();
+      await instance.start();
+      const late = document.querySelector('#late')!;
+      expect(late.querySelector('[data-justranslate-translation]')).toBeNull();
+      if (trigger === 'open') document.querySelector('details')!.open = true;
+      else if (trigger === 'data-state')
+        document.querySelector('section')!.setAttribute('data-state', 'open');
+      else {
+        // CSSOM changes themselves produce no DOM mutation, as with the final frame of an animation.
+        (document.querySelector('style')!.sheet!.cssRules[0] as CSSStyleRule).style.display =
+          'block';
+        document.querySelector('section')!.dispatchEvent(new Event(trigger, { bubbles: true }));
+      }
+      try {
+        await vi.waitFor(
+          () => expect(late.querySelector('[data-justranslate-state="translated"]')).not.toBeNull(),
+          { timeout: 1800 },
+        );
+      } finally {
+        document.head.innerHTML = '';
+      }
+    },
+  );
+});
+
+describe('presentation ownership during dynamic updates', () => {
+  it('reconciles same-text replacement children without another translation request', async () => {
+    document.body.innerHTML = '<main><p><em>Visible original paragraph.</em></p></main>';
+    const batches: Batch[] = [];
+    installRuntime((request) => {
+      if (request.type === 'TRANSLATE_BATCH') batches.push(request);
+      return undefined;
+    });
+    const instance = controller();
+    await instance.start();
+    const count = batches.length;
+    instance.setDisplayMode('translation');
+    const replacement = document.createElement('strong');
+    replacement.textContent = 'Visible original paragraph.';
+    document.querySelector('em')!.replaceWith(replacement);
+    await vi.waitFor(() => expect(replacement.hidden).toBe(true));
+    expect(batches).toHaveLength(count);
+    instance.restore();
+    expect(replacement.hidden).toBe(false);
+  });
+
+  it('releases disconnected originals even before a user requests restoration', async () => {
+    document.body.innerHTML = '<main><p><em>Visible original paragraph.</em></p></main>';
+    installRuntime(() => undefined);
+    const instance = controller();
+    await instance.start();
+    instance.setDisplayMode('translation');
+    const source = document.querySelector('p')!;
+    const original = source.querySelector('em')!;
+    source.remove();
+    await vi.waitFor(() => expect(original.hidden).toBe(false));
+    expect(source.querySelector('[data-justranslate-translation]')).toBeNull();
+    document.querySelector('main')!.append(source);
+    await vi.waitFor(
+      () => expect(source.querySelector('[data-justranslate-state="translated"]')).not.toBeNull(),
+      { timeout: 1800 },
+    );
+    instance.restore();
+    expect(original.hidden).toBe(false);
+    expect(original.hasAttribute('data-justranslate-source-content')).toBe(false);
+  });
+});

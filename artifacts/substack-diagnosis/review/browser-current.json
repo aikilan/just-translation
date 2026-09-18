@@ -1,0 +1,24 @@
+{
+  "movedOriginal": {
+    "hidden": true,
+    "visible": false,
+    "marked": true,
+    "expectedHidden": false
+  },
+  "replacedOriginal": {
+    "visible": true,
+    "expectedVisible": false
+  },
+  "hiddenMain": {
+    "ids": [],
+    "expectedIds": [
+      "visible"
+    ]
+  },
+  "overflowRestore": {
+    "overflowY": "",
+    "computedOverflowY": "visible",
+    "expectedOverflowY": "hidden",
+    "color": "red"
+  }
+}

@@ -1,11 +1,11 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Result, RuntimeRequest, TranslationBatchResult } from '../shared/messages';
 import { TranslationController } from './controller';
-import { translateBatch } from '../shared/openai-client';
-import { DEFAULT_SETTINGS } from '../shared/settings';
+import { translateBatch } from '../shared/translation-client';
 import { completionResponse, contentEvent } from '../test-utils/sse';
 
 const PUBLIC_SETTINGS = {
@@ -51,7 +51,7 @@ describe('TranslationController', () => {
         return {
           ok: true,
           data: await translateBatch(
-            { ...DEFAULT_SETTINGS.profiles[0], model: 'test', targetLanguage: 'Chinese' },
+            { ...TEST_PROFILE, model: 'test', targetLanguage: 'Chinese' },
             request.segments,
             fetcher,
             undefined,
@@ -133,7 +133,7 @@ describe('TranslationController', () => {
                 })),
               );
         const result = await translateBatch(
-          { ...DEFAULT_SETTINGS.profiles[0], model: 'test', targetLanguage: 'Chinese' },
+          { ...TEST_PROFILE, model: 'test', targetLanguage: 'Chinese' },
           request.segments,
           vi.fn<typeof fetch>().mockResolvedValue(response),
           undefined,
@@ -975,62 +975,90 @@ describe('TranslationController', () => {
     controller.restore();
   });
 
-  it('holds a later cache hit until an earlier network result settles', async () => {
-    document.body.innerHTML = `
-      <main>
-        <p id="network">Earlier network source.</p>
-        <p id="cache">Later cached source.</p>
-      </main>
-    `;
-    let pendingBatch:
-      | {
-          request: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
-          resolve: (result: Result<TranslationBatchResult>) => void;
+  it.each([false, true])(
+    'renders cache hits and duplicates before an earlier network result (dynamic=%s)',
+    async (dynamic) => {
+      document.body.innerHTML = `
+        <main>
+          <p id="network">Earlier network source.</p>
+          <p id="cache">Later cached source.</p>
+          ${dynamic ? '' : '<p id="duplicate">Later cached source.</p>'}
+        </main>
+      `;
+      let pendingBatch:
+        | {
+            request: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
+            resolve: (result: Result<TranslationBatchResult>) => void;
+          }
+        | undefined;
+      const sendMessage = vi.fn((request: RuntimeRequest): Promise<Result<unknown>> => {
+        if (request.type === 'GET_PUBLIC_SETTINGS') {
+          return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
         }
-      | undefined;
-    const sendMessage = vi.fn((request: RuntimeRequest): Promise<Result<unknown>> => {
-      if (request.type === 'GET_PUBLIC_SETTINGS') {
-        return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
-      }
-      if (request.type === 'TRANSLATE_BATCH') {
-        return new Promise((resolve) => {
-          pendingBatch = { request, resolve };
-        });
-      }
-      return Promise.resolve(controlResponse(request));
-    });
-    stubChrome(sendMessage, (request) => {
-      const network = request.candidates.find((candidate) =>
-        candidate.text.includes('Earlier network'),
-      )!;
-      const cached = request.candidates.find((candidate) =>
-        candidate.text.includes('Later cached'),
-      )!;
-      return Promise.resolve({
-        skippedIds: [],
-        cachedTranslations: { [cached.id]: '缓存译文' },
-        missIds: [network.id],
+        if (request.type === 'TRANSLATE_BATCH') {
+          return new Promise((resolve) => {
+            pendingBatch = { request, resolve };
+          });
+        }
+        return Promise.resolve(controlResponse(request));
       });
-    });
-    const controller = new TranslationController();
+      const lookup = vi.fn((request: CandidateRequest) =>
+        Promise.resolve({
+          skippedIds: [],
+          cachedTranslations: Object.fromEntries(
+            request.candidates
+              .filter((candidate) => candidate.text === 'Later cached source.')
+              .map((candidate) => [candidate.id, '缓存译文']),
+          ),
+          missIds: request.candidates
+            .filter((candidate) => candidate.text !== 'Later cached source.')
+            .map((candidate) => candidate.id),
+        }),
+      );
+      stubChrome(sendMessage, lookup);
+      const controller = new TranslationController();
+      const translation = controller.start();
+      try {
+        await vi.waitFor(() => expect(pendingBatch).toBeDefined());
+        // Keep the network promise unresolved: a cache hit must paint independently.
+        await vi.waitFor(() =>
+          expect(document.querySelector('#cache [data-justranslate-translation]')?.textContent)
+            .toBe('缓存译文'),
+        );
+        const lookupCount = lookup.mock.calls.length;
+        if (dynamic) {
+          document.querySelector('main')!.insertAdjacentHTML(
+            'beforeend', '<p id="duplicate">Later cached source.</p>',
+          );
+        }
+        await vi.waitFor(() =>
+          expect(document.querySelector('#duplicate [data-justranslate-translation]')?.textContent)
+            .toBe('缓存译文'),
+        );
+        expect(lookup).toHaveBeenCalledTimes(lookupCount);
+        expect(controller.getStatus()).toMatchObject({
+          phase: 'translating', translated: 2, total: 3,
+        });
+        expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(1);
+        expect(pendingBatch!.request.segments.map((segment) => segment.text))
+          .toEqual(['Earlier network source.']);
+        expect(sendMessage.mock.calls.filter(([request]) => request.type === 'TRANSLATE_BATCH'))
+          .toHaveLength(1);
 
-    const translation = controller.start();
-    await vi.waitFor(() => expect(pendingBatch).toBeDefined());
-
-    expect(document.querySelector('#network [data-justranslate-state="pending"]')).not.toBeNull();
-    expect(document.querySelector('#cache [data-justranslate-state="pending"]')).toBeNull();
-
-    resolveBatch(pendingBatch!, '网络译文');
-    await translation;
-
-    expect(document.querySelector('#network [data-justranslate-translation]')?.textContent).toBe(
-      '网络译文',
-    );
-    expect(document.querySelector('#cache [data-justranslate-translation]')?.textContent).toBe(
-      '缓存译文',
-    );
-    controller.restore();
-  });
+        resolveBatch(pendingBatch!, '网络译文');
+        await translation;
+        expect(controller.getStatus()).toMatchObject({ phase: 'complete', translated: 3, total: 3 });
+        // Advancing the ordered lane past already rendered cache slots must not render twice.
+        expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(3);
+        expect(document.querySelector('#network [data-justranslate-translation]')?.textContent)
+          .toBe('网络译文');
+      } finally {
+        controller.restore();
+        if (pendingBatch) resolveBatch(pendingBatch, '网络译文');
+        await translation;
+      }
+    },
+  );
 
   it('finishes and renders the current window before dispatching the next window', async () => {
     const viewportHeight = window.innerHeight || 768;

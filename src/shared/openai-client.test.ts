@@ -1,6 +1,7 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it, vi } from 'vitest';
 
-import { translateBatch } from './openai-client';
+import { translateBatch } from './translation-client';
 import { DEFAULT_SETTINGS } from './settings';
 import { completionResponse } from '../test-utils/sse';
 
@@ -17,7 +18,7 @@ describe('translateBatch', () => {
       )
       .mockResolvedValueOnce(completionResponse([{ id: 'a:0', text: '' }]));
     const result = await translateBatch(
-      { ...DEFAULT_SETTINGS.profiles[0], targetLanguage: 'Chinese', model: 'test' },
+      { ...TEST_PROFILE, targetLanguage: 'Chinese', model: 'test' },
       [
         { requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'First paragraph.' },
         { requestId: 'b:0', unitId: 'b', partIndex: 0, text: 'Second paragraph.' },
@@ -44,7 +45,7 @@ describe('translateBatch', () => {
       )
       .mockResolvedValueOnce(completionResponse([{ id: 'a:0', text: '运行 [[JT_KEEP_0]]。' }]));
     const result = await translateBatch(
-      { ...DEFAULT_SETTINGS.profiles[0], targetLanguage: 'Chinese', model: 'test' },
+      { ...TEST_PROFILE, targetLanguage: 'Chinese', model: 'test' },
       [
         { requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'Run [[JT_KEEP_0]].' },
         { requestId: 'b:0', unitId: 'b', partIndex: 0, text: 'Another paragraph.' },
@@ -64,7 +65,7 @@ describe('translateBatch', () => {
     const onTiming = vi.fn();
     try {
       await translateBatch(
-        { ...DEFAULT_SETTINGS.profiles[0], targetLanguage: 'Chinese', model: 'test' },
+        { ...TEST_PROFILE, targetLanguage: 'Chinese', model: 'test' },
         [{ requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'Hello' }],
         vi.fn<typeof fetch>().mockImplementation(() => {
           clock += 40;
@@ -102,7 +103,7 @@ describe('translateBatch', () => {
       );
     const onTranslations = vi.fn();
     const result = translateBatch(
-      { ...DEFAULT_SETTINGS.profiles[0], targetLanguage: 'Chinese', model: 'test' },
+      { ...TEST_PROFILE, targetLanguage: 'Chinese', model: 'test' },
       [
         { requestId: 'first:0', unitId: 'first', partIndex: 0, text: 'First' },
         { requestId: 'second:0', unitId: 'second', partIndex: 0, text: 'Second' },
@@ -135,7 +136,7 @@ describe('translateBatch', () => {
     await expect(
       translateBatch(
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           targetLanguage: 'Simplified Chinese',
           model: 'test-model',
         },
@@ -163,7 +164,7 @@ describe('translateBatch', () => {
     await expect(
       translateBatch(
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           targetLanguage: 'Simplified Chinese',
           model: 'test-model',
         },
@@ -185,7 +186,7 @@ describe('translateBatch', () => {
 
     const result = await translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         apiUrl: 'https://gateway.example.com/openai/v1',
         apiKey: 'secret-key',
         model: 'my-model',
@@ -246,7 +247,7 @@ describe('translateBatch', () => {
     await expect(
       translateBatch(
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           targetLanguage: DEFAULT_SETTINGS.targetLanguage,
           apiUrl: 'https://gateway.example.com',
           model: 'my-model',
@@ -267,7 +268,7 @@ describe('translateBatch', () => {
 
     const promise = translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         targetLanguage: DEFAULT_SETTINGS.targetLanguage,
         apiUrl: 'https://gateway.example.com',
         apiKey: 'must-not-leak',
@@ -298,7 +299,7 @@ describe('translateBatch', () => {
 
     const result = await translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         targetLanguage: DEFAULT_SETTINGS.targetLanguage,
         apiUrl: 'https://gateway.example.com',
         model: 'my-model',
@@ -325,7 +326,7 @@ describe('translateBatch', () => {
     await expect(
       translateBatch(
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           targetLanguage: DEFAULT_SETTINGS.targetLanguage,
           apiUrl: 'https://gateway.example.com',
           model: 'bad-model',
@@ -349,7 +350,7 @@ describe('translateBatch', () => {
 
     const result = await translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         targetLanguage: DEFAULT_SETTINGS.targetLanguage,
         apiUrl: 'https://gateway.example.com',
         model: 'my-model',
@@ -385,7 +386,7 @@ describe('translateBatch', () => {
 
     const result = await translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         targetLanguage: DEFAULT_SETTINGS.targetLanguage,
         apiUrl: 'https://gateway.example.com',
         model: 'my-model',

@@ -1,3 +1,4 @@
+import { sendRuntimeMessage } from '../shared/chrome-api';
 import type { PageCommand } from '../shared/messages';
 import { TranslationController } from './controller';
 import { registerRetryInteractions } from './retry-interaction';
@@ -5,7 +6,10 @@ import { tryStartAutomaticTranslation } from './auto-start';
 import './styles.css';
 
 // 页面唯一入口：只处理当前网页中的译文采集、渲染和状态切换。
-const controller = new TranslationController();
+const controller = new TranslationController(() => {
+  // This notification carries no page data; the background reads its current active document.
+  void sendRuntimeMessage<void>({ type: 'PAGE_RETRY_STATE_CHANGED' }).catch(() => {});
+});
 const automaticStartup = new AbortController();
 registerRetryInteractions((source) => {
   automaticStartup.abort();
@@ -13,6 +17,7 @@ registerRetryInteractions((source) => {
 });
 
 chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendResponse) => {
+  if (command.type === 'START_SELECTION_TRANSLATION') return;
   switch (command.type) {
     case 'TRANSLATION_BATCH_PROGRESS':
       controller.receiveBatchProgress(command);
@@ -31,6 +36,10 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendRespons
     case 'RESTART_TRANSLATION':
       automaticStartup.abort();
       void controller.restart();
+      break;
+    case 'RETRY_FAILED_TRANSLATIONS':
+      automaticStartup.abort();
+      void controller.retryAllFailed();
       break;
     case 'STOP_TRANSLATION':
       automaticStartup.abort();

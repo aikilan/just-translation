@@ -1,7 +1,15 @@
-import { translateBatch, translateFullDocument } from '../shared/openai-client';
+import { configuredProviderOptions } from '../shared/providers';
+import { translateBatch, translateFullDocument } from '../shared/translation-client';
 import { AbortableRequestRegistry } from './request-registry';
 import { ProviderRequestQueue } from './provider-request-queue';
-import { ensurePageTranslationMenu, handlePageTranslationMenuClick } from './context-menu';
+import { SelectionTranslationService } from './selection-translation';
+import {
+  ensurePageTranslationMenu,
+  handlePageTranslationMenuClick,
+  RetryMenuRegistration,
+  RETRY_FAILED_MENU_ID,
+  RETRY_FAILED_MENU_PROPERTIES,
+} from './context-menu';
 import {
   readPublicSettings,
   saveTranslationProfile,
@@ -36,6 +44,11 @@ import {
 // 后台唯一入口：负责持久化设置、AI 请求调度和浏览器右键菜单注册。
 const activeRequests = new AbortableRequestRegistry(60_000);
 const providerRequests = new ProviderRequestQueue();
+const selectionTranslations = new SelectionTranslationService(
+  getSettings,
+  (details) => chrome.webNavigation.getFrame(details),
+  providerRequests,
+);
 const translationCache = new TranslationCache();
 const candidateResolver = new CandidateResolver(translationCache);
 const translationSessions = new TranslationSessionStore(chrome.storage.session);
@@ -52,7 +65,25 @@ void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void initializeSettings();
 void ensureCacheCleanupAlarm(chrome.alarms);
 // One registration per worker evaluation also covers install/startup, without concurrent resets.
-ensureContextMenu();
+const menuReady = ensureContextMenu();
+const retryMenu = new RetryMenuRegistration(
+  async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab?.id === undefined) return undefined;
+    return chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_STATUS' }, { frameId: 0 });
+  },
+  async (registered) => {
+    await menuReady;
+    if (registered) await createContextMenu(RETRY_FAILED_MENU_PROPERTIES);
+    else await chrome.contextMenus.remove(RETRY_FAILED_MENU_ID);
+  },
+);
+refreshRetryMenu();
+chrome.tabs.onActivated.addListener(refreshRetryMenu);
+chrome.windows.onFocusChanged.addListener(refreshRetryMenu);
+chrome.tabs.onUpdated.addListener((_tabId, change) => {
+  if (change.status || change.url) refreshRetryMenu();
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   void initializeSettings();
@@ -70,12 +101,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  void handlePageTranslationMenuClick(info.menuItemId, tab?.id, (tabId, command) =>
-    chrome.tabs.sendMessage(tabId, command),
+  void handlePageTranslationMenuClick(
+    info,
+    tab?.id,
+    (tabId, command, options) => chrome.tabs.sendMessage(tabId, command, options),
+    async (tabId, frameId) => (await chrome.webNavigation.getFrame({ tabId, frameId }))?.documentId,
   );
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  refreshRetryMenu();
+  selectionTranslations.removeTab(tabId);
   activeRequests.cancelForTab(tabId);
   void translationSessions.deleteForTab(tabId).catch((error: unknown) => {
     console.error('翻译会话清理失败', error);
@@ -83,7 +119,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.webNavigation.onCommitted.addListener(({ tabId, frameId, documentId }) => {
+  selectionTranslations.navigate(tabId, frameId, documentId);
   if (frameId !== 0) return;
+  refreshRetryMenu();
   activeRequests.cancelOtherDocuments(tabId, documentId);
   void translationSessions.deleteOtherDocuments(tabId, documentId).catch((error: unknown) => {
     console.error('旧网页翻译会话清理失败', error);
@@ -127,6 +165,17 @@ async function handleRuntimeRequest(
       throw new Error('设置只能由扩展页面修改');
     }
     switch (request.type) {
+      case 'PAGE_RETRY_STATE_CHANGED':
+        if (sender.frameId === 0 && sender.tab?.id !== undefined) await retryMenu.refresh();
+        return { ok: true, data: undefined };
+      case 'TRANSLATE_SELECTION':
+        return {
+          ok: true,
+          data: await selectionTranslations.translate(sender, request.requestId, request.text),
+        };
+      case 'CANCEL_SELECTION_TRANSLATION':
+        selectionTranslations.cancel(sender, request.requestId);
+        return { ok: true, data: undefined };
       case 'GET_PUBLIC_SETTINGS': {
         return { ok: true, data: await readPublicSettings() };
       }
@@ -245,6 +294,8 @@ async function handleRuntimeRequest(
             requestKey,
             (signal) =>
               translateBatch(session.settings, request.segments, fetch, signal, {
+                // Keep the retry budget fixed for this session, including later dynamic batches.
+                maxRetries: session.settings.translationRetryCount,
                 onTranslations: (translations) => publish({ translations }),
                 onTiming: (stage, durationMs) =>
                   publish({ translations: {}, timing: { stage, durationMs } }),
@@ -341,7 +392,12 @@ async function getConfiguredSettings(profileId: string) {
   ) {
     throw new Error('请先在设置页完成 API 配置');
   }
-  return { ...profile, targetLanguage: settings.targetLanguage };
+  return {
+    ...profile,
+    ...configuredProviderOptions(profile),
+    targetLanguage: settings.targetLanguage,
+    translationRetryCount: settings.translationRetryCount,
+  };
 }
 
 function assertSessionMode(
@@ -353,13 +409,7 @@ function assertSessionMode(
 
 function getCacheContext(session: TranslationSessionContext): TranslationCacheContext {
   const { settings } = session;
-  return {
-    origin: session.origin,
-    apiUrl: settings.apiUrl,
-    model: settings.model,
-    targetLanguage: settings.targetLanguage,
-    translationPrompt: settings.translationPrompt,
-  };
+  return { ...settings, origin: session.origin };
 }
 
 async function getTranslationSession(
@@ -406,19 +456,29 @@ async function getActiveTabId(): Promise<number | undefined> {
   return tab?.id;
 }
 
-function ensureContextMenu(): void {
-  void ensurePageTranslationMenu({
+function ensureContextMenu(): Promise<void> {
+  return ensurePageTranslationMenu({
     removeAll: () => chrome.contextMenus.removeAll(),
-    create: (properties) =>
-      new Promise<void>((resolve, reject) => {
-        // create reports asynchronous registration errors through its callback, not its return ID.
-        chrome.contextMenus.create(properties, () => {
-          const error = chrome.runtime.lastError;
-          if (error) reject(new Error(error.message));
-          else resolve();
-        });
-      }),
+    create: createContextMenu,
   }).catch((error: unknown) => {
     console.error('右键翻译菜单注册失败', error);
+  });
+}
+
+/** Chrome reports create failures through the callback, not the synchronous return ID. */
+function createContextMenu(properties: chrome.contextMenus.CreateProperties): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    chrome.contextMenus.create(properties, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
+/** Recompute on lifecycle events rather than retaining potentially stale per-tab failure counts. */
+function refreshRetryMenu(): void {
+  void retryMenu.refresh().catch((error: unknown) => {
+    console.error('右键重试菜单更新失败', error);
   });
 }

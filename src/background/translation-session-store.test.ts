@@ -1,9 +1,15 @@
+import { DEFAULT_PROVIDER_OPTIONS } from '../shared/providers';
 import { describe, expect, it } from 'vitest';
 
-import type { TranslationRequestConfig } from '../shared/openai-client';
+import type { TranslationRequestConfig } from '../shared/translation-client';
 import { TranslationSessionStore } from './translation-session-store';
 
-const SETTINGS: TranslationRequestConfig = {
+const SETTINGS: TranslationRequestConfig & { translationRetryCount: number } = {
+  ...DEFAULT_PROVIDER_OPTIONS,
+  provider: 'custom',
+  protocol: 'openai',
+  thinkingEnabled: true,
+  translationRetryCount: 3,
   apiUrl: 'https://gateway.example.com/v1',
   apiKey: 'test-secret',
   model: 'translation-model',
@@ -45,6 +51,14 @@ describe('TranslationSessionStore', () => {
     });
     mutableSettings.model = 'changed-after-session-start';
     mutableSettings.translationPrompt = 'A different prompt.';
+    mutableSettings.translationRetryCount = 0;
+    mutableSettings.thinkingEnabled = false;
+    mutableSettings.provider = 'mimo';
+    mutableSettings.protocol = 'anthropic';
+    mutableSettings.thinkingControl = 'anthropic-budget';
+    mutableSettings.reasoningEffort = 'high';
+    mutableSettings.thinkingBudgetTokens = 4096;
+    mutableSettings.maxOutputTokens = 32768;
 
     await expect(
       store.read({
@@ -165,3 +179,19 @@ class InMemorySessionStorage {
     return Promise.resolve();
   }
 }
+
+it('explicitly invalidates stored sessions without the new provider contract', async () => {
+  const storage = new InMemorySessionStorage();
+  const store = new TranslationSessionStore(storage);
+  const identity = {
+    tabId: 9,
+    documentId: 'document',
+    sessionId: 'old',
+    origin: 'https://page.test',
+  };
+  const settings: Record<string, unknown> = { ...SETTINGS };
+  delete settings.provider;
+  delete settings.protocol;
+  await storage.set({ 'translation-session:9:old': { ...identity, mode: 'segmented', settings } });
+  await expect(store.read(identity)).rejects.toThrow('已失效');
+});

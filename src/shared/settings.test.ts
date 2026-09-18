@@ -1,3 +1,4 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -33,7 +34,7 @@ describe('validateSettings', () => {
         ...DEFAULT_SETTINGS,
         profiles: [
           {
-            ...DEFAULT_SETTINGS.profiles[0],
+            ...TEST_PROFILE,
             apiUrl: 'https://gateway.example.com/v1',
             model: 'gpt-4.1-mini',
           },
@@ -47,7 +48,7 @@ describe('validateSettings', () => {
       ...DEFAULT_SETTINGS,
       profiles: [
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           apiUrl: 'ftp://example.com',
           model: ' ',
           translationPrompt: ' ',
@@ -74,7 +75,7 @@ describe('validateSettings', () => {
       ...DEFAULT_SETTINGS,
       profiles: [
         {
-          ...DEFAULT_SETTINGS.profiles[0],
+          ...TEST_PROFILE,
           model: 'translation-model',
           translationPrompt: 'x'.repeat(MAX_TRANSLATION_PROMPT_CHARACTERS + 1),
         },
@@ -92,7 +93,7 @@ describe('validateSettings', () => {
         ...DEFAULT_SETTINGS,
         profiles: [
           {
-            ...DEFAULT_SETTINGS.profiles[0],
+            ...TEST_PROFILE,
             apiUrl: 'http://gateway.example.com/v1',
             apiKey: 'secret',
             model: 'model',
@@ -106,7 +107,7 @@ describe('validateSettings', () => {
         ...DEFAULT_SETTINGS,
         profiles: [
           {
-            ...DEFAULT_SETTINGS.profiles[0],
+            ...TEST_PROFILE,
             apiUrl: 'http://127.0.0.1:11434/v1',
             apiKey: 'local-secret',
             model: 'model',
@@ -143,19 +144,23 @@ describe('validateSettings', () => {
       ...DEFAULT_SETTINGS,
       profiles: [
         {
+          ...TEST_PROFILE,
           id: 'deepseek',
           name: 'DeepSeek',
           apiUrl: 'https://api.deepseek.com/v1',
           apiKey: 'a',
           model: 'deepseek-chat',
+          thinkingEnabled: true,
           translationPrompt: 'Use concise terminology.',
         },
         {
+          ...TEST_PROFILE,
           id: 'local',
           name: '本地模型',
           apiUrl: 'http://127.0.0.1:11434/v1',
           apiKey: '',
           model: 'qwen3',
+          thinkingEnabled: true,
           translationPrompt: 'Use natural Chinese.',
         },
       ],
@@ -171,6 +176,7 @@ describe('validateSettings', () => {
       ...DEFAULT_SETTINGS,
       profiles: [
         {
+          provider: 'custom', protocol:'openai',
           id: 'stored-profile',
           name: '已有配置',
           apiUrl: 'https://gateway.example.com/v1',
@@ -208,14 +214,31 @@ describe('isUrlAutoTranslated', () => {
 });
 
 describe('translation concurrency preference', () => {
-  it('defaults to six and retains a saved limit', () => {
-    expect(mergeSettings(undefined).translationConcurrency).toBe(6);
+  it('defaults to four and retains saved limits', () => {
+    expect(mergeSettings(undefined).translationConcurrency).toBe(4);
+    expect(mergeSettings({}).translationConcurrency).toBe(4);
+    expect(mergeSettings({ translationConcurrency: 6 }).translationConcurrency).toBe(6);
     expect(mergeSettings({ translationConcurrency: 2 }).translationConcurrency).toBe(2);
   });
   it.each([0, -1, 7, 1.5, '2', null, NaN, Infinity])(
     'normalizes invalid stored concurrency %s',
     (value) => {
-      expect(mergeSettings({ translationConcurrency: value }).translationConcurrency).toBe(6);
+      expect(mergeSettings({ translationConcurrency: value }).translationConcurrency).toBe(4);
     },
   );
+});
+
+describe('translation retry preference', () => {
+  it('defaults to one retry and preserves zero and supported counts', () => {
+    expect(mergeSettings(undefined).translationRetryCount).toBe(1);
+    expect(mergeSettings({}).translationRetryCount).toBe(1);
+    for (const translationRetryCount of [0, 1, 2, 3, 4, 5]) {
+      expect(mergeSettings({ translationRetryCount }).translationRetryCount).toBe(
+        translationRetryCount,
+      );
+    }
+  });
+  it.each([-1, 6, 1.5, '2', null, NaN, Infinity])('normalizes invalid retry count %s', (value) => {
+    expect(mergeSettings({ translationRetryCount: value }).translationRetryCount).toBe(1);
+  });
 });

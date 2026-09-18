@@ -1,9 +1,9 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it, vi } from 'vitest';
-import { translateBatch } from './openai-client';
-import { DEFAULT_SETTINGS } from './settings';
+import { translateBatch } from './translation-client';
 import { completionResponse, contentEvent } from '../test-utils/sse';
 
-const config = { ...DEFAULT_SETTINGS.profiles[0], model: 'test', targetLanguage: 'Chinese' };
+const config = { ...TEST_PROFILE, model: 'test', targetLanguage: 'Chinese' };
 const segments = ['a', 'b'].map((id) => ({
   requestId: `${id}:0`,
   unitId: id,
@@ -16,7 +16,41 @@ const success = () =>
     { id: 'b:0', text: '乙' },
   ]);
 
-describe('one automatic retry budget', () => {
+describe('configurable automatic retry budget', () => {
+  it.each([0, 1, 3, 5])(
+    'limits mixed failures to %i retries and resends only outstanding IDs',
+    async (maxRetries) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(completionResponse([{ id: 'a:0', text: '甲' }]))
+        .mockRejectedValueOnce(new TypeError('network disconnected'))
+        .mockImplementation(() => Promise.resolve(completionResponse([])));
+      const sleep = vi.fn().mockResolvedValue(undefined);
+      const result = await translateBatch(config, segments, fetcher, undefined, {
+        maxRetries,
+        sleep,
+      });
+      expect(result.translations).toEqual({ 'a:0': '甲' });
+      expect(Object.keys(result.failures)).toEqual(['b:0']);
+      expect(fetcher).toHaveBeenCalledTimes(maxRetries + 1);
+      expect(sleep).toHaveBeenCalledTimes(maxRetries);
+      for (const call of fetcher.mock.calls.slice(1)) expect(ids(call[1])).toEqual(['b:0']);
+    },
+  );
+  it('stops retrying as soon as all items succeed', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(completionResponse([]))
+      .mockResolvedValueOnce(success());
+    expect(
+      await translateBatch(config, segments, fetcher, undefined, {
+        maxRetries: 5,
+        sleep: vi.fn().mockResolvedValue(undefined),
+      }),
+    ).toEqual({ translations: { 'a:0': '甲', 'b:0': '乙' }, failures: {} });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
   it.each([400, 401, 429, 500])(
     'automatically retries HTTP %i once without user input',
     async (status) => {
@@ -128,7 +162,7 @@ describe('one automatic retry budget', () => {
     vi.useFakeTimers();
     const controller = new AbortController();
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('disconnected'));
-    const work = translateBatch(config, segments, fetcher, controller.signal);
+    const work = translateBatch(config, segments, fetcher, controller.signal, { maxRetries: 5 });
     const rejected = expect(work).rejects.toThrow('stopped');
     try {
       await vi.advanceTimersByTimeAsync(100);

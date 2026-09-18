@@ -34,6 +34,12 @@ export default defineManifest({
   content_scripts: [
     {
       matches: ['http://*/*', 'https://*/*'],
+      js: ['src/content/selection-content-script.ts'],
+      all_frames: true,
+      run_at: 'document_idle',
+    },
+    {
+      matches: ['http://*/*', 'https://*/*'],
       js: ['src/content/content-script.ts'],
       run_at: 'document_idle',
     },

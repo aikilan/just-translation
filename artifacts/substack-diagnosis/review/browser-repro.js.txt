@@ -1,0 +1,35 @@
+/** Run the same browser assertions against the current and pre-fix DOM modules. */
+(api) => {
+  const results = {};
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p><div id="destination"></div></main>';
+  let source = document.querySelector('#source');
+  const moved = source.querySelector('em');
+  api.renderTranslation(source, '译文。');
+  api.setDocumentDisplayMode('translation');
+  document.querySelector('#destination').append(moved);
+  api.restoreDocument();
+  results.movedOriginal = { hidden: moved.hidden, visible: moved.checkVisibility(), marked: moved.hasAttribute('data-justranslate-source-content'), expectedHidden: false };
+
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p></main>';
+  source = document.querySelector('#source');
+  api.renderTranslation(source, '译文。');
+  const replacement = document.createElement('strong');
+  replacement.textContent = 'Visible original paragraph.';
+  source.querySelector('em').replaceWith(replacement);
+  api.setDocumentDisplayMode('translation');
+  results.replacedOriginal = { visible: replacement.checkVisibility(), expectedVisible: false };
+  api.restoreDocument();
+
+  document.body.innerHTML = '<main style="visibility:hidden"><p>Hidden reading paragraph.</p></main><article><p id="visible">Visible reading paragraph.</p></article>';
+  results.hiddenMain = { ids: api.collectTranslatableElements(document.body).map(e=>e.id), expectedIds: ['visible'] };
+  api.restoreDocument();
+
+  document.body.innerHTML = '<main><p style="overflow-y:hidden;height:20px">Visible reading paragraph.</p></main>';
+  source = document.querySelector('p');
+  api.renderTranslation(source, '译文。');
+  source.style.color = 'red';
+  api.restoreDocument();
+  results.overflowRestore = { overflowY: source.style.overflowY, computedOverflowY: getComputedStyle(source).overflowY, expectedOverflowY: 'hidden', color: source.style.color };
+  document.body.innerHTML = '';
+  return results;
+}

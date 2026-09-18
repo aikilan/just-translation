@@ -1,0 +1,188 @@
+{
+  "results": [
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1440,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1024,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1024,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 1024,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 768,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 768,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 768,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 390,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "light",
+      "width": 320,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1440,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1024,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1024,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 1024,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 768,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 768,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 768,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 390,
+      "section": "站点规则",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "AI 配置",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "阅读偏好",
+      "overflow": false
+    },
+    {
+      "scheme": "dark",
+      "width": 320,
+      "section": "站点规则",
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "draftIsolation": true,
+  "persistence": true,
+  "fixtureConnectionTest": true
+}

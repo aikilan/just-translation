@@ -1,0 +1,31 @@
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { collectOriginalReadingUnits } from '../../src/content/dom-translator';
+
+describe('Substack article discovery reproduction', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    { display: 'block', expected: 1 },
+    { display: 'contents', expected: 1 },
+    { display: 'none', expected: 0 },
+  ])('discovers visible article descendants under display: $display', ({ display, expected }) => {
+    document.body.innerHTML = `<div role="main"><div style="display:${display}"><article><p>A visible article paragraph needs translation.</p></article></div></div>`;
+
+    // jsdom has no layout. Model the browser observation: contents/none wrappers have no box.
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (
+      this: HTMLElement,
+    ): DOMRectList {
+      const hasBox = !['contents', 'none'].includes(getComputedStyle(this).display);
+      return { length: hasBox ? 1 : 0 } as DOMRectList;
+    });
+
+    const units = collectOriginalReadingUnits(document.body);
+    expect(units).toHaveLength(expected);
+    if (expected) expect(units[0]).toBe(document.querySelector('p'));
+  });
+});

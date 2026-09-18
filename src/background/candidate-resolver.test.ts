@@ -1,3 +1,4 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CandidateResolver } from './candidate-resolver';
@@ -8,6 +9,8 @@ import type {
 } from './translation-cache';
 
 const CONTEXT: TranslationCacheContext = {
+  ...TEST_PROFILE,
+  thinkingEnabled: true,
   origin: 'https://news.example.com',
   apiUrl: 'https://gateway.example.com/v1',
   model: 'translation-model',

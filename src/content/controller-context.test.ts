@@ -13,6 +13,7 @@ beforeEach(() => {
     targetLanguage: 'English',
     displayMode: 'bilingual',
     translationConcurrency: 6,
+    translationRetryCount: 1,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],

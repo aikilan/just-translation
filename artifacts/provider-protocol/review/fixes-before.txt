@@ -1,0 +1,143 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/protocol-request.test.ts (14 tests | 3 failed) 9ms
+     × sends the validated budget output cap for custom/alias full=false override=null 4ms
+     × sends the validated budget output cap for custom/alias full=true override=null 1ms
+     × sends the validated budget output cap for mimo/mimo-v2.5-pro full=true override=null 0ms
+ ❯ src/shared/providers.test.ts (34 tests | 4 failed) 12ms
+   × explicitly enables manual reasoning_effort for mimo-v2.5 3ms
+   × validates the documented output limit of gpt-4.1 2ms
+   × validates the documented output limit of gpt-4.1-mini 0ms
+   × validates the documented output limit of gpt-4.1-nano 0ms
+ ❯ src/options/provider-configuration.test.tsx (10 tests | 2 failed) 298ms
+   × restores the actual grok thinking state when returning to auto 25ms
+   × discards address edits without losing the saved URL behavior for https://api.xiaomimimo.com/v1 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/shared/protocol-request.test.ts > protocol request adapters > sends the validated budget output cap for custom/alias full=false override=null
+ FAIL  src/shared/protocol-request.test.ts > protocol request adapters > sends the validated budget output cap for custom/alias full=true override=null
+AssertionError: expected { model: 'alias', stream: true, …(2) } to match object { Object (max_tokens, thinking) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "max_tokens": 8192,
+    "thinking": {
+      "budget_tokens": 6000,
+      "type": "enabled",
+    },
+  }
+
+ ❯ src/shared/protocol-request.test.ts:84:18
+     82|     };
+     83|     const { body } = buildProtocolRequest(settings, 's', 'c', full);
+     84|     expect(body).toMatchObject({ max_tokens: expected, thinking: { typ…
+       |                  ^
+     85|     expect(() => buildProtocolRequest({ ...settings, thinkingBudgetTok…
+     86|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/shared/protocol-request.test.ts > protocol request adapters > sends the validated budget output cap for mimo/mimo-v2.5-pro full=true override=null
+AssertionError: expected { model: 'mimo-v2.5-pro', …(3) } to match object { max_tokens: 65536, …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "max_tokens": 65536,
+    "thinking": {
+      "budget_tokens": 6000,
+      "type": "enabled",
+    },
+  }
+
+ ❯ src/shared/protocol-request.test.ts:84:18
+     82|     };
+     83|     const { body } = buildProtocolRequest(settings, 's', 'c', full);
+     84|     expect(body).toMatchObject({ max_tokens: expected, thinking: { typ…
+       |                  ^
+     85|     expect(() => buildProtocolRequest({ ...settings, thinkingBudgetTok…
+     86|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/shared/providers.test.ts > explicitly enables manual reasoning_effort for mimo-v2.5
+AssertionError: expected {} to deeply equal { reasoning_effort: 'low' }
+
+- Expected
++ Received
+
+- {
+-   "reasoning_effort": "low",
+- }
++ {}
+
+ ❯ src/shared/providers.test.ts:246:54
+    244| it.each(['mimo-v2.5', 'private-alias'])('explicitly enables manual rea…
+    245|   const options = { ...base, model, thinkingControl: 'reasoning_effort…
+    246|   expect(resolveProviderOptions(options).parameters).toEqual({ reasoni…
+       |                                                      ^
+    247|   expect(resolveProviderOptions({ ...options, reasoningEffort: 'high' …
+    248|   expect(resolveProviderOptions({ ...options, thinkingEnabled: false, …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/shared/providers.test.ts > validates the documented output limit of gpt-4.1
+ FAIL  src/shared/providers.test.ts > validates the documented output limit of gpt-4.1-mini
+ FAIL  src/shared/providers.test.ts > validates the documented output limit of gpt-4.1-nano
+Error: 输出上限超过模型限制
+ ❯ resolveProviderOptions src/shared/providers.ts:487:11
+    485|     throw new Error('输出上限必须为 1–1000000 的整数');
+    486|   if (model && options.maxOutputTokens !== null && options.maxOutputTo…
+    487|     throw new Error('输出上限超过模型限制');
+       |           ^
+    488|   const maxOutputTokens =
+    489|     options.maxOutputTokens ??
+ ❯ src/shared/providers.test.ts:263:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/options/provider-configuration.test.tsx > restores the actual grok thinking state when returning to auto
+AssertionError: expected '只是翻译设置AI 配置阅读偏好站点规则你的 API，你的阅读方式。版本 0…' not to contain '此模型始终思考，无法关闭'
+
+Expected: "此模型始终思考，无法关闭"
+Received: "只是翻译设置AI 配置阅读偏好站点规则你的 API，你的阅读方式。版本 0.3.28偏好设置AI 配置连接你的 AI，管理用于翻译的服务。单页翻译并发数所有 AI 配置共用，默认 4。修改后自动保存，下次翻译生效；可视区完成后仍会继续翻译屏外内容。123456翻译失败重试次数所有 AI 配置共用，默认 1 次，0 表示不自动重试。仅用于普通翻译，全文翻译不自动重试。修改后自动保存，下次翻译生效。0 次（不重试）1 次2 次3 次4 次5 次正在编辑的配置默认配置 · 当前使用备用配置新增配置当前使用·未保存供应商请选择供应商Google GeminixAI GrokOpenAIAnthropic Claude月之暗面 Kimi智谱 GLM小米 MiMoDeepSeek阿里云 Qwen自定义供应商接入协议请选择接入协议OpenAI Chat CompletionsAnthropic Messages配置名称API 地址支持所选协议的基础地址或完整请求地址，保留自定义路径。API Key模型开启思考此模型始终开启思考，无法关闭。思考强度服务商默认lowmediumhighxhigh思考与输出高级设置思考控制方式自动识别接口默认（不发送思考参数）thinking.typereasoning_effortenable_thinkingAnthropic 自适应 thinking.typeAnthropic 预算 thinking.budget_tokens手动方式用于新模型和中转别名；由接口验证参数支持情况，不自动降级。输出上限（tokens）Anthropic 默认：普通翻译 8192，全文最高 65536，受模型上限约束；未知模型 8192。此模型始终思考，无法关闭高级设置自定义翻译 Prompt翻译 Prompt恢复默认 PromptYou are a professional webpage translator. Translate every segment naturally and accurately into {{targetLanguage}}. Preserve meaning, tone, names, numbers, URLs, placeholders, and inline formatting markers.用 {{targetLanguage}} 表示目标语言。207 / 8000未测试测试会直接请求你的 API，不会保存或启用配置。保存配置测试连接放弃修改密钥仅保存在当前浏览器，翻译请求直接发送到你的 API。删除配置删除前请先启用其他配置。目标语言下一次翻译时使用的语言简体中文繁體中文英语日语韩语法语德语西班牙语自定义语言…默认展示双语阅读或专注译文双语仅译文动态内容翻译继续翻译后来加载的正文、评论等内容阅读效果排版示例 · 不调用 API一小段阅读时光让好奇心走得更远Reading opens a window to ideas beyond our everyday world. A few quiet moments can change how we see things.阅读为我们打开一扇窗，通往日常之外的思想。片刻安静，也能改变我们看待世界的方式。实际译文继承所在网页的字体与颜色。语言与动态翻译偏好用于下一次翻译。已打开网页的显示方式可在插件弹窗中切换。自动翻译0 个站点进入这些网站时自动开始翻译，仅匹配填写的精确域名。添加还没有自动翻译的站点也可以在网页的插件弹窗中开启“此站自动翻译”。不翻译0 个站点这些站点始终保持原文。不翻译优先于自动翻译。添加还没有不翻译的站点添加域名，让这些网站保持原样。"
+
+ ❯ src/options/provider-configuration.test.tsx:158:42
+    156|   expect(toggle.disabled).toBe(mandatory);
+    157|   await click(view.container, '保存配置');
+    158|   expect(view.container.textContent).not.toContain('此模型始终思考，无法关闭');
+       |                                          ^
+    159|   expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+    160|     type: 'SAVE_TRANSLATION_PROFILE',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/options/provider-configuration.test.tsx > discards address edits without losing the saved URL behavior for https://api.xiaomimimo.com/v1
+AssertionError: expected 'https://api.xiaomimimo.com/v1' to be 'https://api.xiaomimimo.com/anthropic' // Object.is equality
+
+Expected: "https://api.xiaomimimo.com/anthropic"
+Received: "https://api.xiaomimimo.com/v1"
+
+ ❯ src/options/provider-configuration.test.tsx:180:90
+    178|   await click(view.container, '放弃修改');
+    179|   await input(view.container, '接入协议', 'anthropic');
+    180|   expect(view.container.querySelector<HTMLInputElement>('[aria-label="…
+       |                                                                                          ^
+    181| });
+    182|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  9 failed | 49 passed (58)
+   Start at  13:32:19
+   Duration  995ms (transform 245ms, setup 0ms, import 425ms, tests 319ms, environment 277ms)
+

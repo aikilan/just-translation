@@ -1,0 +1,270 @@
+{
+  "results": [
+    {
+      "name": "normal",
+      "expected": true,
+      "selected": true,
+      "passed": true,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "contents",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "hidden-parent-visible-child",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "flex-direct-text",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "grid-direct-text",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "flex-span",
+      "expected": true,
+      "selected": true,
+      "passed": true,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "flex-em",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "display-none",
+      "expected": false,
+      "selected": false,
+      "passed": true,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 0,
+      "visibility": "visible",
+      "browserVisible": false
+    },
+    {
+      "name": "visibility-hidden",
+      "expected": false,
+      "selected": false,
+      "passed": true,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "hidden",
+      "browserVisible": false
+    },
+    {
+      "name": "visibility-collapse",
+      "expected": false,
+      "selected": true,
+      "passed": false,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "collapse",
+      "browserVisible": false
+    },
+    {
+      "name": "opacity-zero",
+      "expected": null,
+      "selected": true,
+      "passed": null,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": false
+    },
+    {
+      "name": "content-visibility-hidden",
+      "expected": false,
+      "selected": true,
+      "passed": false,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": false
+    },
+    {
+      "name": "content-visibility-auto",
+      "expected": null,
+      "selected": true,
+      "passed": null,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": false
+    },
+    {
+      "name": "zero-size-visible-overflow",
+      "expected": true,
+      "selected": true,
+      "passed": true,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "contents-overflow",
+      "expected": true,
+      "selected": false,
+      "passed": false,
+      "units": [
+        "control"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "transform-offscreen",
+      "expected": true,
+      "selected": true,
+      "passed": true,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": false,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": true
+    },
+    {
+      "name": "closed-details",
+      "expected": false,
+      "selected": true,
+      "passed": false,
+      "units": [
+        "control",
+        "target"
+      ],
+      "viewportSelected": true,
+      "rects": 1,
+      "visibility": "visible",
+      "browserVisible": false
+    }
+  ],
+  "rendering": [
+    {
+      "name": "normal",
+      "sourceHeight": 47.21875,
+      "translationTop": 35.21875,
+      "sourceBottom": 55.21875,
+      "entirelyBelowSource": false,
+      "overflow": "visible"
+    },
+    {
+      "name": "fixed-height-overflow",
+      "sourceHeight": 20,
+      "translationTop": 35.21875,
+      "sourceBottom": 28,
+      "entirelyBelowSource": true,
+      "overflow": "hidden"
+    },
+    {
+      "name": "line-clamp",
+      "sourceHeight": 20,
+      "translationTop": 35.21875,
+      "sourceBottom": 28,
+      "entirelyBelowSource": true,
+      "overflow": "hidden"
+    }
+  ],
+  "contentsClipping": {
+    "selectedWithTraversalOverride": true,
+    "viewportSelectedWithTraversalOverride": false,
+    "expectedViewportSelected": true
+  },
+  "directChildSelector": {
+    "beforeWeight": "700",
+    "afterWeight": "400",
+    "expectedWeight": "700"
+  }
+}

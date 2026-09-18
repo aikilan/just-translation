@@ -32,6 +32,7 @@ type TranslationCommand = Extract<
   | 'STOP_TRANSLATION'
   | 'RESTORE_PAGE'
   | 'RESTART_TRANSLATION'
+  | 'RETRY_FAILED_TRANSLATIONS'
   | 'START_FULL_DOCUMENT_TRANSLATION'
 >;
 const IDLE: PageTranslationStatus = {
@@ -180,7 +181,7 @@ export function PopupApp() {
       : fullDocument
         ? '重新全文翻译'
         : status.failed > 0
-          ? '返回网页重试'
+          ? '重试全部失败'
           : status.phase === 'stopped'
             ? '继续翻译'
             : status.phase === 'complete'
@@ -319,7 +320,7 @@ export function PopupApp() {
                 if (needsRestart) void run('RESTART_TRANSLATION');
                 else if (status.phase === 'translating') void run('STOP_TRANSLATION');
                 else if (fullDocument) void run('START_FULL_DOCUMENT_TRANSLATION');
-                else if (status.failed > 0) window.close();
+                else if (status.failed > 0) void run('RETRY_FAILED_TRANSLATIONS');
                 else void run('START_TRANSLATION');
               }}
             >
@@ -327,6 +328,8 @@ export function PopupApp() {
                 <LoaderCircle className="spin" aria-hidden="true" />
               ) : status.phase === 'translating' && !needsRestart ? (
                 <Square aria-hidden="true" />
+              ) : !fullDocument && status.failed > 0 && !needsRestart ? (
+                <RotateCcw aria-hidden="true" />
               ) : (
                 <Play aria-hidden="true" />
               )}
@@ -348,7 +351,7 @@ export function PopupApp() {
               <p className="retry-guidance">
                 {fullDocument
                   ? '原文已保留，重试会重新提交全文。'
-                  : '在网页中点击失败段落的“重试”，已完成的译文会保留。'}
+                  : '仅重试失败段落，已完成的译文会保留。'}
               </p>
             ) : null}
             {status.error ? (

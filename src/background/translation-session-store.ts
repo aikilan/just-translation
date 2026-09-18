@@ -1,11 +1,13 @@
-import type { TranslationRequestConfig } from '../shared/openai-client';
+import { parseConfiguredProviderOptions } from '../shared/providers';
+import type { TranslationRequestConfig } from '../shared/translation-client';
 import type { TranslationMode } from '../shared/messages';
+import { isValidTranslationRetryCount, type TranslatorSettings } from '../shared/settings';
 
 const SESSION_STORAGE_PREFIX = 'translation-session:';
 
 export interface TranslationSessionContext extends TranslationSessionIdentity {
   mode: TranslationMode;
-  settings: TranslationRequestConfig;
+  settings: TranslationRequestConfig & Pick<TranslatorSettings, 'translationRetryCount'>;
 }
 
 export interface TranslationSessionIdentity {
@@ -91,13 +93,19 @@ function assertIdentity(identity: TranslationSessionIdentity): void {
 function parseStoredContext(value: unknown): TranslationSessionContext | undefined {
   if (!isRecord(value) || !isRecord(value.settings)) return undefined;
   const { tabId, documentId, sessionId, origin, settings, mode } = value;
+  const providerOptions = parseConfiguredProviderOptions(settings);
+  const translationRetryCount = settings.translationRetryCount;
+  const thinkingEnabled = settings.thinkingEnabled;
   if (
+    !providerOptions ||
     (mode !== 'segmented' && mode !== 'full-document') ||
     typeof tabId !== 'number' ||
     !Number.isInteger(tabId) ||
     typeof sessionId !== 'string' ||
     typeof documentId !== 'string' ||
     typeof origin !== 'string' ||
+    typeof thinkingEnabled !== 'boolean' ||
+    !isValidTranslationRetryCount(translationRetryCount) ||
     !hasStringFields(settings, ['apiUrl', 'apiKey', 'model', 'targetLanguage', 'translationPrompt'])
   ) {
     return undefined;
@@ -109,6 +117,9 @@ function parseStoredContext(value: unknown): TranslationSessionContext | undefin
     sessionId,
     origin,
     settings: {
+      ...providerOptions,
+      translationRetryCount,
+      thinkingEnabled,
       apiUrl: settings.apiUrl,
       apiKey: settings.apiKey,
       model: settings.model,

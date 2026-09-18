@@ -1,0 +1,19 @@
+{
+  "before": {
+    "total": 51,
+    "bodyParagraphs": 21,
+    "paragraphCount": 21,
+    "ancestorClaimed": false
+  },
+  "bilingual": {
+    "paragraphTranslations": 21,
+    "linksKeepParents": true,
+    "visibleTranslations": 21
+  },
+  "translationOnly": {
+    "visibleTranslations": 21,
+    "sourceTextPreserved": true
+  },
+  "restoredHTML": true,
+  "restoredLinks": true
+}

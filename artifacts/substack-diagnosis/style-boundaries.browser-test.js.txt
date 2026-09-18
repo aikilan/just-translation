@@ -1,0 +1,96 @@
+/** Browser regression cases for the current DOM collector; no model requests are made. */
+({ api, css }) => {
+  const cases = [
+    ['normal', '<p id="target">Visible reading paragraph.</p>', true],
+    ['contents', '<div style="display:contents"><p id="target">Visible reading paragraph.</p></div>', true],
+    ['hidden-parent-visible-child', '<div style="visibility:hidden"><p id="target" style="visibility:visible">Visible reading paragraph.</p></div>', true],
+    ['flex-direct-text', '<p id="target" style="display:flex">Visible reading paragraph.</p>', true],
+    ['grid-direct-text', '<p id="target" style="display:grid">Visible reading paragraph.</p>', true],
+    ['flex-span', '<div style="display:flex"><span id="target">Visible reading paragraph.</span></div>', true],
+    ['flex-em', '<div style="display:flex"><em id="target">Visible reading paragraph.</em></div>', true],
+    ['display-none', '<div style="display:none"><p id="target">Hidden reading paragraph.</p></div>', false],
+    ['visibility-hidden', '<p id="target" style="visibility:hidden">Hidden reading paragraph.</p>', false],
+    ['visibility-collapse', '<p id="target" style="visibility:collapse">Hidden reading paragraph.</p>', false],
+    ['opacity-zero', '<div style="opacity:0"><p id="target">Transparent reading paragraph.</p></div>', null],
+    ['content-visibility-hidden', '<div style="content-visibility:hidden"><p id="target">Hidden reading paragraph.</p></div>', false],
+    ['content-visibility-auto', '<div style="content-visibility:auto;margin-top:20000px;contain-intrinsic-size:200px"><p id="target">Deferred reading paragraph.</p></div>', null],
+    ['zero-size-visible-overflow', '<div style="width:0;height:0;overflow:visible"><p id="target" style="position:absolute;top:100px;width:300px">Visible reading paragraph.</p></div>', true],
+    ['contents-overflow', '<div style="display:contents;overflow:hidden"><p id="target">Visible reading paragraph.</p></div>', true],
+    ['transform-offscreen', '<p id="target" style="transform:translateX(-20000px)">Offscreen reading paragraph.</p>', true],
+    ['closed-details', '<details><summary>Toggle</summary><p id="target">Collapsed reading paragraph.</p></details>', false],
+  ];
+  const style = document.createElement('style');
+  style.textContent = 'body {margin:8px} p {margin:0;line-height:20px} main {display:block}' + css;
+  document.head.append(style);
+  const results = [];
+  for (const [name, html, expected] of cases) {
+    api.cleanupReadingRuns();
+    document.body.innerHTML = '<main><p id="control">Control reading paragraph.</p>' + html + '</main>';
+    const target = document.querySelector('#target');
+    const units = api.collectTranslatableElements(document.body);
+    const selected = units.includes(target);
+    const visible = api.collectOriginalReadingUnits(document.body, { viewportOnly: true });
+    const style = getComputedStyle(target);
+    results.push({
+      name, expected, selected, passed: expected === null ? null : selected === expected,
+      units: units.map(e => e.id || e.tagName),
+      viewportSelected: visible.includes(target),
+      rects: target.getClientRects().length,
+      visibility: style.visibility,
+      browserVisible: target.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }),
+    });
+  }
+  const rendering = [];
+  for (const [name, sourceStyle] of [
+    ['normal', ''],
+    ['flex', 'display:flex'],
+    ['inline-flex', 'display:inline-flex'],
+    ['grid', 'display:grid'],
+    ['inline-grid', 'display:inline-grid'],
+    ['fixed-height-overflow', 'height:20px;overflow:hidden'],
+    ['line-clamp', 'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden'],
+  ]) {
+    api.cleanupReadingRuns();
+    document.body.innerHTML = '<main><p id="target" style="' + sourceStyle + '">Visible reading paragraph.</p></main>';
+    const [source] = api.collectTranslatableElements(document.body);
+    const originalText = source.firstChild;
+    const translation = api.renderTranslation(source, '用于检查译文位置的测试文字。');
+    const a = source.getBoundingClientRect();
+    const b = translation.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(originalText);
+    rendering.push({ name, sourceHeight: a.height, translationTop: b.top, sourceBottom: a.bottom, entirelyBelowSource: b.top >= a.bottom, belowOriginal: b.top >= range.getBoundingClientRect().bottom, overflow: getComputedStyle(source).overflow });
+    api.restoreDocument();
+  }
+  // Traversal and viewport clipping must agree: a contents ancestor cannot clip with its empty box.
+  api.cleanupReadingRuns();
+  document.body.innerHTML = '<main><div style="display:contents;overflow:hidden"><p id="target">Visible reading paragraph.</p></div></main>';
+  const contentsVisible = e => {
+    const s = getComputedStyle(e);
+    return !e.hidden && s.display !== 'none' && s.visibility !== 'hidden' &&
+      (s.display === 'contents' || e.getClientRects().length > 0);
+  };
+  const target = document.querySelector('#target');
+  const contentsClipping = {
+    selectedWithTraversalOverride: api.collectTranslatableElements(document.body, { isVisible: contentsVisible }).includes(target),
+    viewportSelectedWithTraversalOverride: api.collectOriginalReadingUnits(document.body, { isVisible: contentsVisible, viewportOnly: true }).includes(target),
+    expectedViewportSelected: true,
+  };
+
+  // The host's direct-child selectors must retain their meaning after translation rendering.
+  api.cleanupReadingRuns();
+  const hostStyle = document.createElement('style');
+  hostStyle.textContent = 'p > .emphasis {font-weight:700}';
+  document.head.append(hostStyle);
+  document.body.innerHTML = '<main><p id="target"><span class="emphasis">Visible reading paragraph.</span></p></main>';
+  const emphasis = document.querySelector('.emphasis');
+  const beforeWeight = getComputedStyle(emphasis).fontWeight;
+  const [source] = api.collectTranslatableElements(document.body);
+  api.renderTranslation(source, '用于检查原文样式的测试文字。');
+  const directChildSelector = { beforeWeight, afterWeight: getComputedStyle(emphasis).fontWeight, expectedWeight: beforeWeight };
+  api.restoreDocument();
+  hostStyle.remove();
+  document.body.innerHTML = '';
+  style.remove();
+  return { results, rendering, contentsClipping, directChildSelector };
+}

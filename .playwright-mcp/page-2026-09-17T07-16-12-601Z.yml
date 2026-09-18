@@ -1,0 +1,373 @@
+- generic [ref=e2]:
+  - iframe
+  - generic [ref=e3]:
+    - generic [ref=e7]:
+      - link [ref=e9] [cursor=pointer]:
+        - /url: /
+        - img "The Etymology Nerd" [ref=e13]
+      - heading [level=1] [ref=e15]:
+        - link "The Etymology Nerd" [ref=e16] [cursor=pointer]:
+          - /url: /
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - button "Search" [ref=e22] [cursor=pointer]
+          - button "Share Publication" [ref=e26] [cursor=pointer]
+        - button "Subscribe" [ref=e30] [cursor=pointer]
+        - button "Sign in" [ref=e31] [cursor=pointer]
+    - main "Post" [ref=e34]:
+      - article [ref=e38]:
+        - dialog "Subscribe modal" [ref=e40]:
+          - generic [ref=e41]:
+            - button "close" [ref=e42] [cursor=pointer]
+            - generic "User" [ref=e48]:
+              - img "User's avatar" [ref=e50]
+            - generic [ref=e51]:
+              - generic [ref=e52]: Discover more from The Etymology Nerd
+              - generic [ref=e53]: ruminations on modern communication
+              - generic [ref=e54]: Over 105,000 subscribers
+            - generic [ref=e56]:
+              - textbox "Enter your email..." [ref=e58]
+              - button "Subscribe" [ref=e59] [cursor=pointer]
+              - generic [ref=e62]:
+                - text: By subscribing, you agree Substack's
+                - link "Terms of Use" [ref=e63] [cursor=pointer]:
+                  - /url: https://substack.com/tos
+                - text: ", and acknowledge its"
+                - link "Information Collection Notice" [ref=e64] [cursor=pointer]:
+                  - /url: https://substack.com/ccpa#personal-data-collected
+                - text: and
+                - link "Privacy Policy" [ref=e65] [cursor=pointer]:
+                  - /url: https://substack.com/privacy
+                - text: .
+          - generic [ref=e66]: Already have an account? Sign in
+        - region "Post header" [ref=e68]:
+          - heading "lolcow theory of the internet" [level=1] [ref=e69]
+          - region "Post UFI" [ref=e70]:
+            - generic [ref=e72]:
+              - link "View Adam Aleksic's profile" [ref=e77] [cursor=pointer]:
+                - /url: https://substack.com/@etymologynerd
+                - generic "Adam Aleksic" [ref=e79]:
+                  - img "Adam Aleksic's avatar" [ref=e81]
+              - generic [ref=e82]:
+                - link "Adam Aleksic" [ref=e85] [cursor=pointer]:
+                  - /url: https://substack.com/@etymologynerd
+                - time [ref=e88]: Sep 17, 2026
+            - generic [ref=e89]:
+              - generic [ref=e90]:
+                - button "Like (72)" [ref=e92] [cursor=pointer]:
+                  - generic [ref=e97]: "72"
+                - button "View comments (3)" [ref=e98] [cursor=pointer]:
+                  - generic [ref=e103]: "3"
+                - button "9" [ref=e104] [cursor=pointer]
+              - button "Share" [ref=e110] [cursor=pointer]
+        - generic [ref=e112]:
+          - generic [ref=e115]:
+            - paragraph [ref=e116]: I’m back on schizogram again.
+            - paragraph [ref=e117]:
+              - text: The posts are all different, but all the same. A man
+              - link "hides in the bushes" [ref=e118] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DbwhRBMONoN/?stkn=MWttMDRiaXJwbTM3cg%3D%3D
+              - text: from the authorities. A shirtless old woman
+              - link "yells obscenities at her camera" [ref=e119] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DcqKamngWJh/?stkn=MWIyMWZsbDNxcnpmdg%3D%3D
+              - text: . A wild-eyed college burnout shares his discovery that we’re living in a
+              - link "300,000-year-old simulation" [ref=e120] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@danielwilliamschmidt/video/7657357047112961311?_r=1&_t=ZT-99iebLioWFR
+              - text: .
+            - paragraph [ref=e121]:
+              - text: "Each video has millions of views, and the comments range from concerned to encouraging. “Keep talking to the AI, it’s working.” “Please get help!” “I think bro is onto something.” In any case, the audience shares a frame of reference that the user does not:"
+              - emphasis [ref=e122]: we are sane, and they are insane
+              - text: .
+            - paragraph [ref=e123]:
+              - text: Now I’m on Old Person Instagram. A woman
+              - link "taps her phone" [ref=e124] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DaiHFvOCZmH/?stkn=NWw5bXR4eWZ5ZTgw
+              - text: in confusion. Another
+              - link "squints at her screen" [ref=e125] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DZvU1C0JqZI/?stkn=a3oyOGEweGszNmRu
+              - text: before starting to speak. A third
+              - link "accidentally zooms" [ref=e126] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DaCuF4kOfXg/?stkn=MTM2ZWZmMXdqemQyZg%3D%3D
+              - text: "onto her own forehead. Here, the comments are warmer, but the underlying relation is the same as on schizogram. There is a power dynamic between the viewer and the poster:"
+              - emphasis [ref=e127]: they don’t understand the internet, but I do
+              - text: .
+            - paragraph [ref=e128]: In both of these instances, the naïve user unwittingly serves as a “lolcow”—an internet laughingstock who can be milked for laughs just like a “cash cow” can be milked for money. Except it’s really more about control. The humor is only enjoyed when the viewers can situate themselves as more knowledgeable or important.
+            - paragraph [ref=e129]:
+              - text: The classic example of a lolcow is Joshua Block, known online as
+              - link "@worldoftshirts" [ref=e130] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@worldoftshirts
+              - text: . Block is a clearly autistic young man known for drinking on camera and being goaded into public meltdowns by his viewers. While some people genuinely try to help, and others antagonize him further, both the instincts to protect and attack come from an assumed position of power over the lolcow. The feeling of asymmetry gives you a license to intervene, to try to shape this person’s life for better or for worse.
+            - paragraph [ref=e131]:
+              - text: But every influencer-viewer dynamic comes with its own asymmetry. To look at someone is to objectify them, projecting a certain interpretation that cannot possibly match onto their more complex reality. To look at an image or video, meanwhile, is to objectify without the possibility of reciprocity. As Susan Sontag writes in
+              - emphasis [ref=e132]: On Photography
+              - text: ", “photographs give people an imaginary possession of a past that is unreal.”"
+            - paragraph [ref=e133]: They can’t see me, but I can see them.
+            - paragraph [ref=e134]:
+              - text: With this asymmetry, the influencer inherently becomes a spectacle to be poked and prodded for your amusement. People check in on Charli D’Amelio
+              - link "like she’s their personal Tamagotchi" [ref=e135] [cursor=pointer]:
+                - /url: https://www.tiktok.com/t/ZTUbHg6HW/
+              - text: . Millions
+              - link "unfollowed Vexbolts" [ref=e136] [cursor=pointer]:
+                - /url: https://knowyourmeme.com/memes/events/vexbolts-mass-unfollowing-december-31st-2024
+              - text: and helped
+              - link "MrBeast overtake T-Series" [ref=e137] [cursor=pointer]:
+                - /url: https://www.bbc.com/news/articles/c8440yxd92xo
+              - text: and
+              - link "trolled KSI" [ref=e138] [cursor=pointer]:
+                - /url: https://knowyourmeme.com/memes/🪑-chair-emoji-on-tiktok
+              - text: with the chair emoji. You, the viewer, can help determine an influencer’s reality. As popular as they might appear, they can’t do anything back to you. They are the court jester and you are their king.
+            - paragraph [ref=e139]:
+              - text: Everybody trying to make it online inevitably experiences some form of
+              - emphasis [ref=e140]: audience capture
+              - text: ", where our followers push us into expressing certain ideas and behaviors—so everybody is a lolcow to some degree. I like to think of myself as fairly independently minded, but I still feel myself regularly conforming to what I think my audience will appreciate."
+            - paragraph [ref=e141]:
+              - text: "There’s a spectrum, to be sure. The more you rely on your followers, the more you have to debase yourself for their approval: begging for galaxies on TikTok live, letting people dictate what you say on Cameo, selling little"
+              - link "moments in your life" [ref=e142] [cursor=pointer]:
+                - /url: https://www.nytimes.com/2021/03/10/style/creators-selling-selves.html
+              - text: ". Then there are those who keep posting even though they’re clearly the butt of a joke:"
+              - link "Ned Fulmer" [ref=e143] [cursor=pointer]:
+                - /url: https://www.youtube.com/@NedFulmer
+              - text: ", the “"
+              - link "cuh dey board" [ref=e144] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@ohmontaine
+              - text: ” guy, arguably George Santos. These are more traditional lolcows, pathologically catering to the people who despise them.
+            - paragraph [ref=e145]:
+              - text: But at least these influencers still know what’s happening. Another type of lolcow doesn’t understand that they are amusing to their audience, or at least doesn’t understand
+              - emphasis [ref=e146]: why
+              - text: . This includes the elderly, the naïve, and the mentally disabled, but the asymmetry could also manifest as educated versus uneducated, urban versus rural, ironic versus sincere.
+            - paragraph [ref=e147]:
+              - text: Every so often, I’ll come across a viral video of a Russian family
+              - link "eating breakfast together" [ref=e148] [cursor=pointer]:
+                - /url: https://www.tiktok.com/@kolbasenko_irina/video/7623348029101313300?is_from_webapp=1&sender_device=pc&web_id=7683558458901644814
+              - text: or an African man
+              - link "carrying water across a river" [ref=e149] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DYXZTDfKH3j/?stkn=MWg2dDJwOWZ6a29vNg==
+              - text: or two Cambodian men
+              - link "building houses in the jungle" [ref=e150] [cursor=pointer]:
+                - /url: https://www.youtube.com/watch?v=hC9neGH7qXs
+              - text: . While these videos can provide a genuinely interesting window into another world, part of the appeal is that the Western viewer can judge them as “quaint,” “rustic,” or “provincial.” We feel a sense of touristic power behind our screens, watching the reel from a more sophisticated viewpoint.
+            - paragraph [ref=e151]: "Many international content creators might understand this way of looking, but I’m sure many do not. They are not situated in the same interpretive frame. They know that people enjoy watching their videos, but they don’t know it’s because they’re part of the algorithmic freak show: a collection of digital specimens to be examined by the cosmopolitan observer. This imbalance only adds to the spectacle."
+            - figure [ref=e153]:
+              - link [ref=e154] [cursor=pointer]:
+                - /url: https://substackcdn.com/image/fetch/$s_!qK2o!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F61e0c1f3-e256-49cb-9d0b-a7b3eb14c171_1179x547.jpeg
+                - img "IMG_4646.jpeg" [ref=e157]
+            - paragraph [ref=e158]:
+              - text: Just as lolcows exist along a continuum, so do their viewers. On the extreme end, agitators coordinate abusive behavior on
+              - link "Kiwi Farms" [ref=e159] [cursor=pointer]:
+                - /url: https://en.wikipedia.org/wiki/Kiwi_Farms
+              - text: ", but everyone is complicit to a lesser extent. As the internet has shifted away from 2010s influencer culture to idealize a raw, unmediated style of content, I’ve specifically noticed a rising interest in these “lolcow lite” genres, where you get to feel a heightened sense of agency without resorting to overt cyberbullying."
+            - paragraph [ref=e160]: I do not think it is a coincidence that the schizo/boomer/foreign style of video has become more popular just as we are losing control over the internet as a whole. Everything feels like a psyop right now, but at least I can laugh over this crazy guy who doesn’t know how to use his phone properly.
+            - paragraph [ref=e161]:
+              - text: Ironically, the lolcow aesthetic is already being exploited by malicious actors—it’s fairly trivial to make an AI-generated profile where you
+              - link "mimic the semiotics of naïveté" [ref=e162] [cursor=pointer]:
+                - /url: https://www.instagram.com/reel/DcemhfoTZ9B/?stkn=eWxlM2I4cDR2MnBv
+              - text: while actually baiting engagement.
+            - paragraph [ref=e163]:
+              - text: Regardless, I am concerned that these kinds of posts will only continue to go viral as we become desensitized to our own spectatorship. As they do, the online dynamics we subject influencers to will trickle down to everyone else. I regularly see random people’s Instagram posts blow up because they have a
+              - link "funny last name" [ref=e164] [cursor=pointer]:
+                - /url: https://www.instagram.com/p/DdPULgMCdUy/?stkn=MjB0bGJ2cnBpNTg=
+              - text: or embody an internet stereotype. By making yourself legible, you make yourself vulnerable to attack, because
+              - emphasis [ref=e165]: someone
+              - text: will find a way to perceive you harmfully.
+            - paragraph [ref=e166]: The word “respect” in Latin literally means “to look back.” The proper way to treat each other as human beings is to act as if everyone can meet our gaze—seeing us the way we see them. If we don’t learn to look back, we’ll keep trying to control each other, and everybody online will be a lolcow to someone else.
+            - generic [ref=e168]:
+              - paragraph [ref=e170]: please subscribe I’m doing this all for your validation please
+              - generic [ref=e175]:
+                - textbox "Type your email..." [ref=e178]
+                - button "Subscribe" [disabled] [ref=e179]
+            - separator [ref=e181]
+            - paragraph [ref=e182]:
+              - text: "Upcoming events:"
+              - strong [ref=e183]: "November 2:"
+              - text: Boston, MA - SciCom summit
+              - strong [ref=e184]: "November 6-8:"
+              - text: Kilkenny, Ireland - Kilkenomics Festival
+              - strong [ref=e185]: "November 8:"
+              - text: Dublin, Ireland - Trinity College Dublin
+              - strong [ref=e186]: "November 10:"
+              - text: Cambridge, UK - Cambridge Union
+              - strong [ref=e187]: "November 11:"
+              - text: Cambridge, UK - Cambridge Psychology Society
+              - strong [ref=e188]: "November 12:"
+              - text: London, UK - Waterstones Gower Street
+          - generic [ref=e190]:
+            - generic [ref=e192]:
+              - link "View Mintprince's profile" [ref=e194] [cursor=pointer]:
+                - /url: https://substack.com/profile/360807914-mintprince
+                - generic "Mintprince" [ref=e196]:
+                  - img "Mintprince's avatar" [ref=e198]
+              - link "View Kate's profile" [ref=e200] [cursor=pointer]:
+                - /url: https://substack.com/profile/212508-kate
+                - generic "Kate" [ref=e202]:
+                  - img "Kate's avatar" [ref=e204]
+              - link "View yogurtwasfood's profile" [ref=e206] [cursor=pointer]:
+                - /url: https://substack.com/profile/334758192-yogurtwasfood
+                - generic "yogurtwasfood" [ref=e208]:
+                  - img "yogurtwasfood's avatar" [ref=e210]
+              - link "View ace’s faces 🎭's profile" [ref=e212] [cursor=pointer]:
+                - /url: https://substack.com/profile/464559819-aces-faces
+                - generic "ace’s faces 🎭" [ref=e214]:
+                  - img "ace’s faces 🎭's avatar" [ref=e216]
+              - link "View Rufus Braza Sentinela's profile" [ref=e218] [cursor=pointer]:
+                - /url: https://substack.com/profile/94593895-rufus-braza-sentinela
+                - generic "Rufus Braza Sentinela" [ref=e220]:
+                  - img "Rufus Braza Sentinela's avatar" [ref=e222]
+            - generic [ref=e224]:
+              - generic [ref=e225] [cursor=pointer]: 72 Likes
+              - text: ∙
+              - link "9 Restacks" [ref=e227] [cursor=pointer]:
+                - /url: https://substack.com/note/p-215612370/restacks?utm_source=substack&utm_content=facepile-restacks
+          - generic [ref=e229]:
+            - generic [ref=e230]:
+              - button "Like (72)" [ref=e232] [cursor=pointer]:
+                - generic [ref=e237]: "72"
+              - button "View comments (3)" [ref=e238] [cursor=pointer]:
+                - generic [ref=e243]: "3"
+              - button "9" [ref=e244] [cursor=pointer]
+            - button "Share" [ref=e250] [cursor=pointer]
+      - generic [ref=e252]:
+        - generic [ref=e253]:
+          - generic [ref=e254]:
+            - heading "Discussion about this post" [level=4] [ref=e255]
+            - tablist "Select discussion type" [ref=e259]:
+              - tab "Comments" [selected] [ref=e260] [cursor=pointer]
+              - tab "Restacks" [ref=e261] [cursor=pointer]
+          - generic [ref=e264]:
+            - generic [ref=e266]:
+              - generic "User" [ref=e268]:
+                - img "User's avatar" [ref=e270]
+              - textbox "Write a comment..." [ref=e273]
+            - generic [ref=e275]:
+              - article "Comment by Jas" [ref=e279]:
+                - link "View Jas's profile" [ref=e282] [cursor=pointer]:
+                  - /url: https://substack.com/profile/232208034-jas?utm_source=comment
+                  - generic "Jas" [ref=e284]:
+                    - img "Jas's avatar" [ref=e286]
+                - generic [ref=e287]:
+                  - generic [ref=e288]:
+                    - generic [ref=e291]:
+                      - link "Jas" [ref=e297] [cursor=pointer]:
+                        - /url: https://substack.com/profile/232208034-jas?utm_source=substack-feed-item
+                      - link "2h" [ref=e298] [cursor=pointer]:
+                        - /url: https://etymology.substack.com/p/lolcow-theory-of-the-internet/comment/339024216
+                    - button "Ellipsis" [ref=e301] [cursor=pointer]
+                  - paragraph [ref=e307]: It's the mask and bystander effect roled into one; by wearing the mask of anonymity people feel justified in joining in on the comments, but also feel it's not their job to report harassment because someone else surely will
+                  - generic [ref=e308]:
+                    - link "Like (1)" [ref=e310] [cursor=pointer]:
+                      - /url: javascript:void(0)
+                    - generic [ref=e318]: Reply
+                    - generic [ref=e324]: Share
+              - article "Comment by ace’s faces 🎭" [ref=e334]:
+                - link "View ace’s faces 🎭's profile" [ref=e337] [cursor=pointer]:
+                  - /url: https://substack.com/profile/464559819-aces-faces?utm_source=comment
+                  - generic "ace’s faces 🎭" [ref=e339]:
+                    - img "ace’s faces 🎭's avatar" [ref=e341]
+                - generic [ref=e342]:
+                  - generic [ref=e343]:
+                    - generic [ref=e346]:
+                      - link "ace’s faces 🎭" [ref=e352] [cursor=pointer]:
+                        - /url: https://substack.com/profile/464559819-aces-faces?utm_source=substack-feed-item
+                      - link "4h" [ref=e353] [cursor=pointer]:
+                        - /url: https://etymology.substack.com/p/lolcow-theory-of-the-internet/comment/338983652
+                    - button "Ellipsis" [ref=e356] [cursor=pointer]
+                  - paragraph [ref=e362]: Respect🫡
+                  - generic [ref=e363]:
+                    - link "Like" [ref=e365] [cursor=pointer]:
+                      - /url: javascript:void(0)
+                    - generic [ref=e373]: Reply
+                    - generic [ref=e379]: Share
+            - link "1 more comment..." [ref=e386] [cursor=pointer]:
+              - /url: https://etymology.substack.com/p/lolcow-theory-of-the-internet/comments
+        - region "Top Posts Footer" [ref=e389]:
+          - generic [ref=e390]:
+            - navigation "Archive sort tabs" [ref=e391]:
+              - tablist "Tabs" [ref=e394]:
+                - tab "Top" [selected] [ref=e395] [cursor=pointer]
+                - tab "Latest" [ref=e396] [cursor=pointer]
+                - tab "Discussions" [ref=e397] [cursor=pointer]
+              - button "Search" [ref=e399] [cursor=pointer]
+            - generic [ref=e403]:
+              - generic [ref=e405]:
+                - article "Post preview for stay on your phone" [ref=e406] [cursor=pointer]:
+                  - generic [ref=e408]:
+                    - link "stay on your phone" [ref=e410]:
+                      - /url: https://etymology.substack.com/p/stay-on-your-phone
+                    - link "(within reason)" [ref=e412]:
+                      - /url: https://etymology.substack.com/p/stay-on-your-phone
+                    - generic [ref=e413]:
+                      - time [ref=e414]: Aug 5, 2025
+                      - text: •
+                      - link "Adam Aleksic" [ref=e417]:
+                        - /url: https://substack.com/@etymologynerd
+                    - generic [ref=e419]:
+                      - button "Like (3,604)" [ref=e421]:
+                        - generic [ref=e426]: 3,604
+                      - button "View comments (195)" [ref=e427]:
+                        - generic [ref=e432]: "195"
+                      - button "399" [ref=e433]
+                      - button [ref=e438]
+                - article "Post preview for the importance of not knowing" [ref=e445] [cursor=pointer]:
+                  - generic [ref=e447]:
+                    - link "the importance of not knowing" [ref=e449]:
+                      - /url: https://etymology.substack.com/p/the-importance-of-not-knowing
+                    - link "It’s human nature to be inquisitive." [ref=e451]:
+                      - /url: https://etymology.substack.com/p/the-importance-of-not-knowing
+                    - generic [ref=e452]:
+                      - time [ref=e453]: Dec 3, 2025
+                      - text: •
+                      - link "Adam Aleksic" [ref=e456]:
+                        - /url: https://substack.com/@etymologynerd
+                    - generic [ref=e458]:
+                      - button "Like (2,747)" [ref=e460]:
+                        - generic [ref=e465]: 2,747
+                      - button "View comments (54)" [ref=e466]:
+                        - generic [ref=e471]: "54"
+                      - button "476" [ref=e472]
+                      - button [ref=e477]
+                - article "Post preview for what your porn searches say about society" [ref=e484] [cursor=pointer]:
+                  - generic [ref=e486]:
+                    - link "what your porn searches say about society" [ref=e488]:
+                      - /url: https://etymology.substack.com/p/what-your-porn-searches-say-about
+                    - link "or vice versa?" [ref=e490]:
+                      - /url: https://etymology.substack.com/p/what-your-porn-searches-say-about
+                    - generic [ref=e491]:
+                      - time [ref=e492]: Dec 31, 2024
+                      - text: •
+                      - link "Adam Aleksic" [ref=e495]:
+                        - /url: https://substack.com/@etymologynerd
+                    - generic [ref=e497]:
+                      - button "Like (2,219)" [ref=e499]:
+                        - generic [ref=e504]: 2,219
+                      - button "View comments (61)" [ref=e505]:
+                        - generic [ref=e510]: "61"
+                      - button "148" [ref=e511]
+                      - button [ref=e516]
+              - button "See all" [ref=e523] [cursor=pointer]
+        - generic [ref=e528]:
+          - heading "Ready for more?" [level=3] [ref=e529]
+          - generic [ref=e532]:
+            - textbox "Type your email..." [ref=e535]
+            - button "Subscribe" [disabled] [ref=e536]
+    - generic [ref=e539]:
+      - generic [ref=e540]:
+        - generic [ref=e541]: © 2026 Adam Aleksic
+        - text: ·
+        - link "Privacy" [ref=e542] [cursor=pointer]:
+          - /url: https://substack.com/privacy
+        - text: ∙
+        - link "Terms" [ref=e543] [cursor=pointer]:
+          - /url: https://substack.com/tos
+        - text: ∙
+        - link "Collection notice" [ref=e544] [cursor=pointer]:
+          - /url: https://substack.com/ccpa#personal-data-collected
+      - generic [ref=e545]:
+        - link "Start your Substack" [ref=e546] [cursor=pointer]:
+          - /url: https://substack.com/signup?utm_source=substack&utm_medium=web&utm_content=footer
+        - link "Get the app" [ref=e552] [cursor=pointer]:
+          - /url: https://substack.com/app/app-store-redirect?utm_campaign=app-marketing&utm_content=web-footer-button
+      - generic [ref=e553]:
+        - link "Substack" [ref=e554] [cursor=pointer]:
+          - /url: https://substack.com
+        - text: is the home for great culture
+  - region "Notifications (F8)":
+    - list

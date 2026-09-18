@@ -1,0 +1,113 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/provider-review.repro.test.ts (3 tests | 3 failed) 5ms
+   × validates the budget against an output cap actually sent to the OpenAI-compatible gateway 3ms
+   × manual reasoning_effort sends an enabling parameter even when the catalog defaults another control on 1ms
+   × accepts the documented 32768 output tokens for GPT-4.1 1ms
+ ❯ src/options/provider-review.repro.test.tsx (2 tests | 2 failed) 86ms
+   × switching back to auto restores the required enabled state for an always-thinking model 56ms
+   × discarding a URL edit restores the original preset ownership 29ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/options/provider-review.repro.test.tsx > switching back to auto restores the required enabled state for an always-thinking model
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/options/provider-review.repro.test.tsx:18:75
+     16|  await click(view.container,'保存配置');
+     17|  expect(view.container.textContent).toContain('此模型始终思考，无法关闭');
+     18|  expect(send.mock.calls.some(([r])=>r.type==='SAVE_TRANSLATION_PROFILE…
+       |                                                                           ^
+     19| });
+     20| it('discarding a URL edit restores the original preset ownership',asyn…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/options/provider-review.repro.test.tsx > discarding a URL edit restores the original preset ownership
+AssertionError: expected 'https://api.xiaomimimo.com/v1' to be 'https://api.xiaomimimo.com/anthropic' // Object.is equality
+
+Expected: "https://api.xiaomimimo.com/anthropic"
+Received: "https://api.xiaomimimo.com/v1"
+
+ ❯ src/options/provider-review.repro.test.tsx:26:89
+     24|  await click(view.container,'放弃修改');
+     25|  await input(view.container,'接入协议','anthropic');
+     26|  expect(view.container.querySelector<HTMLInputElement>('[aria-label="A…
+       |                                                                                         ^
+     27| });
+     28|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/shared/provider-review.repro.test.ts > validates the budget against an output cap actually sent to the OpenAI-compatible gateway
+AssertionError: expected undefined to be 8192 // Object.is equality
+
+- Expected:
+8192
+
++ Received:
+undefined
+
+ ❯ src/shared/provider-review.repro.test.ts:10:70
+      8|  expect(resolved.maxOutputTokens).toBe(8192);
+      9|  const request=buildProtocolRequest(settings,'system','content');
+     10|  expect(request.body.max_tokens??request.body.max_completion_tokens).t…
+       |                                                                      ^
+     11| });
+     12| it('manual reasoning_effort sends an enabling parameter even when the …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/shared/provider-review.repro.test.ts > manual reasoning_effort sends an enabling parameter even when the catalog defaults another control on
+AssertionError: expected {} to deeply equal { reasoning_effort: 'low' }
+
+- Expected
++ Received
+
+- {
+-   "reasoning_effort": "low",
+- }
++ {}
+
+ ❯ src/shared/provider-review.repro.test.ts:14:54
+     12| it('manual reasoning_effort sends an enabling parameter even when the …
+     13|  const settings={...base,provider:'mimo' as const,model:'mimo-v2.5',th…
+     14|  expect(resolveProviderOptions(settings).parameters).toEqual({reasonin…
+       |                                                      ^
+     15| });
+     16| it('accepts the documented 32768 output tokens for GPT-4.1',()=>{
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/shared/provider-review.repro.test.ts > accepts the documented 32768 output tokens for GPT-4.1
+AssertionError: expected [Function] to not throw an error but 'Error: 输出上限超过模型限制' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: 输出上限超过模型限制"
+
+ ❯ src/shared/provider-review.repro.test.ts:17:108
+     15| });
+     16| it('accepts the documented 32768 output tokens for GPT-4.1',()=>{
+     17|  expect(()=>resolveProviderOptions({...base,provider:'openai',model:'g…
+       |                                                                                                            ^
+     18| });
+     19|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed (5)
+   Start at  12:47:49
+   Duration  584ms (transform 107ms, setup 0ms, import 219ms, tests 91ms, environment 239ms)
+

@@ -1,8 +1,11 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it, vi } from 'vitest';
-import { translateFullDocument } from './openai-client';
+import { translateFullDocument } from './translation-client';
 import { completionResponse, contentEvent, sseEvent, STREAM_END } from '../test-utils/sse';
 
 const settings = {
+  ...TEST_PROFILE,
+  thinkingEnabled: true,
   apiUrl: 'https://api.example.com/v1',
   apiKey: 'private-test-key',
   model: 'test',

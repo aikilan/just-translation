@@ -1,0 +1,64 @@
+async (page) => {
+  const ctx = await page.context().browser().browserType().launchPersistentContext('/tmp/jt-provider-acceptance-' + Date.now(), {
+    headless: true,
+    executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    args: ['--disable-extensions-except=/Users/jintao.xu/Documents/只是翻译/dist', '--load-extension=/Users/jintao.xu/Documents/只是翻译/dist'],
+  });
+  const results = [], errors = [];
+  ctx.on('page', p => p.on('pageerror', e => errors.push(e.message)));
+  try {
+    const worker = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker');
+    const id = worker.url().split('/')[2];
+    const o = await ctx.newPage();
+    await o.goto('chrome-extension://' + id + '/src/options/index.html');
+    await o.getByLabel('供应商', { exact: true }).selectOption('mimo');
+    await o.getByLabel('模型', { exact: true }).fill('mimo-v2.5');
+    const p = await ctx.newPage();
+    await p.goto('http://127.0.0.1:18767/article');
+    const command = type => o.evaluate(async type => {
+      const t = (await chrome.tabs.query({})).find(t => t.url?.includes('18767/article'));
+      return chrome.tabs.sendMessage(t.id, { type });
+    }, type);
+    const ready = () => o.waitForFunction(async () => {
+      const t = (await chrome.tabs.query({})).find(t => t.url?.includes('18767/article'));
+      try { return Boolean(await chrome.tabs.sendMessage(t.id, { type: 'GET_PAGE_STATUS' })); } catch { return false; }
+    });
+    for (const protocol of ['openai', 'anthropic']) {
+      await o.getByLabel('接入协议', { exact: true }).selectOption(protocol);
+      await o.getByLabel('API 地址', { exact: true }).fill('http://127.0.0.1:18767/' + (protocol === 'openai' ? 'openai/v1' : 'anthropic'));
+      await o.getByRole('button', { name: '测试连接', exact: true }).click();
+      await o.getByText('测试通过', { exact: false }).waitFor();
+      await o.getByRole('button', { name: '保存配置', exact: true }).click();
+      await o.getByText('已保存', { exact: true }).first().waitFor();
+      await o.reload();
+      for (const mode of ['segmented', 'full']) {
+        await p.reload(); await ready();
+        await command(mode === 'segmented' ? 'START_TRANSLATION' : 'START_FULL_DOCUMENT_TRANSLATION');
+        await p.locator('[data-justranslate-translation]').nth(2).waitFor();
+        let status;
+        for(let i=0;i<100;i++){ status=await command('GET_PAGE_STATUS'); if(status.phase==='complete')break; await o.waitForTimeout(20); }
+        if(status.phase!=='complete') throw new Error('Translation did not finish: '+JSON.stringify(status));
+        results.push({ protocol, mode, status, rendered: await p.locator('[data-justranslate-translation]').count() });
+      }
+      await p.locator('p').first().click({ button: 'right' });
+      const selection = await o.evaluate(async () => {
+        const t = (await chrome.tabs.query({})).find(t => t.url?.includes('18767/article'));
+        return chrome.tabs.sendMessage(t.id, { type: 'START_SELECTION_TRANSLATION', text: 'The selection should also be translated.' });
+      });
+      await p.locator('[data-justranslate-selection]').getByText('翻译成功：The selection should also be translated.', { exact: true }).waitFor();
+      results.push({ protocol, mode: 'selection', selection });
+    }
+    await o.getByText('思考与输出高级设置',{exact:true}).click();
+    await o.setViewportSize({width:1280,height:1800});
+    await o.evaluate(()=>window.scrollTo(0,0));
+    await o.screenshot({ path: '/Users/jintao.xu/Documents/只是翻译/artifacts/provider-protocol/options-anthropic.png', fullPage: true, animations:'disabled' });
+    await p.screenshot({ path: '/Users/jintao.xu/Documents/只是翻译/artifacts/provider-protocol/translated-anthropic.png', fullPage: true });
+    const pop = await ctx.newPage(); await p.bringToFront(); await pop.goto('chrome-extension://' + id + '/src/popup/index.html');
+    await pop.getByText('只是翻译', { exact: true }).waitFor();
+    await pop.getByText('翻译完成',{exact:false}).waitFor();
+    await pop.screenshot({path:'/Users/jintao.xu/Documents/只是翻译/artifacts/provider-protocol/popup.png'});
+    results.push({ popupText: (await pop.locator('body').innerText()).slice(0, 350) });
+    return { results, errors };
+  } catch (error) { return { results, errors, failure: String(error) }; }
+  finally { await ctx.close(); }
+}

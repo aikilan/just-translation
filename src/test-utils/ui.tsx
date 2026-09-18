@@ -1,3 +1,4 @@
+import { TEST_PROFILE } from './provider';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { vi } from 'vitest';
@@ -11,8 +12,8 @@ import type { PageTranslationStatus, RuntimeRequest } from '../shared/messages';
 export const READY_SETTINGS: TranslatorSettings = {
   ...DEFAULT_SETTINGS,
   profiles: [
-    { ...DEFAULT_SETTINGS.profiles[0], model: 'test-model', apiKey: 'test-secret' },
-    { ...DEFAULT_SETTINGS.profiles[0], id: 'second', name: '备用配置', model: 'second-model' },
+    { ...TEST_PROFILE, model: 'test-model', apiKey: 'test-secret' },
+    { ...TEST_PROFILE, id: 'second', name: '备用配置', model: 'second-model' },
   ],
 };
 export const IDLE_STATUS: PageTranslationStatus = {

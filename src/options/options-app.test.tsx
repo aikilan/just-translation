@@ -15,6 +15,124 @@ afterEach(() => {
   vi.mocked(testTranslatorConfiguration).mockReset();
 });
 describe('settings workspace', () => {
+  it('puts the connection editor before independently saved translation preferences', async () => {
+    mockExtension();
+    view = await mount(<OptionsApp />);
+    const editor = view.container.querySelector('[aria-label="配置编辑器"]')!;
+    const preferences = view.container.querySelector('aside[aria-label="翻译偏好"]')!;
+    expect(editor).not.toBeNull();
+    expect(preferences).not.toBeNull();
+    expect(
+      editor.compareDocumentPosition(preferences) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(editor.querySelector('[aria-label="API 地址"]')).not.toBeNull();
+    expect(preferences.querySelector('[aria-label="单页翻译并发数"]')).not.toBeNull();
+    expect(preferences.querySelector('[aria-label="翻译失败重试次数"]')).not.toBeNull();
+    expect(preferences.textContent).toContain('自动保存');
+    expect(editor.querySelector('fieldset')?.textContent).toContain('连接信息');
+    expect(editor.querySelector('fieldset[aria-label="模型行为"]')).not.toBeNull();
+  });
+  it('keeps draft state next to save actions and restores it when switching sections', async () => {
+    mockExtension();
+    view = await mount(<OptionsApp />);
+    await input(view.container, '模型', 'draft-model');
+    expect(view.container.querySelector('.ai-actions')?.textContent).toContain('有未保存的修改');
+    await click(view.container, '阅读偏好');
+    await click(view.container, 'AI 配置');
+    expect(view.container.querySelector<HTMLInputElement>('[aria-label="模型"]')?.value).toBe(
+      'draft-model',
+    );
+    await click(view.container, '放弃修改');
+    expect(view.container.querySelector('.ai-actions')?.textContent).not.toContain(
+      '有未保存的修改',
+    );
+  });
+  it('defaults thinking off, saves it with the profile and retains a failed draft', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    await input(view.container, '供应商', 'mimo');
+    await input(view.container, '模型', 'mimo-v2.5');
+    const toggle = () => view.container.querySelector<HTMLInputElement>('[aria-label="开启思考"]')!;
+    expect(toggle()?.checked).toBe(false);
+    expect(view.container.textContent).toContain('开启思考翻译时间较慢');
+    await act(async () => {
+      toggle().click();
+      await Promise.resolve();
+    });
+    expect(toggle().checked).toBe(true);
+    expect(send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'SAVE_TRANSLATION_PROFILE' }),
+    );
+    send.mockRejectedValueOnce(new Error('写入失败'));
+    await click(view.container, '保存配置');
+    expect(toggle().checked).toBe(true);
+    expect(view.container.textContent).toContain('写入失败');
+    await click(view.container, '保存配置');
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'SAVE_TRANSLATION_PROFILE',
+      profile: { thinkingEnabled: true },
+    });
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    expect(toggle().checked).toBe(true);
+    await input(view.container, '正在编辑的配置', 'second');
+    expect(toggle().checked).toBe(false);
+    expect(toggle().disabled).toBe(true);
+    await click(view.container, '新增配置');
+    await input(view.container, '供应商', 'mimo');
+    await input(view.container, '模型', 'mimo-v2.5');
+    expect(toggle().checked).toBe(false);
+    expect(toggle().disabled).toBe(false);
+  });
+  it('autosaves retry count in AI settings without saving the AI draft and retains it on reopen', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    const select =
+      view.container.querySelector<HTMLSelectElement>('[aria-label="翻译失败重试次数"]');
+    expect(select?.closest('section')?.getAttribute('aria-label')).toBe('AI 配置');
+    expect(select?.value).toBe('1');
+    expect(Array.from(select?.options ?? [], (option) => option.value)).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+    ]);
+    await input(view.container, '模型', 'unsaved-model');
+    await input(view.container, '翻译失败重试次数', '0');
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { translationRetryCount: 0 },
+    });
+    expect(send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'SAVE_TRANSLATION_PROFILE' }),
+    );
+    expect(view.container.querySelector<HTMLInputElement>('[aria-label="模型"]')?.value).toBe(
+      'unsaved-model',
+    );
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="翻译失败重试次数"]')?.value,
+    ).toBe('0');
+  });
+  it('retains a failed retry count selection and allows retrying its save', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    send.mockRejectedValueOnce(new Error('写入失败'));
+    await input(view.container, '翻译失败重试次数', '5');
+    expect(view.container.textContent).toContain('写入失败');
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="翻译失败重试次数"]')?.value,
+    ).toBe('5');
+    await click(view.container, '重试保存');
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    expect(
+      view.container.querySelector<HTMLSelectElement>('[aria-label="翻译失败重试次数"]')?.value,
+    ).toBe('5');
+  });
   it('places concurrency only in AI settings and retains its saved value after reopening', async () => {
     const { send } = mockExtension();
     view = await mount(<OptionsApp />);

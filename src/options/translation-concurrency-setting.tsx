@@ -36,7 +36,7 @@ export function TranslationConcurrencySetting({ settings, onSaved }: Props) {
     <div className="preferences-list">
       <SettingRow
         label="单页翻译并发数"
-        description="所有 AI 配置共用，默认 6。修改后自动保存，下次翻译生效；可视区完成后仍会继续翻译屏外内容。"
+        description="同时处理的翻译请求数，默认 4。优先翻译可视区，再继续处理屏外内容。"
         feedback={feedback.translationConcurrency}
       >
         <select

@@ -1,0 +1,131 @@
+:host {
+  all: initial;
+}
+* {
+  box-sizing: border-box;
+}
+section {
+  --surface: #fff;
+  --text: #383a43;
+  --muted: #6b6d78;
+  --border: #e7e7ec;
+  --soft: #f1f2f5;
+  --accent: #4f46e5;
+  color-scheme: light dark;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 15%);
+  font:
+    14px/1.65 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  text-align: left;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  overscroll-behavior: contain;
+}
+@media (prefers-color-scheme: dark) {
+  section {
+    --surface: #202126;
+    --text: #e7e7ec;
+    --muted: #a6a8b3;
+    --border: #3b3d48;
+    --soft: #30323b;
+    --accent: #a5a0ff;
+  }
+}
+header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+strong {
+  font-size: 14px;
+  white-space: nowrap;
+}
+.language {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+p {
+  margin: 0;
+}
+.status {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 12px 0 8px;
+  overflow-wrap: anywhere;
+}
+.result,
+.source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.result:empty {
+  display: none;
+}
+details {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.source {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+button {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button:hover {
+  color: var(--accent);
+}
+button:focus-visible,
+summary:focus-visible,
+.result:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+[hidden] {
+  display: none !important;
+}
+
+.content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}

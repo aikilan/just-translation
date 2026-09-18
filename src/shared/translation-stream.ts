@@ -1,3 +1,4 @@
+import type { ApiProtocol } from './providers';
 import { JSONParser, TokenType } from '@streamparser/json';
 import { createParser } from 'eventsource-parser';
 
@@ -19,7 +20,8 @@ export interface TranslationStreamLimits {
   maxJsonCharacters: number;
 }
 const BATCH_STREAM_LIMITS: TranslationStreamLimits = {
-  maxStreamBytes: 1_048_576,
+  // Counts all SSE bytes, including reasoning content and event metadata, for one attempt.
+  maxStreamBytes: 10 * 1_048_576,
   maxEventCharacters: 262_144,
   maxJsonCharacters: 262_144,
 };
@@ -30,12 +32,13 @@ export const FULL_DOCUMENT_STREAM_LIMITS: TranslationStreamLimits = {
 };
 
 /**
- * Decodes one Chat Completions SSE body. Only complete JSON items reach onItem;
+ * Decodes one Chat Completions or Messages SSE body. Only complete JSON items reach onItem;
  * the caller owns ID/marker validation and the cross-attempt, write-once result ledger.
  * Network bytes, provider diagnostics and unfinished strings never become progress events.
  */
 export async function readTranslationStream(
   response: Response,
+  protocol: ApiProtocol,
   onItem: (item: StreamTranslationItem) => void,
   signal?: AbortSignal,
   onContent?: () => void,
@@ -60,6 +63,7 @@ export async function readTranslationStream(
       signal?.throwIfAborted();
       onItem(item);
     }, limits.maxJsonCharacters);
+    const anthropic = new AnthropicEventDecoder();
     let done = false;
     let finished = false;
     let bytes = 0;
@@ -77,7 +81,7 @@ export async function readTranslationStream(
         if (event.data.length > limits.maxEventCharacters)
           throw new StreamProtocolError('API 流式事件超过大小上限');
         if (done) return;
-        if (event.data.trim() === '[DONE]') {
+        if (protocol === 'openai' && event.data.trim() === '[DONE]') {
           if (!finished) throw new StreamInterruptedError('API 流式响应缺少正常结束标记');
           payload.finish();
           done = true;
@@ -95,6 +99,20 @@ export async function readTranslationStream(
             typeof chunk.error.message === 'string' ? chunk.error.message : '未知服务商错误';
           // The request boundary redacts credentials before exposing this diagnostic.
           throw new StreamProtocolError(`API 流式返回错误：${detail}`);
+        }
+        if (protocol === 'anthropic') {
+          if (event.event && event.event !== chunk.type)
+            throw new StreamProtocolError('Anthropic 事件名称与类型不匹配');
+          const decoded = anthropic.consume(chunk);
+          if (decoded.text) {
+            if (decoded.text.trim()) onContent?.();
+            payload.write(decoded.text);
+          }
+          if (decoded.done) {
+            payload.finish();
+            done = true;
+          }
+          return;
         }
         if (!Array.isArray(chunk.choices))
           throw new StreamProtocolError('API 流式返回中缺少 choices');
@@ -155,9 +173,101 @@ export async function readTranslationStream(
     }
   } finally {
     signal?.removeEventListener('abort', cancel);
-    // Also releases a fetch body that is still open after [DONE], malformed output or timeout.
+    // Also releases a fetch body that is still open after the protocol end event, malformed output or timeout.
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
+  }
+}
+
+/** Validates Messages lifecycle independently from JSON translation payloads. */
+class AnthropicEventDecoder {
+  private started = false;
+  private finished = false;
+  private blocks = new Map<number, { type: string; closed: boolean }>();
+  consume(chunk: Record<string, unknown>): { text?: string; done?: boolean } {
+    const type = chunk.type;
+    if (typeof type !== 'string') throw new StreamProtocolError('Anthropic 事件缺少类型');
+    if (type === 'ping') return {};
+    if (type === 'message_start') {
+      if (
+        this.started ||
+        !isRecord(chunk.message) ||
+        chunk.message.role !== 'assistant' ||
+        !Array.isArray(chunk.message.content) ||
+        chunk.message.content.length
+      )
+        throw new StreamProtocolError('Anthropic 消息开始事件无效');
+      this.started = true;
+      return {};
+    }
+    if (!this.started) throw new StreamProtocolError('Anthropic 缺少消息开始事件');
+    if (type === 'message_stop') {
+      if (!this.finished || [...this.blocks.values()].some((b) => !b.closed))
+        throw new StreamInterruptedError('Anthropic 消息缺少正常结束标记');
+      return { done: true };
+    }
+    if (type === 'message_delta') {
+      if (!isRecord(chunk.delta)) throw new StreamProtocolError('Anthropic 消息增量无效');
+      const reason = chunk.delta.stop_reason;
+      if (reason === 'max_tokens')
+        throw new StreamOutputLimitError('API 输出被截断，剩余段落尚未完成');
+      if (reason !== undefined && reason !== null) {
+        if (
+          this.finished ||
+          reason !== 'end_turn' ||
+          [...this.blocks.values()].some((b) => !b.closed)
+        )
+          throw new StreamProtocolError('Anthropic 未正常完成翻译');
+        this.finished = true;
+      }
+      return {};
+    }
+    if (!['content_block_start', 'content_block_delta', 'content_block_stop'].includes(type))
+      return {};
+    if (
+      this.finished ||
+      typeof chunk.index !== 'number' ||
+      !Number.isInteger(chunk.index) ||
+      chunk.index < 0
+    )
+      throw new StreamProtocolError('Anthropic 内容块位置无效');
+    const block = this.blocks.get(chunk.index);
+    if (type === 'content_block_start') {
+      if (
+        block ||
+        [...this.blocks.values()].some((b) => !b.closed) ||
+        !isRecord(chunk.content_block)
+      )
+        throw new StreamProtocolError('Anthropic 内容块开始事件无效');
+      const content = chunk.content_block;
+      if (
+        content.type !== 'text' &&
+        content.type !== 'thinking' &&
+        content.type !== 'redacted_thinking'
+      )
+        throw new StreamProtocolError('API 未返回翻译内容：返回了工具或不支持的内容块');
+      this.blocks.set(chunk.index, { type: content.type, closed: false });
+      if (content.type === 'text') {
+        if (typeof content.text !== 'string')
+          throw new StreamProtocolError('Anthropic 文本内容无效');
+        return { text: content.text };
+      }
+      return {};
+    }
+    if (!block || block.closed) throw new StreamProtocolError('Anthropic 内容块尚未开始或已结束');
+    if (type === 'content_block_stop') {
+      block.closed = true;
+      return {};
+    }
+    if (!isRecord(chunk.delta)) throw new StreamProtocolError('Anthropic 内容增量无效');
+    if (block.type === 'text') {
+      if (chunk.delta.type !== 'text_delta' || typeof chunk.delta.text !== 'string')
+        throw new StreamProtocolError('Anthropic 文本增量无效');
+      return { text: chunk.delta.text };
+    }
+    if (chunk.delta.type !== 'thinking_delta' && chunk.delta.type !== 'signature_delta')
+      throw new StreamProtocolError('Anthropic 思考增量无效');
+    return {};
   }
 }
 

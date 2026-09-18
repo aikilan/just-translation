@@ -18,6 +18,7 @@ beforeEach(() => {
     targetLanguage: 'Chinese',
     displayMode: 'translation',
     translationConcurrency: 6,
+    translationRetryCount: 1,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
@@ -113,7 +114,13 @@ describe('full document lifecycle', () => {
       total: 6,
       translated: 6,
     });
-    expect(document.querySelectorAll('[data-justranslate-source-content][hidden]')).toHaveLength(6);
+    expect(
+      [...document.querySelectorAll('[data-justranslate-source]')].every((source) =>
+        [
+          ...source.querySelectorAll<HTMLElement>(':scope > [data-justranslate-source-content]'),
+        ].every((child) => child.hidden),
+      ),
+    ).toBe(true);
     expect(send.mock.calls.some(([r]) => r.type === 'STORE_TRANSLATION_CACHE')).toBe(false);
     controller.restore();
     expect(document.querySelector('[data-justranslate-source]')).toBeNull();
@@ -375,7 +382,7 @@ describe('full document lifecycle', () => {
     expect(controller.getStatus()).toMatchObject({ phase: 'complete', translated: 6 });
   });
 
-  it.each(['raw', 'new-scope', 'visibility', 'layout'] as const)(
+  it.each(['raw', 'new-scope', 'visibility'] as const)(
     'rejects changed reading membership: %s',
     async (change) => {
       const { work } = await pending();
@@ -386,13 +393,20 @@ describe('full document lifecycle', () => {
           '<main><p>Another article appeared.</p></main>',
         );
       if (change === 'visibility') document.querySelector('h1')!.hidden = true;
-      if (change === 'layout') document.querySelector('h1')!.style.display = 'grid';
       finish();
       await work;
       expect(controller.getStatus().error).toContain('正文已变化');
       expect(resultNodes()).toHaveLength(0);
     },
   );
+  it('accepts a layout-only change when the same reading leaf remains eligible', async () => {
+    const { work } = await pending();
+    document.querySelector('h1')!.style.display = 'grid';
+    finish();
+    await work;
+    expect(controller.getStatus()).toMatchObject({ phase: 'complete', translated: 6 });
+  });
+
   it('rechecks fragment visibility controlled by arbitrary host attributes', async () => {
     document.body.innerHTML =
       '<style>[data-state="hidden"] span { display:none }</style><main><h1>A stable headline</h1><p>Visible paragraph with <span>changing contextual words</span>.</p></main>';

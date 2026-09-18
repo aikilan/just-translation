@@ -10,7 +10,7 @@ import {
 } from './translation-scheduler';
 
 describe('TranslationScheduler', () => {
-  it('uses all six slots for background work and waits for a free slot for foreground', async () => {
+  it('uses all four default slots for background work and waits for a free slot for foreground', async () => {
     const releases: Array<() => void> = [];
     const priorities: string[] = [];
     const scheduler = new TranslationScheduler((batch) => {
@@ -18,11 +18,11 @@ describe('TranslationScheduler', () => {
       return new Promise<void>((resolve) => releases.push(resolve));
     });
     scheduler.enqueue(createUnits('background', 28, 100, 0));
-    expect(priorities).toEqual(Array<string>(6).fill('background'));
+    expect(priorities).toEqual(Array<string>(4).fill('background'));
     scheduler.enqueue(createUnits('visible', 4, 100, 100));
-    expect(priorities).toHaveLength(6);
+    expect(priorities).toHaveLength(4);
     releases.shift()!();
-    await vi.waitFor(() => expect(priorities[6]).toBe('visible'));
+    await vi.waitFor(() => expect(priorities[4]).toBe('visible'));
     scheduler.stop();
     releases.forEach((resolve) => resolve());
     await scheduler.waitForIdle();
@@ -191,7 +191,7 @@ describe('TranslationScheduler', () => {
       readAhead: { maxCharacters: 1_800, maxItems: 4 },
       background: { maxCharacters: 2_400, maxItems: 4 },
     });
-    expect(DEFAULT_SETTINGS.translationConcurrency).toBe(6);
+    expect(DEFAULT_SETTINGS.translationConcurrency).toBe(4);
     for (const batch of dispatched) {
       const profile = TRANSLATION_BATCH_PROFILES[batch.priority];
       expect(batch.segments.length).toBeLessThanOrEqual(profile.maxItems);
@@ -201,7 +201,7 @@ describe('TranslationScheduler', () => {
     }
   });
 
-  it('dispatches higher priorities first and never exceeds six active requests', async () => {
+  it('dispatches higher priorities first and never exceeds four active requests by default', async () => {
     const releases: Array<() => void> = [];
     const priorities: string[] = [];
     let active = 0;
@@ -234,7 +234,7 @@ describe('TranslationScheduler', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     await finished;
-    expect(maximumActive).toBe(6);
+    expect(maximumActive).toBe(4);
     expect(priorities.indexOf('readAhead')).toBeLessThan(priorities.indexOf('background'));
   });
 

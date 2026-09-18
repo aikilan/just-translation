@@ -1,11 +1,26 @@
+import {
+  DEFAULT_PROVIDER_OPTIONS,
+  isProvider,
+  isProtocol,
+  normalizeEndpoint,
+  resolveProviderOptions,
+  THINKING_CONTROLS,
+  REASONING_EFFORTS,
+  type ProviderOptions,
+  type ApiProtocol,
+  type ThinkingControl,
+  type ReasoningEffort,
+} from './providers';
 export type DisplayMode = 'bilingual' | 'translation';
 
-export interface TranslationProfile {
+export interface TranslationProfile extends ProviderOptions {
   id: string;
   name: string;
   apiUrl: string;
   apiKey: string;
   model: string;
+  /** Per-profile reasoning preference, resolved using the selected provider and protocol. */
+  thinkingEnabled: boolean;
   translationPrompt: string;
 }
 
@@ -17,12 +32,24 @@ export interface TranslatorSettings {
   translateDynamicContent: boolean;
   /** Maximum concurrent batches in a page translation operation. */
   translationConcurrency: number;
+  /** Additional attempts per ordinary translation batch; zero disables automatic retry. */
+  translationRetryCount: number;
   excludedSites: string[];
   autoTranslateSites: string[];
 }
 
 export type TranslationProfileValidationErrors = Partial<
-  Record<'name' | 'apiUrl' | 'model' | 'translationPrompt', string>
+  Record<
+    | 'name'
+    | 'apiUrl'
+    | 'model'
+    | 'translationPrompt'
+    | 'thinkingEnabled'
+    | 'provider'
+    | 'protocol'
+    | 'thinkingControl',
+    string
+  >
 >;
 
 export interface SettingsValidationErrors {
@@ -39,6 +66,7 @@ export interface SettingsValidationResult {
 
 export const SETTINGS_STORAGE_KEY = 'translatorSettings';
 export const MAX_TRANSLATION_CONCURRENCY = 6;
+export const MAX_TRANSLATION_RETRY_COUNT = 5;
 export const DEFAULT_PROFILE_ID = 'profile-default';
 export const MAX_TRANSLATION_PROMPT_CHARACTERS = 8_000;
 export const DEFAULT_TRANSLATION_PROMPT = [
@@ -50,11 +78,13 @@ export const DEFAULT_TRANSLATION_PROMPT = [
 export const DEFAULT_SETTINGS: TranslatorSettings = {
   profiles: [
     {
+      ...DEFAULT_PROVIDER_OPTIONS,
       id: DEFAULT_PROFILE_ID,
       name: '默认配置',
-      apiUrl: 'https://api.openai.com/v1',
+      apiUrl: '',
       apiKey: '',
       model: '',
+      thinkingEnabled: false,
       translationPrompt: DEFAULT_TRANSLATION_PROMPT,
     },
   ],
@@ -62,20 +92,15 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translateDynamicContent: true,
-  translationConcurrency: 6,
+  translationConcurrency: 4,
+  translationRetryCount: 1,
   excludedSites: [],
   autoTranslateSites: [],
 };
 
-/** Converts a base URL or v1 URL into the one Chat Completions endpoint we support. */
-export function normalizeApiUrl(input: string): string {
-  const url = new URL(input.trim());
-  const pathname = url.pathname.replace(/\/+$/u, '');
-  if (pathname.endsWith('/chat/completions')) url.pathname = pathname;
-  else if (pathname.endsWith('/v1')) url.pathname = `${pathname}/chat/completions`;
-  else url.pathname = `${pathname}/v1/chat/completions`;
-  url.hash = '';
-  return url.toString();
+/** Normalizes the endpoint using the explicitly selected wire protocol. */
+export function normalizeApiUrl(input: string, protocol: ApiProtocol = 'openai'): string {
+  return normalizeEndpoint(input, protocol);
 }
 
 /** Returns the selected profile without silently falling back to another provider. */
@@ -90,20 +115,36 @@ export function validateTranslationProfile(
   profile: TranslationProfile,
 ): TranslationProfileValidationErrors {
   const errors: TranslationProfileValidationErrors = {};
+  if (!isProvider(profile.provider)) errors.provider = '请补全供应商';
+  if (!isProtocol(profile.protocol)) errors.protocol = '请补全接入协议';
   if (!profile.name.trim()) errors.name = '请填写配置名称';
   try {
-    const url = new URL(normalizeApiUrl(profile.apiUrl));
+    const url = new URL(normalizeApiUrl(profile.apiUrl, profile.protocol ?? 'openai'));
     if (!['https:', 'http:'].includes(url.protocol)) errors.apiUrl = '只支持 HTTP 或 HTTPS 地址';
     else if (url.protocol === 'http:' && profile.apiKey.trim() && !isLoopbackHost(url.hostname)) {
       errors.apiUrl = '携带 API Key 时必须使用 HTTPS（localhost 除外）';
     }
-  } catch {
-    errors.apiUrl = '请输入有效的 API 地址';
+  } catch (error) {
+    errors.apiUrl =
+      error instanceof TypeError
+        ? '请输入有效的 API 地址'
+        : error instanceof Error
+          ? error.message
+          : '请输入有效的 API 地址';
   }
   if (!profile.model.trim()) errors.model = '请填写模型名称';
+  if (typeof profile.thinkingEnabled !== 'boolean')
+    errors.thinkingEnabled = '思考开关必须为开启或关闭';
   if (!profile.translationPrompt.trim()) errors.translationPrompt = '请填写翻译 Prompt';
   else if (profile.translationPrompt.length > MAX_TRANSLATION_PROMPT_CHARACTERS) {
     errors.translationPrompt = `翻译 Prompt 不能超过 ${MAX_TRANSLATION_PROMPT_CHARACTERS} 个字符`;
+  }
+  if (isProvider(profile.provider) && isProtocol(profile.protocol)) {
+    try {
+      resolveProviderOptions(profile);
+    } catch (error) {
+      errors.thinkingControl = error instanceof Error ? error.message : '思考设置无效';
+    }
   }
   return errors;
 }
@@ -141,10 +182,14 @@ export function getSettingsValidationMessage(result: SettingsValidationResult): 
   if (result.errors.targetLanguage) return result.errors.targetLanguage;
   for (const profileErrors of Object.values(result.errors.profileErrors)) {
     const message =
+      profileErrors.provider ??
+      profileErrors.protocol ??
+      profileErrors.thinkingControl ??
       profileErrors.name ??
       profileErrors.apiUrl ??
       profileErrors.model ??
-      profileErrors.translationPrompt;
+      profileErrors.translationPrompt ??
+      profileErrors.thinkingEnabled;
     if (message) return message;
   }
   return undefined;
@@ -160,15 +205,40 @@ export function isValidTranslationConcurrency(value: unknown): value is number {
   );
 }
 
+/** Validates the shared retry budget at storage and runtime-message boundaries. */
+export function isValidTranslationRetryCount(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_TRANSLATION_RETRY_COUNT
+  );
+}
+
 export function mergeSettings(value: unknown): TranslatorSettings {
   if (!isRecord(value)) return cloneDefaultSettings();
   const profiles = Array.isArray(value.profiles)
     ? value.profiles.filter(isRecord).map((profile) => ({
+        ...DEFAULT_PROVIDER_OPTIONS,
+        provider: isProvider(profile.provider) ? profile.provider : null,
+        protocol: isProtocol(profile.protocol) ? profile.protocol : null,
+        thinkingControl: (THINKING_CONTROLS as readonly unknown[]).includes(profile.thinkingControl)
+          ? (profile.thinkingControl as ThinkingControl)
+          : 'auto',
+        reasoningEffort: (REASONING_EFFORTS as readonly unknown[]).includes(profile.reasoningEffort)
+          ? (profile.reasoningEffort as ReasoningEffort)
+          : 'default',
+        thinkingBudgetTokens:
+          typeof profile.thinkingBudgetTokens === 'number' ? profile.thinkingBudgetTokens : 2048,
+        maxOutputTokens:
+          typeof profile.maxOutputTokens === 'number' ? profile.maxOutputTokens : null,
         id: readString(profile.id, ''),
         name: readString(profile.name, ''),
         apiUrl: readString(profile.apiUrl, ''),
         apiKey: readString(profile.apiKey, ''),
         model: readString(profile.model, ''),
+        thinkingEnabled:
+          typeof profile.thinkingEnabled === 'boolean' ? profile.thinkingEnabled : false,
         // A blank Prompt is never a valid saved state; initialize it from the product default.
         translationPrompt: readTranslationPrompt(profile.translationPrompt),
       }))
@@ -192,6 +262,9 @@ export function mergeSettings(value: unknown): TranslatorSettings {
     translationConcurrency: isValidTranslationConcurrency(value.translationConcurrency)
       ? value.translationConcurrency
       : DEFAULT_SETTINGS.translationConcurrency,
+    translationRetryCount: isValidTranslationRetryCount(value.translationRetryCount)
+      ? value.translationRetryCount
+      : DEFAULT_SETTINGS.translationRetryCount,
     excludedSites: readStringArray(value.excludedSites),
     autoTranslateSites: readStringArray(value.autoTranslateSites),
   };

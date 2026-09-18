@@ -1,0 +1,87 @@
+import { chromium } from '/Users/jintao.xu/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+const server = createServer(async (request, response) => {
+  let body = '';
+  for await (const chunk of request) body += chunk;
+  const input = JSON.parse(body);
+  const { segments } = JSON.parse(input.messages[1].content);
+  const content = JSON.stringify({ translations: segments.map(({id}) => ({ id, text: '早上好。' })) });
+  response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': '*' });
+  response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const root = process.cwd();
+const profile = await mkdtemp(path.join(tmpdir(), 'jt-settings-focus-'));
+const context = await chromium.launchPersistentContext(profile, {
+  headless: true,
+  executablePath: '/Users/jintao.xu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  args: [`--disable-extensions-except=${root}/dist`, `--load-extension=${root}/dist`],
+  viewport: { width: 1440, height: 1100 }, colorScheme: 'light',
+});
+const results = [], errors = [];
+try {
+  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const id = worker.url().split('/')[2];
+  const page = await context.newPage();
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`chrome-extension://${id}/src/options/index.html`);
+  await page.getByLabel('供应商', { exact: true }).waitFor();
+  await page.screenshot({ path: `${root}/artifacts/settings-focus/first-run.png`, fullPage: true, animations: 'disabled' });
+  await page.getByLabel('供应商', { exact: true }).selectOption('mimo');
+  await page.getByLabel('配置名称', { exact: true }).fill('小米 MiMo');
+  await page.getByLabel('模型', { exact: true }).fill('mimo-v2.5');
+  await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  await page.locator('.ai-actions .is-saved').waitFor();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [1440, 1024, 768, 390, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const section of ['AI 配置', '阅读偏好', '站点规则']) {
+        await page.getByRole('navigation').getByRole('button', { name: section, exact: true }).click();
+        await page.getByRole('navigation').locator('button[aria-current=page]').filter({ hasText: section }).waitFor();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+        assert.equal(overflow, false, `${scheme} ${width} ${section} overflows`);
+        results.push({ scheme, width, section, overflow });
+        if ([1440, 390].includes(width)) {
+          await page.screenshot({ path: `${root}/artifacts/settings-focus/${section}-${scheme}-${width}.png`, fullPage: true, animations: 'disabled' });
+        }
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.getByRole('navigation').getByRole('button', { name: 'AI 配置', exact: true }).click();
+  await page.locator('section[aria-label="AI 配置"]:not([hidden])').waitFor();
+  await page.getByLabel('模型', { exact: true }).fill('unsaved-model');
+  await page.getByLabel('翻译失败重试次数', { exact: true }).selectOption('3');
+  assert.equal(await page.getByLabel('模型', { exact: true }).inputValue(), 'unsaved-model');
+  await page.getByRole('button', { name: '放弃修改', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[aria-label="模型"]').value === 'mimo-v2.5');
+  await page.getByText('思考与输出高级设置', { exact: true }).click();
+  await page.getByLabel('输出上限', { exact: true }).fill('8192');
+  await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  await page.locator('.ai-actions .is-saved').waitFor();
+  await page.reload();
+  assert.equal(await page.getByLabel('翻译失败重试次数', { exact: true }).inputValue(), '3');
+  assert.equal(await page.getByLabel('输出上限', { exact: true }).inputValue(), '8192');
+  // Local route fixture verifies the result layout without using a real service or any credentials.
+  await page.getByLabel('API 地址', { exact: true }).fill(`http://127.0.0.1:${server.address().port}/v1`);
+  await page.getByRole('button', { name: '测试连接', exact: true }).click();
+  await page.locator('.test-passed, .test-failed').waitFor();
+  assert.equal(await page.locator('.test-failed').count(), 0, await page.locator('.connection-result').innerText());
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.setViewportSize({ width: 1440, height: 1400 });
+  await page.screenshot({ path: `${root}/artifacts/settings-focus/test-passed.png`, fullPage: true, animations: 'disabled' });
+  assert.deepEqual(errors, []);
+  await writeFile(`${root}/artifacts/settings-focus/results.json`, JSON.stringify({ results, errors, draftIsolation: true, persistence: true, fixtureConnectionTest: true }, null, 2));
+  console.log('PASS: 30 layout checks; draft isolation; persisted preferences; advanced settings; fixture connection test; no page errors.');
+} finally {
+  await context.close();
+  server.close();
+  await rm(profile, { recursive: true, force: true });
+}

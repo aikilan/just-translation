@@ -1,0 +1,108 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Result, RuntimeRequest, TranslationBatchResult } from '../../../src/shared/messages';
+import { TranslationController } from '../../../src/content/controller';
+import { TranslationScheduler } from '../../../src/content/translation-scheduler';
+
+type Batch = Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
+const SETTINGS = {
+  configured: true,
+  activeProfileId: 'one',
+  profiles: [{ id: 'one', name: 'Test', configured: true }],
+  targetLanguage: 'Simplified Chinese',
+  displayMode: 'bilingual',
+  translationConcurrency: 6,
+  translateDynamicContent: true,
+  excludedSites: [],
+  autoTranslateSites: [],
+};
+const controllers: TranslationController[] = [];
+function controller(): TranslationController {
+  const instance = new TranslationController();
+  controllers.push(instance);
+  return instance;
+}
+function successful(request: Batch): Result<TranslationBatchResult> {
+  return {
+    ok: true,
+    data: {
+      translations: Object.fromEntries(
+        request.segments.map((s) => [s.requestId, `译文 ${s.text}`]),
+      ),
+      failures: {},
+    },
+  };
+}
+function installRuntime(
+  handler: (request: RuntimeRequest) => Promise<Result<unknown>> | undefined,
+) {
+  vi.stubGlobal('chrome', {
+    runtime: {
+      sendMessage: vi.fn((request: RuntimeRequest) => {
+        const handled = handler(request);
+        if (handled) return handled;
+        if (request.type === 'GET_PUBLIC_SETTINGS')
+          return Promise.resolve({ ok: true, data: SETTINGS });
+        if (request.type === 'BEGIN_TRANSLATION_SESSION')
+          return Promise.resolve({
+            ok: true,
+            data: {
+              configurationId: 'config-one',
+              context: {
+                profileId: SETTINGS.activeProfileId,
+                targetLanguage: SETTINGS.targetLanguage,
+              },
+            },
+          });
+        if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
+          return Promise.resolve({
+            ok: true,
+            data: {
+              skippedIds: [],
+              cachedTranslations: {},
+              missIds: request.candidates.map((c) => c.id),
+            },
+          });
+        if (request.type === 'TRANSLATE_BATCH') return Promise.resolve(successful(request));
+        return Promise.resolve({ ok: true, data: undefined });
+      }),
+    },
+  });
+}
+beforeEach(() => {
+  document.body.innerHTML = '';
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+});
+afterEach(() => {
+  for (const instance of controllers.splice(0)) instance.restore();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+
+it('controller restores a moved original after dynamic rediscovery', async () => {
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p><div id="destination"></div></main>';
+  installRuntime(() => undefined);
+  const instance = controller();
+  await instance.start();
+  const moved = document.querySelector('em')!;
+  instance.setDisplayMode('translation');
+  document.querySelector('#destination')!.append(moved);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  instance.restore();
+  expect(moved.hidden).toBe(false);
+  expect(moved.hasAttribute('data-justranslate-source-content')).toBe(false);
+});
+
+it('controller hides same-text replacement originals after processing mutations', async () => {
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p></main>';
+  installRuntime(() => undefined);
+  const instance = controller();
+  await instance.start();
+  const replacement = document.createElement('strong');
+  replacement.textContent = 'Visible original paragraph.';
+  document.querySelector('em')!.replaceWith(replacement);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  instance.setDisplayMode('translation');
+  expect(replacement.closest('[hidden]')).not.toBeNull();
+});

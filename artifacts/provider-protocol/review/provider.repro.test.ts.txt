@@ -1,0 +1,18 @@
+import {expect,it} from 'vitest';
+import {DEFAULT_PROVIDER_OPTIONS,resolveProviderOptions} from './providers';
+import {buildProtocolRequest} from './protocol-request';
+const base={...DEFAULT_PROVIDER_OPTIONS,provider:'custom' as const,protocol:'openai' as const,model:'alias',thinkingEnabled:true,apiUrl:'https://relay.test/v1',apiKey:'test'};
+it('validates the budget against an output cap actually sent to the OpenAI-compatible gateway',()=>{
+ const settings={...base,thinkingControl:'anthropic-budget' as const,thinkingBudgetTokens:6000};
+ const resolved=resolveProviderOptions(settings);
+ expect(resolved.maxOutputTokens).toBe(8192);
+ const request=buildProtocolRequest(settings,'system','content');
+ expect(request.body.max_tokens??request.body.max_completion_tokens).toBe(resolved.maxOutputTokens);
+});
+it('manual reasoning_effort sends an enabling parameter even when the catalog defaults another control on',()=>{
+ const settings={...base,provider:'mimo' as const,model:'mimo-v2.5',thinkingControl:'reasoning_effort' as const};
+ expect(resolveProviderOptions(settings).parameters).toEqual({reasoning_effort:'low'});
+});
+it('accepts the documented 32768 output tokens for GPT-4.1',()=>{
+ expect(()=>resolveProviderOptions({...base,provider:'openai',model:'gpt-4.1',maxOutputTokens:32768})).not.toThrow();
+});

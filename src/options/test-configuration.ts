@@ -1,8 +1,9 @@
+import { configuredProviderOptions } from '../shared/providers';
 import {
   assertConnectionTestTranslation,
   createConnectionTestSegment,
 } from '../shared/connection-test';
-import { translateBatch } from '../shared/openai-client';
+import { translateBatch } from '../shared/translation-client';
 import { validateTranslationProfile, type TranslationProfile } from '../shared/settings';
 
 const CONNECTION_TEST_TIMEOUT_MS = 60_000;
@@ -28,7 +29,7 @@ export async function testTranslatorConfiguration(
 
   try {
     const result = await translateBatch(
-      { ...profile, targetLanguage },
+      { ...profile, ...configuredProviderOptions(profile), targetLanguage },
       [segment],
       fetcher,
       controller.signal,

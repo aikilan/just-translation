@@ -119,7 +119,7 @@ describe('popup reading controls', () => {
       view = await mount(<PopupApp />);
       expect(view.container.textContent).toContain(title);
       expect(view.container.textContent).not.toContain('部分段落未完成');
-      expect(view.container.textContent).not.toContain('返回网页重试');
+      expect(view.container.textContent).not.toContain('重试全部失败');
       expect(view.container.textContent).not.toContain('全文完整翻译');
       await click(view.container, action);
       expect(tabSend).toHaveBeenCalledWith(7, { type: command });
@@ -255,9 +255,9 @@ describe('popup reading controls', () => {
     view = await mount(<PopupApp />);
     expect(view.container.textContent).toContain('未发现需要翻译的内容');
   });
-  it('returns to the page for partial retry and displays the provider error', async () => {
+  it('retries all failed paragraphs from the popup and preserves progress', async () => {
     const close = vi.spyOn(window, 'close').mockImplementation(() => {});
-    mockExtension(READY_SETTINGS, {
+    const { tabSend } = mockExtension(READY_SETTINGS, {
       ...IDLE_STATUS,
       phase: 'error',
       total: 3,
@@ -268,7 +268,53 @@ describe('popup reading controls', () => {
     view = await mount(<PopupApp />);
     expect(view.container.textContent).toContain('API 缺少 choices');
     expect(view.container.textContent).toContain('已翻译 2');
-    await click(view.container, '返回网页重试');
-    expect(close).toHaveBeenCalledOnce();
+    tabSend.mockResolvedValueOnce({
+      ...IDLE_STATUS,
+      phase: 'translating',
+      total: 3,
+      translated: 2,
+    });
+    await click(view.container, '重试全部失败');
+    expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' });
+    expect(close).not.toHaveBeenCalled();
+    expect(button(view.container, '停止翻译')).toBeDefined();
+    expect(view.container.textContent).toContain('已翻译 2');
+  });
+  it('locks bulk retry commands and allows retry after a messaging failure', async () => {
+    const { tabSend } = mockExtension(READY_SETTINGS, {
+      ...IDLE_STATUS,
+      phase: 'error',
+      total: 2,
+      translated: 1,
+      failed: 1,
+    });
+    view = await mount(<PopupApp />);
+    let reject!: (error: Error) => void;
+    tabSend.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      button(view.container, '重试全部失败').click();
+      button(view.container, '重试全部失败').click();
+      button(view.container, '全文完整翻译').click();
+    });
+    expect(
+      tabSend.mock.calls.filter(
+        ([, command]) => (command as { type: string }).type !== 'GET_PAGE_STATUS',
+      ),
+    ).toEqual([[7, { type: 'RETRY_FAILED_TRANSLATIONS' }]]);
+    expect(button(view.container, '重试全部失败').disabled).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+      reject(new Error('网页未响应'));
+    });
+    expect(view.container.textContent).toContain('网页未响应');
+    expect(button(view.container, '重试全部失败').disabled).toBe(false);
+    await click(view.container, '重试全部失败');
+    expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' });
   });
 });

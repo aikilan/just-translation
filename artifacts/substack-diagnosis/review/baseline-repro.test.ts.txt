@@ -1,0 +1,55 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import {
+  collectTranslatableElements,
+  renderTranslation,
+  restoreDocument,
+  setDocumentDisplayMode,
+} from './baseline-dom-translator';
+
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+});
+afterEach(() => {
+  restoreDocument();
+  document.body.innerHTML = '';
+  vi.restoreAllMocks();
+});
+
+it('restores original elements even after the host moves them outside the translated source', () => {
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p><div id="destination"></div></main>';
+  const source = document.querySelector<HTMLElement>('#source')!;
+  const moved = source.querySelector('em')!;
+  renderTranslation(source, '译文。');
+  setDocumentDisplayMode('translation');
+  document.querySelector('#destination')!.append(moved);
+  restoreDocument();
+  expect(moved.hidden).toBe(false);
+  expect(moved.hasAttribute('data-justranslate-source-content')).toBe(false);
+});
+
+it('keeps identical replacement content hidden when switching to translation-only mode', () => {
+  document.body.innerHTML = '<main><p id="source"><em>Visible original paragraph.</em></p></main>';
+  const source = document.querySelector<HTMLElement>('#source')!;
+  renderTranslation(source, '译文。');
+  const replacement = document.createElement('strong');
+  replacement.textContent = 'Visible original paragraph.';
+  source.querySelector('em')!.replaceWith(replacement);
+  setDocumentDisplayMode('translation');
+  expect(replacement.closest('[hidden]')).not.toBeNull();
+});
+
+it('does not let an entirely visibility-hidden main displace a visible article', () => {
+  document.body.innerHTML = '<main style="visibility:hidden"><p>Hidden reading paragraph.</p></main><article><p id="visible">Visible reading paragraph.</p></article>';
+  expect(collectTranslatableElements(document.body)).toEqual([document.querySelector('#visible')]);
+});
+
+it('restores overflow longhands while preserving unrelated host style edits', () => {
+  document.body.innerHTML = '<main><p style="overflow-y:hidden;height:20px">Visible reading paragraph.</p></main>';
+  const source = document.querySelector('p')!;
+  renderTranslation(source, '译文。');
+  source.style.color = 'red';
+  restoreDocument();
+  expect(source.style.overflowY).toBe('hidden');
+  expect(source.style.color).toBe('red');
+});

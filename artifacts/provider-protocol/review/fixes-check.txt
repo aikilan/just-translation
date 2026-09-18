@@ -1,0 +1,46 @@
+
+> just-translate@0.3.28 check /Users/jintao.xu/Documents/只是翻译
+> eslint . && vitest run && tsc --noEmit && vite build && node scripts/verify-build.mjs
+
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+
+ Test Files  48 passed (48)
+      Tests  550 passed (550)
+   Start at  13:33:14
+   Duration  8.36s (transform 1.40s, setup 0ms, import 2.78s, tests 23.85s, environment 4.19s)
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 1878 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/service-worker-loader.js                                 0.04 kB
+dist/assets/content-script.ts-loader-Ht0sAXXu.js              0.35 kB
+dist/assets/selection-content-script.ts-loader-Q0-5HPRN.js    0.36 kB
+dist/src/popup/index.html                                     0.79 kB │ gzip:  0.38 kB
+dist/src/options/index.html                                   0.96 kB │ gzip:  0.42 kB
+dist/icons/icon-16.png                                        1.41 kB
+dist/manifest.json                                            2.35 kB │ gzip:  0.86 kB
+dist/icons/icon-32.png                                        2.67 kB
+dist/icons/icon-48.png                                        4.35 kB
+dist/icons/icon-128.png                                      16.85 kB
+dist/assets/content-script-O4NfO2-l.css                       1.84 kB │ gzip:  0.56 kB
+dist/assets/index-BKYDn7wg.css                                2.98 kB │ gzip:  0.95 kB
+dist/assets/base-Db_BZbNA.css                                 5.74 kB │ gzip:  1.89 kB
+dist/assets/index-Br_UPf8e.css                                8.27 kB │ gzip:  2.16 kB
+dist/assets/messages-CQotUX8N.js                              0.13 kB │ gzip:  0.14 kB │ map:   5.52 kB
+dist/assets/chrome-api-B8lGD3DT.js                            0.47 kB │ gzip:  0.41 kB │ map:   1.49 kB
+dist/assets/selection-content-script.ts-C7brDm5H.js           8.55 kB │ gzip:  3.33 kB │ map:  21.77 kB
+dist/assets/index.html-qxi3_2So.js                           10.97 kB │ gzip:  4.49 kB │ map:  34.28 kB
+dist/assets/dist-BPnVmZth.js                                 11.70 kB │ gzip:  4.22 kB │ map:  65.83 kB
+dist/assets/settings-D8gwzyNh.js                             15.31 kB │ gzip:  4.93 kB │ map:  44.76 kB
+dist/assets/index.html-DsFc3D0M.js                           30.64 kB │ gzip: 10.30 kB │ map:  92.08 kB
+dist/assets/settings-store-JeeZCpNr.js                       41.95 kB │ gzip: 13.24 kB │ map: 188.21 kB
+dist/assets/content-script.ts-DvchREBW.js                    58.54 kB │ gzip: 17.56 kB │ map: 214.26 kB
+dist/assets/service-worker.ts-CJoxLFBE.js                    94.66 kB │ gzip: 44.92 kB │ map: 243.77 kB
+dist/assets/base-taLaon1k.js                                195.46 kB │ gzip: 62.15 kB │ map: 864.35 kB
+
+✓ built in 253ms
+构建校验通过：service-worker-loader.js 已连接后台 bundle

@@ -1,0 +1,358 @@
+{
+  "regressions": {
+    "movedOriginal": {
+      "hidden": false,
+      "visible": true,
+      "marked": false,
+      "expectedHidden": false
+    },
+    "replacedOriginal": {
+      "visible": false,
+      "expectedVisible": false
+    },
+    "hiddenMain": {
+      "ids": [
+        "visible"
+      ],
+      "expectedIds": [
+        "visible"
+      ]
+    },
+    "overflowRestore": {
+      "overflowY": "hidden",
+      "computedOverflowY": "hidden",
+      "expectedOverflowY": "hidden",
+      "color": "red"
+    }
+  },
+  "lifecycle": {
+    "axes": {
+      "x": "hidden",
+      "y": "scroll",
+      "priority": "important"
+    },
+    "detachedRestored": true,
+    "idempotent": true
+  },
+  "substack": {
+    "paragraphCount": 21,
+    "selectedParagraphs": 21,
+    "ancestorClaimed": false,
+    "bodyClaimed": false,
+    "translationsVisible": true,
+    "translationModeVisible": true,
+    "restoredHTML": true,
+    "restoredLinks": true
+  },
+  "styles": {
+    "results": [
+      {
+        "name": "normal",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "contents",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "hidden-parent-visible-child",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "flex-direct-text",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "grid-direct-text",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "flex-span",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "flex-em",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "display-none",
+        "expected": false,
+        "selected": false,
+        "passed": true,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 0,
+        "visibility": "visible",
+        "browserVisible": false
+      },
+      {
+        "name": "visibility-hidden",
+        "expected": false,
+        "selected": false,
+        "passed": true,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "hidden",
+        "browserVisible": false
+      },
+      {
+        "name": "visibility-collapse",
+        "expected": false,
+        "selected": false,
+        "passed": true,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "collapse",
+        "browserVisible": false
+      },
+      {
+        "name": "opacity-zero",
+        "expected": null,
+        "selected": false,
+        "passed": null,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": false
+      },
+      {
+        "name": "content-visibility-hidden",
+        "expected": false,
+        "selected": false,
+        "passed": true,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": false
+      },
+      {
+        "name": "content-visibility-auto",
+        "expected": null,
+        "selected": true,
+        "passed": null,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": false
+      },
+      {
+        "name": "zero-size-visible-overflow",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "contents-overflow",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": true,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "transform-offscreen",
+        "expected": true,
+        "selected": true,
+        "passed": true,
+        "units": [
+          "control",
+          "target"
+        ],
+        "viewportSelected": false,
+        "rects": 1,
+        "visibility": "visible",
+        "browserVisible": true
+      },
+      {
+        "name": "closed-details",
+        "expected": false,
+        "selected": false,
+        "passed": true,
+        "units": [
+          "control"
+        ],
+        "viewportSelected": false,
+        "rects": 0,
+        "visibility": "visible",
+        "browserVisible": false
+      }
+    ],
+    "rendering": [
+      {
+        "name": "normal",
+        "sourceHeight": 46.078125,
+        "translationTop": 34.078125,
+        "sourceBottom": 54.078125,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "flex",
+        "sourceHeight": 47.671875,
+        "translationTop": 34.078125,
+        "sourceBottom": 55.671875,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "inline-flex",
+        "sourceHeight": 47.671875,
+        "translationTop": 34.078125,
+        "sourceBottom": 55.671875,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "grid",
+        "sourceHeight": 47.671875,
+        "translationTop": 34.078125,
+        "sourceBottom": 55.671875,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "inline-grid",
+        "sourceHeight": 47.671875,
+        "translationTop": 34.078125,
+        "sourceBottom": 55.671875,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "fixed-height-overflow",
+        "sourceHeight": 46.078125,
+        "translationTop": 34.078125,
+        "sourceBottom": 54.078125,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      },
+      {
+        "name": "line-clamp",
+        "sourceHeight": 47.671875,
+        "translationTop": 34.078125,
+        "sourceBottom": 55.671875,
+        "entirelyBelowSource": false,
+        "belowOriginal": true,
+        "overflow": "visible"
+      }
+    ],
+    "contentsClipping": {
+      "selectedWithTraversalOverride": true,
+      "viewportSelectedWithTraversalOverride": true,
+      "expectedViewportSelected": true
+    },
+    "directChildSelector": {
+      "beforeWeight": "700",
+      "afterWeight": "700",
+      "expectedWeight": "700"
+    }
+  }
+}

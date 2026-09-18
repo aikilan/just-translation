@@ -1,6 +1,6 @@
 {
   "name": "just-translate",
-  "version": "0.3.28",
+  "version": "0.3.29",
   "private": true,
   "description": "A local-first bilingual webpage translator using your own OpenAI-compatible API.",
   "type": "module",

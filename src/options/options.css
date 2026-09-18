@@ -1,9 +1,29 @@
 body {
+  /* Settings typography: module titles > field labels > values > supporting copy. */
+  --text-strong: #222;
+  --text-label: #444;
+  --text: #666;
+  --text-muted: #707070;
+  color: var(--text);
   min-width: 320px;
+  background: color-mix(in srgb, var(--surface-soft) 70%, var(--surface-canvas));
+}
+.options-workspace .field > span:first-child,
+.options-workspace .setting-copy > span,
+.prompt-heading label {
+  color: var(--text-label);
+  font-size: 13px;
+  font-weight: 500;
+}
+.options-workspace input:not([type='checkbox']),
+.options-workspace select,
+.options-workspace textarea {
+  color: var(--text);
+  font-weight: 400;
 }
 .options-layout {
   display: grid;
-  grid-template-columns: 192px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
   min-height: 100vh;
 }
 .options-sidebar {
@@ -15,7 +35,7 @@ body {
   height: 100vh;
   padding: 28px 16px 20px;
   border-right: 1px solid var(--border);
-  background: var(--surface-raised);
+  background: var(--surface-canvas);
 }
 .options-brand {
   display: flex;
@@ -75,16 +95,16 @@ body {
 .options-workspace {
   min-width: 0;
   width: 100%;
-  max-width: 896px;
-  padding: 44px 48px 64px;
+  max-width: 1240px;
+  padding: 36px 40px 48px;
   margin: 0 auto;
 }
 .workspace-header {
-  margin-bottom: 34px;
+  margin-bottom: 26px;
 }
 .workspace-header h1 {
-  font-size: 26px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   letter-spacing: -0.035em;
   color: var(--text-strong);
   margin: 10px 0 8px;
@@ -96,13 +116,13 @@ body {
 }
 h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   color: var(--text-strong);
   font-weight: 600;
 }
 .onboarding {
-  padding: 0 0 24px;
-  margin-bottom: 24px;
+  padding: 24px;
+  margin-bottom: 0;
   border-bottom: 1px solid var(--border);
 }
 .onboarding h2 {
@@ -151,8 +171,14 @@ h2 {
   min-width: 0;
 }
 .profile-picker > span {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 14px;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.options-workspace .profile-picker select {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 500;
 }
 .profile-state {
   display: flex;
@@ -160,7 +186,7 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   min-height: 44px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -179,16 +205,16 @@ h2 {
 }
 .form-section {
   display: grid;
-  gap: 22px;
+  gap: 18px;
 }
 .credential-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 .credential-grid > .field {
-  grid-template-rows: 21px 38px auto;
+  grid-template-rows: 21px auto auto;
   align-content: start;
 }
 .secret-input {
@@ -204,19 +230,20 @@ h2 {
   top: 3px;
 }
 .prompt-details {
-  margin-top: 28px;
-  border-top: 1px solid var(--border);
+  margin-top: 0;
   border-bottom: 1px solid var(--border);
 }
 .prompt-details summary {
   cursor: pointer;
-  padding: 17px 0;
-  font-size: 14px;
-  color: var(--text-strong);
+  padding: 14px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-label);
 }
 .prompt-details summary > span {
   margin-left: 12px;
   font-size: 12px;
+  font-weight: 400;
   color: var(--text-muted);
 }
 .prompt-editor {
@@ -232,9 +259,6 @@ h2 {
   justify-content: space-between;
   gap: 16px;
 }
-.prompt-heading label {
-  font-size: 12px;
-}
 .prompt-editor textarea {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
@@ -246,7 +270,9 @@ h2 {
   flex-shrink: 0;
 }
 .connection-result {
-  padding: 20px 0 8px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--surface-soft);
   font-size: 12px;
 }
 .connection-heading {
@@ -290,9 +316,15 @@ h2 {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  background: var(--surface-canvas);
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 -4px 12px rgb(0 0 0 / 3%);
 }
 .action-buttons {
   display: flex;
@@ -305,8 +337,12 @@ h2 {
   align-items: flex-start;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px 20px;
-  margin-top: 16px;
+  gap: 4px 20px;
+  margin-top: 0;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-canvas);
+  border-radius: 0 0 12px 12px;
 }
 .configuration-footer p {
   flex: 1;
@@ -462,6 +498,149 @@ dialog p {
   gap: 8px;
   color: var(--text-muted);
 }
+/* The editor is the primary surface; the quiet inspector contains only global autosaved settings. */
+.ai-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  align-items: start;
+  gap: 28px;
+}
+.configuration-editor {
+  min-width: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgb(0 0 0 / 3%);
+  animation: reveal 180ms ease-out;
+}
+.profile-header {
+  padding: 20px 24px 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-raised));
+  border-top: 3px solid var(--accent);
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+.editor-section {
+  min-width: 0;
+  margin: 24px 0 0;
+  padding: 0 24px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.editor-section legend {
+  padding: 0;
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 18px;
+}
+.editor-section-description {
+  margin: 5px 0 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.behavior-section {
+  padding-bottom: 8px;
+}
+.behavior-section .setting-row {
+  padding-top: 12px;
+}
+.behavior-section > .field {
+  margin: 16px 0;
+}
+.behavior-section .prompt-details:last-child {
+  border-bottom: 0;
+}
+.connection-check {
+  padding: 18px 24px;
+}
+.action-state {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.action-state .save-feedback {
+  margin-top: 2px;
+}
+.translation-preferences {
+  min-width: 0;
+  padding-top: 8px;
+}
+.inspector-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inspector-heading svg {
+  color: var(--text-muted);
+}
+.inspector-description {
+  margin: 10px 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.translation-preferences .preferences-list {
+  border-top: 0;
+}
+.translation-preferences .setting-row {
+  padding: 20px 0;
+}
+.translation-preferences .setting-row-main {
+  display: grid;
+  gap: 12px;
+}
+.translation-preferences .setting-control {
+  width: 100%;
+}
+.privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 24px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.privacy-note strong {
+  color: var(--text-label);
+  font-weight: 500;
+}
+.privacy-note p {
+  margin: 6px 0 0;
+}
+.preference-workspace {
+  max-width: 800px;
+  padding: 8px 28px 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  animation: reveal 180ms ease-out;
+}
+.preference-workspace > .preferences-list {
+  border-top: 0;
+}
+.preference-workspace .site-rule-section:first-child {
+  padding-top: 20px;
+}
+.options-workspace input:focus,
+.options-workspace select:focus,
+.options-workspace textarea:focus {
+  border-color: var(--accent);
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    /* Preserve the same hierarchy on dark surfaces without dimming status colors. */
+    --text-strong: #f2f2f2;
+    --text-label: #d0d0d0;
+    --text: #b8b8b8;
+    --text-muted: #a0a0a0;
+  }
+}
+@media (max-width: 1150px) {
+  .ai-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .translation-preferences {
+    padding: 8px 24px 0;
+  }
+}
 @keyframes reveal {
   from {
     opacity: 0;
@@ -509,18 +688,33 @@ dialog p {
     height: 16px;
   }
   .options-workspace {
-    padding: 28px 24px 40px;
+    padding: 24px 24px 40px;
   }
 }
 @media (max-width: 480px) {
   .options-workspace {
-    padding: 24px 20px 32px;
+    padding: 24px 16px 32px;
   }
   .workspace-header {
     margin-bottom: 24px;
   }
   .workspace-header h1 {
     font-size: 24px;
+  }
+  .profile-header,
+  .connection-check,
+  .configuration-footer,
+  .ai-actions {
+    padding-inline: 16px;
+  }
+  .editor-section {
+    padding-inline: 16px;
+  }
+  .preference-workspace {
+    padding-inline: 16px;
+  }
+  .translation-preferences {
+    padding-inline: 4px;
   }
   .credential-grid {
     grid-template-columns: 1fr;

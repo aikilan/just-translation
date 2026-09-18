@@ -1,0 +1,72 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ artifacts/substack-diagnosis/review/repro.test.ts (4 tests | 3 failed) 39ms
+   × restores original elements even after the host moves them outside the translated source 28ms
+   × keeps identical replacement content hidden when switching to translation-only mode 4ms
+   × does not let an entirely visibility-hidden main displace a visible article 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  artifacts/substack-diagnosis/review/repro.test.ts > restores original elements even after the host moves them outside the translated source
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ artifacts/substack-diagnosis/review/repro.test.ts:27:24
+     25|   document.querySelector('#destination')!.append(moved);
+     26|   restoreDocument();
+     27|   expect(moved.hidden).toBe(false);
+       |                        ^
+     28|   expect(moved.hasAttribute('data-justranslate-source-content')).toBe(…
+     29| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  artifacts/substack-diagnosis/review/repro.test.ts > keeps identical replacement content hidden when switching to translation-only mode
+AssertionError: expected null not to be null
+ ❯ artifacts/substack-diagnosis/review/repro.test.ts:39:47
+     37|   source.querySelector('em')!.replaceWith(replacement);
+     38|   setDocumentDisplayMode('translation');
+     39|   expect(replacement.closest('[hidden]')).not.toBeNull();
+       |                                               ^
+     40| });
+     41|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  artifacts/substack-diagnosis/review/repro.test.ts > does not let an entirely visibility-hidden main displace a visible article
+AssertionError: expected [] to deeply equal [ <p id="visible"></p> ]
+
+- Expected
++ Received
+
+- [
+-   <p
+-     id="visible"
+-   >
+-     Visible reading paragraph.
+-   </p>,
+- ]
++ []
+
+ ❯ artifacts/substack-diagnosis/review/repro.test.ts:44:54
+     42| it('does not let an entirely visibility-hidden main displace a visible…
+     43|   document.body.innerHTML = '<main style="visibility:hidden"><p>Hidden…
+     44|   expect(collectTranslatableElements(document.body)).toEqual([document…
+       |                                                      ^
+     45| });
+     46|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+   Start at  15:44:43
+   Duration  402ms (transform 39ms, setup 0ms, import 48ms, tests 39ms, environment 239ms)
+

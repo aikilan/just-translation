@@ -3,10 +3,21 @@ import type { DisplayMode } from '../shared/settings';
 import { getTranslationSiteRule } from './site-rules';
 import { yieldToPage } from './render-tasks';
 import { PROTECTED_MARKER_PATTERN } from '../shared/protected-markers';
+import { canTraverseReadingSubtree, isReadingTextVisible } from './reading-visibility';
+
+import {
+  SOURCE_TEXT_ATTRIBUTE,
+  getPresentedSources,
+  isHiddenByTranslation,
+  isSourcePresentationMutation,
+  prepareSourcePresentation,
+  restoreSourcePresentation,
+  setOriginalContentHidden,
+} from './source-presentation';
 
 const SOURCE_ATTRIBUTE = 'data-justranslate-source';
 const TRANSLATION_ATTRIBUTE = 'data-justranslate-translation';
-const SOURCE_CONTENT_ATTRIBUTE = 'data-justranslate-source-content';
+
 const READING_RUN_ATTRIBUTE = 'data-justranslate-reading-run';
 const TRANSLATION_STATE_ATTRIBUTE = 'data-justranslate-state';
 const TRANSLATION_UNIT_ID_ATTRIBUTE = 'data-justranslate-unit-id';
@@ -217,7 +228,9 @@ function* iterateReadingElements(
   if (readOnly && ownerDocument) getSourceAnalysisCache(ownerDocument).values = new WeakMap();
   const isVisible = options.isVisible ?? isElementVisible;
   const siteRule = getTranslationSiteRule(options.url);
-  const scopes = siteRule ? [root] : findPreferredReadingScopes(root, isVisible);
+  const scopeGroups = siteRule
+    ? [[root]]
+    : findPreferredReadingScopes(root, options.isVisible ?? canTraverseReadingSubtree);
   const seen = new Set<Element>();
   interface Frame {
     element: HTMLElement;
@@ -233,91 +246,123 @@ function* iterateReadingElements(
     next: 0,
     owned: false,
   });
-  for (const scope of scopes) {
-    const roots = scope instanceof HTMLElement ? [scope] : Array.from(scope.children);
-    for (const start of roots) {
-      if (!(start instanceof HTMLElement)) continue;
-      if (start.closest(SKIP_SELECTOR)) continue;
-      const header = start.closest('header');
-      if (header && !header.closest(ARTICLE_SCOPE_SELECTOR)) continue;
-      const stack = [frame(start)];
-      while (stack.length > 0) {
-        const current = stack[stack.length - 1];
-        const { element } = current;
-        if (!current.entered) {
-          current.entered = true;
-          if (options.knownElements?.has(element)) {
-            stack.pop();
-            if (stack.length) stack[stack.length - 1].owned = true;
-            yield null;
-            continue;
-          }
-          if (seen.has(element) || shouldSkipElement(element) || !isVisible(element)) {
-            stack.pop();
-            yield null;
-            continue;
-          }
-          seen.add(element);
-          if (!readOnly && element.closest(`[${SOURCE_ATTRIBUTE}]`)) {
-            stack.pop();
-            if (stack.length) stack[stack.length - 1].owned = true;
-            yield null;
-            continue;
-          }
-          if (readOnly) {
-            const children = originalChildNodes(element);
-            const runs = siteRule ? [] : inlineReadingRuns(element, children);
-            const runNodes = new Set(runs.flat());
-            for (const nodes of runs) {
-              const analysis = yield* analyzeFragments(element, nodes);
-              // Discovery would create a span for this run. Report the same unit without inserting it.
-              if (hasReadableText('SPAN', analysis.text)) {
-                current.owned = true;
-                yield { nodes };
-              }
+  for (const scopes of scopeGroups) {
+    let hasReadingUnit = false;
+    for (const scope of scopes) {
+      const roots = scope instanceof HTMLElement ? [scope] : Array.from(scope.children);
+      for (const start of roots) {
+        if (!(start instanceof HTMLElement)) continue;
+        if (start.closest(SKIP_SELECTOR) || hasSuppressedAncestor(start)) continue;
+        const header = start.closest('header');
+        if (header && !header.closest(ARTICLE_SCOPE_SELECTOR)) continue;
+        const stack = [frame(start)];
+        while (stack.length > 0) {
+          const current = stack[stack.length - 1];
+          const { element } = current;
+          if (!current.entered) {
+            current.entered = true;
+            if (options.knownElements?.has(element)) {
+              hasReadingUnit = true;
+              stack.pop();
+              if (stack.length) stack[stack.length - 1].owned = true;
+              yield null;
+              continue;
             }
-            current.children = children.filter(
-              (node): node is Element => node instanceof Element && !runNodes.has(node),
-            );
-          } else {
-            if (!siteRule) wrapInlineReadingRuns(element);
-            current.children = Array.from(element.children);
+            if (
+              seen.has(element) ||
+              shouldSkipElement(element) ||
+              !canTraverseReadingSubtree(
+                element,
+                getComputedStyle(element),
+                isHiddenByTranslation(element),
+              ) ||
+              (options.isVisible && !options.isVisible(element))
+            ) {
+              stack.pop();
+              yield null;
+              continue;
+            }
+            seen.add(element);
+            if (!readOnly && element.closest(`[${SOURCE_ATTRIBUTE}]`)) {
+              hasReadingUnit = true;
+              stack.pop();
+              if (stack.length) stack[stack.length - 1].owned = true;
+              yield null;
+              continue;
+            }
+            if (readOnly) {
+              const children = originalChildNodes(element);
+              const runs = siteRule ? [] : inlineReadingRuns(element, children);
+              const runNodes = new Set(runs.flat());
+              for (const nodes of runs) {
+                const analysis = yield* analyzeFragments(element, nodes);
+                // Discovery would create a span for this run. Report the same unit without inserting it.
+                if (hasReadableText('SPAN', analysis.text)) {
+                  hasReadingUnit = true;
+                  current.owned = true;
+                  yield { nodes };
+                }
+              }
+              current.children = children.filter(
+                (node): node is Element => node instanceof Element && !runNodes.has(node),
+              );
+            } else {
+              if (!siteRule) wrapInlineReadingRuns(element);
+              current.children = Array.from(element.children);
+            }
+            yield null;
           }
-          yield null;
-        }
-        const child = current.children[current.next++];
-        if (child) {
-          if (child instanceof HTMLElement) stack.push(frame(child));
-          continue;
-        }
-        stack.pop();
-        if (current.owned) {
+          const child = current.children[current.next++];
+          if (child) {
+            if (child instanceof HTMLElement) stack.push(frame(child));
+            continue;
+          }
+          stack.pop();
+          if (current.owned) {
+            if (stack.length) stack[stack.length - 1].owned = true;
+            continue;
+          }
+          const inlineLayoutChild =
+            !element.matches(READING_BLOCK_SELECTOR) &&
+            !!element.parentElement &&
+            hasLayoutRisk(element.parentElement);
+          // A semantic sentence retains its inline emphasis/text; layout divs still own separate items.
+          if (
+            inlineLayoutChild &&
+            element.parentElement?.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
+            !element.parentElement.querySelector(SEMANTIC_READING_ANCESTOR_SELECTOR)
+          )
+            continue;
+          const matches = siteRule
+            ? element.matches(siteRule.includeSelectors.join(','))
+            : element.matches(READING_BLOCK_SELECTOR) ||
+              element.hasAttribute(READING_RUN_ATTRIBUTE) ||
+              inlineLayoutChild;
+          if (!matches || !isVisible(element)) continue;
+          // Empty layout owners must not absorb controls or nested blocks rejected during discovery.
+          if (
+            hasLayoutRisk(element) &&
+            element.querySelector(`${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article`)
+          )
+            continue;
+          if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
+          const analysis = yield* analyzeSourceFragments(element);
+          if (!hasReadableText(element.tagName, analysis.text)) {
+            if (!readOnly) unwrapReadingRun(element);
+            continue;
+          }
+          // Scope authority depends on readable text, even when it is outside this viewport pass.
+          hasReadingUnit = true;
+          if (options.viewportOnly && getElementTranslationPriority(element) !== 'visible') {
+            if (stack.length) stack[stack.length - 1].owned = true;
+            continue;
+          }
           if (stack.length) stack[stack.length - 1].owned = true;
-          continue;
+          yield element;
         }
-        const matches = siteRule
-          ? element.matches(siteRule.includeSelectors.join(','))
-          : element.matches(READING_BLOCK_SELECTOR) ||
-            element.hasAttribute(READING_RUN_ATTRIBUTE) ||
-            (element.tagName === 'SPAN' &&
-              !!element.parentElement &&
-              hasLayoutRisk(element.parentElement));
-        if (!matches || hasLayoutRisk(element)) continue;
-        if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
-        // A deferred leaf still owns its text: its ancestor must not absorb it as another unit.
-        if (options.viewportOnly && getElementTranslationPriority(element) !== 'visible') {
-          if (stack.length) stack[stack.length - 1].owned = true;
-          continue;
-        }
-        const analysis = yield* analyzeSourceFragments(element);
-        if (!hasReadableText(element.tagName, analysis.text)) {
-          if (!readOnly) unwrapReadingRun(element);
-          continue;
-        }
-        if (stack.length) stack[stack.length - 1].owned = true;
-        yield element;
       }
     }
+    if (hasReadingUnit) return;
   }
 }
 
@@ -353,12 +398,20 @@ function wrapInlineReadingRuns(container: HTMLElement): void {
 
 /** Grouping is shared by materializing discovery and read-only inspection, including raw prose. */
 function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
-  if (
-    !container.matches('main,article,section,div,li,td,th,blockquote') ||
-    hasLayoutRisk(container)
-  )
-    return [];
-  const blockSelector = `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,header,ul,ol,table,dl,[${READING_RUN_ATTRIBUTE}]`;
+  if (!container.matches('main,article,section,div,li,td,th,blockquote')) return [];
+  if (hasLayoutRisk(container)) {
+    if (
+      container.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
+      !container.querySelector(SEMANTIC_READING_ANCESTOR_SELECTOR)
+    )
+      return [];
+    // A text node is an anonymous flex/grid item. Anchor only text runs, never reparent element items.
+    if (!children.some((node) => node instanceof Element)) return [];
+    return children
+      .filter((node) => node.nodeType === 3 && /\p{L}/u.test(node.textContent ?? ''))
+      .map((node) => [node]);
+  }
+  const blockSelector = `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,header,ul,ol,table,dl,details,summary,[${READING_RUN_ATTRIBUTE}]`;
   const isBoundary = (node: Node) =>
     node instanceof Element &&
     (node.matches(blockSelector) || (shouldSkipElement(node) && !node.matches(PROTECTED_SELECTOR)));
@@ -390,7 +443,7 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
 function originalChildNodes(element: HTMLElement): Node[] {
   return Array.from(element.childNodes).flatMap((node) => {
     if (node instanceof HTMLElement && node.hasAttribute(TRANSLATION_ATTRIBUTE)) return [];
-    if (node instanceof HTMLElement && node.hasAttribute(SOURCE_CONTENT_ATTRIBUTE))
+    if (node instanceof HTMLElement && node.hasAttribute(SOURCE_TEXT_ATTRIBUTE))
       return originalChildNodes(node);
     return [node];
   });
@@ -409,15 +462,17 @@ export function cleanupReadingRuns(): void {
   sourceAnalysisCaches.delete(document);
 }
 
-function findPreferredReadingScopes(
+function* findPreferredReadingScopes(
   root: ParentNode,
   isVisible: (element: HTMLElement) => boolean,
-): ParentNode[] {
+): Generator<ParentNode[]> {
+  // Try the next scope class only when traversal found no readable units in this one.
   const mainScopes = findScopes(root, MAIN_SCOPE_SELECTOR, isVisible);
-  if (mainScopes.length > 0) return mainScopes;
+  if (mainScopes.length > 0) yield mainScopes;
 
   const articleScopes = findScopes(root, ARTICLE_SCOPE_SELECTOR, isVisible);
-  return articleScopes.length > 0 ? articleScopes : [root];
+  if (articleScopes.length > 0) yield articleScopes;
+  yield [root];
 }
 
 function findScopes(
@@ -426,10 +481,16 @@ function findScopes(
   isVisible: (element: HTMLElement) => boolean,
 ): HTMLElement[] {
   const scopes: HTMLElement[] = [];
-  if (root instanceof HTMLElement && root.matches(selector) && isVisible(root)) scopes.push(root);
+  if (
+    root instanceof HTMLElement &&
+    root.matches(selector) &&
+    isVisible(root) &&
+    !hasSuppressedAncestor(root)
+  )
+    scopes.push(root);
   scopes.push(
-    ...Array.from(root.querySelectorAll<HTMLElement>(selector)).filter((element) =>
-      isVisible(element),
+    ...Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
+      (element) => isVisible(element) && !hasSuppressedAncestor(element),
     ),
   );
   return scopes;
@@ -479,8 +540,7 @@ function getSourceAnalysisCache(document: Document): SourceAnalysisCache {
           ? (mutation.target as Element)
           : mutation.target.parentElement;
       if (!element || element.closest(`[${TRANSLATION_ATTRIBUTE}]`)) continue;
-      if (mutation.type === 'attributes' && element.hasAttribute(SOURCE_CONTENT_ATTRIBUTE))
-        continue;
+      if (isSourcePresentationMutation(mutation)) continue;
       cache.revision += 1;
       if (mutation.type === 'attributes' || element.closest('style,head')) {
         // Inherited typography or a stylesheet can affect any descendant's dominant text.
@@ -498,7 +558,6 @@ function getSourceAnalysisCache(document: Document): SourceAnalysisCache {
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'translate'],
   });
   cache.drain = () => invalidate(observer.takeRecords());
   cache.disconnect = () => observer.disconnect();
@@ -520,14 +579,7 @@ function* analyzeSourceFragments(element: HTMLElement): Generator<null, SourceAn
   const cached = cache.values.get(element);
   if (cached) return cached;
   const revision = cache.revision;
-  const sourceContent = element.querySelector<HTMLElement>(
-    `:scope > [${SOURCE_CONTENT_ATTRIBUTE}]`,
-  );
-  const analysis = yield* analyzeFragments(
-    element,
-    Array.from((sourceContent ?? element).childNodes),
-    sourceContent ?? undefined,
-  );
+  const analysis = yield* analyzeFragments(element, originalChildNodes(element));
   cache.drain();
   // Async discovery may overlap mutation; only cache a reading made at the current revision.
   if (cache.revision === revision) cache.values.set(element, analysis);
@@ -537,10 +589,18 @@ function* analyzeSourceFragments(element: HTMLElement): Generator<null, SourceAn
 function* analyzeFragments(
   element: HTMLElement,
   nodes: readonly Node[],
-  sourceContent?: HTMLElement,
 ): Generator<null, SourceAnalysis> {
   const protectedText = new Map<string, string>();
   const characterCounts = new Map<HTMLElement, number>();
+  const styles = new Map<Element, CSSStyleDeclaration>();
+  const styleOf = (owner: Element): CSSStyleDeclaration => {
+    let style = styles.get(owner);
+    if (!style) {
+      style = getComputedStyle(owner);
+      styles.set(owner, style);
+    }
+    return style;
+  };
   const parts: string[] = [];
   const stack = [...nodes].reverse();
   const literalText = nodes.map((node) => node.textContent ?? '').join('');
@@ -548,28 +608,38 @@ function* analyzeFragments(
   while (stack.length) {
     const node = stack.pop()!;
     if (node.nodeType === 3) {
-      parts.push((node.textContent ?? '').replace(/\s+/gu, ' '));
-      const parent = node.parentElement === sourceContent ? element : node.parentElement;
-      const count = node.textContent?.match(/[\p{L}\p{N}]/gu)?.length ?? 0;
-      if (parent && count) characterCounts.set(parent, (characterCounts.get(parent) ?? 0) + count);
-    } else if (node instanceof Element) {
-      const style = getComputedStyle(node);
+      const parent = node.parentElement?.hasAttribute(SOURCE_TEXT_ATTRIBUTE)
+        ? node.parentElement.parentElement
+        : node.parentElement;
       if (
-        node.hasAttribute('hidden') ||
-        style.display === 'none' ||
-        style.visibility === 'hidden'
+        !parent ||
+        !isReadingTextVisible(parent, styleOf(parent)) ||
+        parent.matches('details:not([open])')
       ) {
         yield null;
         continue;
       }
+      parts.push((node.textContent ?? '').replace(/\s+/gu, ' '));
+      const count = node.textContent?.match(/[\p{L}\p{N}]/gu)?.length ?? 0;
+      if (parent && count) characterCounts.set(parent, (characterCounts.get(parent) ?? 0) + count);
+    } else if (node instanceof Element) {
+      const style = styleOf(node);
+      if (!canTraverseReadingSubtree(node, style, isHiddenByTranslation(node))) {
+        yield null;
+        continue;
+      }
       if (node.matches(PROTECTED_SELECTOR)) {
+        if (!isReadingTextVisible(node, style)) {
+          yield null;
+          continue;
+        }
         let marker: string;
         do {
           marker = `[[JT_KEEP_${markerIndex++}]]`;
         } while (literalText.includes(marker));
         protectedText.set(marker, node.textContent ?? '');
         parts.push(marker);
-      } else if (!shouldSkipElement(node) && !node.hasAttribute('hidden')) {
+      } else if (!shouldSkipElement(node)) {
         if (node.tagName === 'BR') parts.push('\n');
         else stack.push(...Array.from(node.childNodes).reverse());
       }
@@ -611,7 +681,7 @@ export function prepareTranslationRender(
   source: HTMLElement,
   translatedText: string,
 ): () => HTMLElement {
-  const typography = getTranslationElement(source) ? undefined : captureDominantTypography(source);
+  const preparation = getTranslationElement(source) ? undefined : prepareTranslationElement(source);
   const { protectedText } = readSourceFragments(source);
   let text = translatedText;
   for (const [marker, original] of protectedText) {
@@ -619,7 +689,7 @@ export function prepareTranslationRender(
     text = text.replaceAll(marker, original);
   }
   return () => {
-    const translation = ensureTranslationElement(source, typography);
+    const translation = ensureTranslationElement(source, preparation);
     setTranslationState(translation, 'translated');
     translation.removeAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE);
     translation.removeAttribute('aria-label');
@@ -656,24 +726,34 @@ export function renderTranslationError(source: HTMLElement, unitId: string): HTM
   return translation;
 }
 
+interface TranslationElementPreparation {
+  typography: TranslationTypography;
+  present: () => void;
+}
+
+function prepareTranslationElement(source: HTMLElement): TranslationElementPreparation {
+  return {
+    typography: captureDominantTypography(source),
+    present: prepareSourcePresentation(source),
+  };
+}
+
 function ensureTranslationElement(
   source: HTMLElement,
-  snapshot?: TranslationTypography,
+  preparation?: TranslationElementPreparation,
 ): HTMLElement {
   const existing = getTranslationElement(source);
   if (existing) return existing;
 
-  const typography = snapshot ?? captureDominantTypography(source);
+  const { typography, present } = preparation ?? prepareTranslationElement(source);
   source.setAttribute(SOURCE_ATTRIBUTE, '');
   const translation = document.createElement('span');
   translation.setAttribute(TRANSLATION_ATTRIBUTE, '');
   translation.setAttribute('dir', 'auto');
   applyTranslationTypography(translation, typography);
 
-  const sourceContent = document.createElement('span');
-  sourceContent.setAttribute(SOURCE_CONTENT_ATTRIBUTE, '');
-  while (source.firstChild) sourceContent.append(source.firstChild);
-  source.append(sourceContent, translation);
+  present();
+  source.append(translation);
   return translation;
 }
 
@@ -721,16 +801,13 @@ export function setDocumentDisplayMode(mode: DisplayMode): void {
 
 /** Batch commits touch their own nodes only; a full-page walk is reserved for explicit mode changes. */
 export function setSourceDisplayMode(source: HTMLElement, mode: DisplayMode): void {
-  const sourceContent = source.querySelector<HTMLElement>(`:scope > [${SOURCE_CONTENT_ATTRIBUTE}]`);
   const translationIsReady =
     getTranslationElement(source)?.getAttribute(TRANSLATION_STATE_ATTRIBUTE) === 'translated';
-  if (sourceContent) sourceContent.hidden = mode === 'translation' && translationIsReady;
+  setOriginalContentHidden(source, mode === 'translation' && translationIsReady);
 }
 
 export function restoreDocument(): void {
-  document
-    .querySelectorAll<HTMLElement>(`[${SOURCE_ATTRIBUTE}]`)
-    .forEach((source) => restoreSourceElement(source));
+  getPresentedSources(document).forEach(restoreSourceElement);
   cleanupReadingRuns();
 }
 
@@ -738,17 +815,20 @@ export function restoreSourceElement(source: HTMLElement): void {
   const translation = getTranslationElement(source);
   translation?.remove();
 
-  const sourceContent = source.querySelector<HTMLElement>(`:scope > [${SOURCE_CONTENT_ATTRIBUTE}]`);
-  if (sourceContent) {
-    while (sourceContent.firstChild) source.insertBefore(sourceContent.firstChild, sourceContent);
-    sourceContent.remove();
-  }
+  restoreSourcePresentation(source);
   source.removeAttribute(SOURCE_ATTRIBUTE);
   unwrapReadingRun(source);
 }
 
 function getTranslationElement(source: HTMLElement): HTMLElement | null {
   return source.querySelector<HTMLElement>(`:scope > [${TRANSLATION_ATTRIBUTE}]`);
+}
+
+/** Reads raw original text without style/layout access for the final synchronous commit guard. */
+export function getOriginalSourceText(element: HTMLElement): string {
+  return originalChildNodes(element)
+    .map((node) => node.textContent ?? '')
+    .join('');
 }
 
 function hasReadableText(tagName: string, text: string): boolean {
@@ -784,8 +864,19 @@ function isCodeLikeText(text: string): boolean {
 }
 
 function isElementVisible(element: HTMLElement): boolean {
-  if (element.hidden) return false;
-  const style = getComputedStyle(element);
-  if (style.display === 'none' || style.visibility === 'hidden') return false;
-  return element.getClientRects().length > 0;
+  return (
+    isReadingTextVisible(element) &&
+    (isHiddenByTranslation(element) || element.getClientRects().length > 0)
+  );
+}
+
+/** Preferred scopes and incremental roots must not bypass hidden ancestors. */
+function hasSuppressedAncestor(element: HTMLElement): boolean {
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    if (
+      !canTraverseReadingSubtree(current, getComputedStyle(current), isHiddenByTranslation(current))
+    )
+      return true;
+  }
+  return false;
 }

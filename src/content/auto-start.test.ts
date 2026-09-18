@@ -10,6 +10,7 @@ const SETTINGS: PublicTranslatorSettings = {
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,
+  translationRetryCount: 1,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: ['news.ycombinator.com'],

@@ -1,7 +1,7 @@
+import { TEST_PROFILE } from '../test-utils/provider';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { translateBatch } from './openai-client';
-import { DEFAULT_SETTINGS } from './settings';
+import { translateBatch } from './translation-client';
 
 describe('local browser SSE acceptance fixture', () => {
   let server: ChildProcess;
@@ -26,7 +26,7 @@ describe('local browser SSE acceptance fixture', () => {
     await fetch(`${origin}/scenario?mode=fail-once`);
     const result = await translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         apiUrl: origin,
         model: 'fixture',
         targetLanguage: 'Chinese',
@@ -50,7 +50,7 @@ describe('local browser SSE acceptance fixture', () => {
     });
     const work = translateBatch(
       {
-        ...DEFAULT_SETTINGS.profiles[0],
+        ...TEST_PROFILE,
         apiUrl: origin,
         model: 'fixture',
         targetLanguage: 'Chinese',
