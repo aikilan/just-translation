@@ -1,0 +1,55 @@
+{
+  "passed": 12,
+  "results": [
+    {
+      "name": "same-text host write remains translation-only",
+      "passed": true
+    },
+    {
+      "name": "same-text write reuses result without another request",
+      "passed": true
+    },
+    {
+      "name": "immediate restore preserves explicit host clear",
+      "passed": true
+    },
+    {
+      "name": "disabled translation preserves host clear on restore",
+      "passed": true
+    },
+    {
+      "name": "stopped translation preserves host clear on restore",
+      "passed": true
+    },
+    {
+      "name": "full snapshot commits flex prose and control",
+      "passed": true
+    },
+    {
+      "name": "navigation ticker does not starve full catch-up",
+      "passed": true
+    },
+    {
+      "name": "dynamic and initial scope both exclude outside controls",
+      "passed": true
+    },
+    {
+      "name": "only one full-document request",
+      "passed": true
+    },
+    {
+      "name": "retry rescan preserves full-document mode",
+      "passed": true
+    },
+    {
+      "name": "retry preserves successful full result",
+      "passed": true
+    },
+    {
+      "name": "retry rescan translates current source",
+      "passed": true
+    }
+  ],
+  "provider": "fixed responses",
+  "installedExtension": false
+}

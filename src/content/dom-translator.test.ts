@@ -269,18 +269,20 @@ describe('DOM translation rendering', () => {
 
   it('does not reintroduce hidden or protected-only content through a parent or incremental root', () => {
     document.body.innerHTML = `<main><p>Visible paragraph <span style="display:none">HIDDEN_SECRET</span>text.</p>
-      <p><code>protectedOnly()</code></p><form><p id="form-help">An excluded form help paragraph.</p></form></main>`;
+      <p><code>protectedOnly()</code></p><form><p id="form-help">A readable form help paragraph.</p></form></main>`;
     expect(
       collectTranslatableElements(document.body, {
         isVisible: (element) => element.style.display !== 'none',
       }).map(getElementSourceText),
-    ).toEqual(['Visible paragraph text.']);
+    ).toEqual(['Visible paragraph text.', 'A readable form help paragraph.']);
     expect(
-      collectTranslatableElements(document.querySelector('#form-help')!, { isVisible: () => true }),
-    ).toEqual([]);
+      collectTranslatableElements(document.querySelector('#form-help')!, {
+        isVisible: () => true,
+      }).map(getElementSourceText),
+    ).toEqual(['A readable form help paragraph.']);
   });
 
-  it('collects leaf reading blocks while skipping code, controls, and nested duplicates', () => {
+  it('collects leaf reading blocks while skipping code and nested duplicates while including form help', () => {
     document.body.innerHTML = `
       <main>
         <article>
@@ -288,7 +290,7 @@ describe('DOM translation rendering', () => {
           <div><p>First readable paragraph with <strong>inline text</strong>.</p></div>
           <div>A standalone readable block long enough to translate.</div>
           <pre><code>const secret = 'do not translate';</code></pre>
-          <form><div>This form help text should be skipped completely.</div></form>
+          <form><div>This form help text is readable.</div></form>
         </article>
       </main>
     `;
@@ -301,6 +303,7 @@ describe('DOM translation rendering', () => {
       'Readable title',
       'First readable paragraph with inline text.',
       'A standalone readable block long enough to translate.',
+      'This form help text is readable.',
     ]);
   });
 
@@ -332,12 +335,12 @@ describe('DOM translation rendering', () => {
     ).toBe(false);
   });
 
-  it('supports standalone reading links but skips layout containers and ARIA controls', () => {
+  it('supports standalone reading links but keeps layout items and ARIA control labels separate', () => {
     document.body.innerHTML = `
       <main>
         <a id="article-link" href="/article">A standalone article title</a>
         <div style="display:flex"><span>Flexible layout content</span><span>Meta content</span></div>
-        <div role="button">A long interactive control must not be translated.</div>
+        <div role="button">A long interactive control label is readable.</div>
         <p>Paragraph text with an <a href="/inline">inline link</a>.</p>
       </main>
     `;
@@ -350,6 +353,7 @@ describe('DOM translation rendering', () => {
       'A standalone article title',
       'Flexible layout content',
       'Meta content',
+      'A long interactive control label is readable.',
       'Paragraph text with an inline link.',
     ]);
   });

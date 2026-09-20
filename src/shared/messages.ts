@@ -7,7 +7,7 @@ export type TranslationMode = 'segmented' | 'full-document';
 
 export interface PageTranslationStatus {
   mode: TranslationMode;
-  stage?: 'collecting' | 'requesting' | 'applying';
+  stage?: 'collecting' | 'requesting' | 'applying' | 'incremental';
   phase: TranslationPhase;
   translated: number;
   failed: number;

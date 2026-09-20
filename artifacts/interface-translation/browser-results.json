@@ -1,0 +1,88 @@
+{
+  "passed": 17,
+  "results": [
+    {
+      "name": "bilingual page uses translation-only button",
+      "passed": true
+    },
+    {
+      "name": "prose stays bilingual",
+      "passed": true
+    },
+    {
+      "name": "icons and badges visible",
+      "passed": true
+    },
+    {
+      "name": "control geometry unchanged",
+      "passed": true
+    },
+    {
+      "name": "focus preserved",
+      "passed": true
+    },
+    {
+      "name": "business click preserved",
+      "passed": true
+    },
+    {
+      "name": "input value and placeholder preserved",
+      "passed": true
+    },
+    {
+      "name": "navigation and footer excluded",
+      "passed": true
+    },
+    {
+      "name": "hidden options, body portal and added button translated",
+      "passed": true
+    },
+    {
+      "name": "host label replacement retranslated",
+      "passed": true
+    },
+    {
+      "name": "restore preserves newer host text",
+      "passed": true
+    },
+    {
+      "name": "restore removes all output",
+      "passed": true
+    },
+    {
+      "name": "full snapshot accepts independent additions",
+      "passed": true
+    },
+    {
+      "name": "one full request only",
+      "passed": true
+    },
+    {
+      "name": "full controls are translation-only",
+      "passed": true
+    },
+    {
+      "name": "translation-only prose toggle",
+      "passed": true
+    },
+    {
+      "name": "stop disconnects dynamic work",
+      "passed": true
+    }
+  ],
+  "status": {
+    "mode": "full-document",
+    "phase": "stopped",
+    "stage": "incremental",
+    "translated": 11,
+    "failed": 0,
+    "total": 11,
+    "displayMode": "bilingual",
+    "context": {
+      "profileId": "fixture",
+      "targetLanguage": "English"
+    },
+    "needsRestart": false
+  },
+  "fullRequests": 1
+}

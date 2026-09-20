@@ -4,14 +4,6 @@ import { getTranslationSiteRule } from './site-rules';
 import { yieldToPage } from './render-tasks';
 import { PROTECTED_MARKER_PATTERN } from '../shared/protected-markers';
 import { canTraverseReadingSubtree, isReadingTextVisible } from './reading-visibility';
-import {
-  getLabelSource,
-  getLabelText,
-  getLabelTextParent,
-  registerLabelSource,
-  releaseLabelSource,
-  setLabelTextHidden,
-} from './label-presentation';
 
 import {
   SOURCE_TEXT_ATTRIBUTE,
@@ -29,28 +21,6 @@ const TRANSLATION_ATTRIBUTE = 'data-justranslate-translation';
 const READING_RUN_ATTRIBUTE = 'data-justranslate-reading-run';
 const TRANSLATION_STATE_ATTRIBUTE = 'data-justranslate-state';
 const TRANSLATION_UNIT_ID_ATTRIBUTE = 'data-justranslate-unit-id';
-const LABEL_ATTRIBUTE = 'data-justranslate-label';
-const CONTROL_SELECTOR =
-  'button,label,legend,summary,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],[role="option"],[role="tab"],[role="checkbox"],[role="radio"],[role="switch"],[role="combobox"]';
-const OVERLAY_SELECTOR = 'dialog,[role="dialog"],[role="listbox"],[role="menu"]';
-export type TranslationUnitKind = 'prose' | 'label';
-
-/** Compact interface leaves and control text use inline, translation-only presentation. */
-export function getTranslationUnitKind(element: HTMLElement): TranslationUnitKind {
-  if (element.hasAttribute(LABEL_ATTRIBUTE) || element.closest(CONTROL_SELECTOR)) return 'label';
-  const compact =
-    element.matches('div,span') &&
-    !element.closest(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
-    (element.tagName !== 'SPAN' ||
-      !hasInlineReadingOwner(element) ||
-      (element.parentElement?.textContent?.trim().length ?? 0) < 20) &&
-    !element.querySelector(
-      `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,${CONTROL_SELECTOR}`,
-    ) &&
-    (element.textContent?.trim().length ?? 0) < 20;
-  return compact ? 'label' : 'prose';
-}
-
 const SOURCE_COLOR_PROPERTY = '--justranslate-source-color';
 const TRANSLATION_TYPOGRAPHY_PROPERTIES = [
   'color',
@@ -126,6 +96,8 @@ const SKIP_SELECTOR = [
   'textarea',
   'input',
   'select',
+  'button',
+  'form',
   'nav',
   'footer',
   'aside',
@@ -133,9 +105,10 @@ const SKIP_SELECTOR = [
   'math',
   '[translate="no" i]',
   '.notranslate',
-  '[contenteditable]:not([contenteditable="false"])',
-  '[role="textbox"]',
+  '[contenteditable="true"]',
   '[aria-hidden="true"]',
+  '[role="button"]',
+  '[role="menuitem"]',
   '[role="navigation"]',
   '[role="banner"]',
   '[role="complementary"]',
@@ -238,19 +211,16 @@ function iterateReadingElements(
   root: ParentNode,
   options: CollectionOptions,
   readOnly?: false,
-  withinScope?: boolean,
 ): Generator<HTMLElement | null>;
 function iterateReadingElements(
   root: ParentNode,
   options: CollectionOptions,
   readOnly: true,
-  withinScope?: boolean,
 ): Generator<OriginalReadingUnit | null>;
 function* iterateReadingElements(
   root: ParentNode,
   options: CollectionOptions,
   readOnly = false,
-  withinScope = false,
 ): Generator<OriginalReadingUnit | null> {
   // Inspection is a fresh observation. Arbitrary host attributes/CSS may change fragment
   // eligibility without hitting the incremental cache's ordinary translation invalidators.
@@ -258,13 +228,14 @@ function* iterateReadingElements(
   if (readOnly && ownerDocument) getSourceAnalysisCache(ownerDocument).values = new WeakMap();
   const isVisible = options.isVisible ?? isElementVisible;
   const siteRule = getTranslationSiteRule(options.url);
-  const scopeGroups =
-    siteRule || withinScope ? [[root]] : findPreferredReadingScopes(root, options);
+  const scopeGroups = siteRule
+    ? [[root]]
+    : findPreferredReadingScopes(root, options.isVisible ?? canTraverseReadingSubtree);
   const seen = new Set<Element>();
   interface Frame {
     element: HTMLElement;
     entered: boolean;
-    children: (Element | Node[])[];
+    children: Element[];
     next: number;
     owned: boolean;
   }
@@ -276,10 +247,6 @@ function* iterateReadingElements(
     owned: false,
   });
   for (const scopes of scopeGroups) {
-    if (!scopes) {
-      yield null;
-      continue;
-    }
     let hasReadingUnit = false;
     for (const scope of scopes) {
       const roots = scope instanceof HTMLElement ? [scope] : Array.from(scope.children);
@@ -327,15 +294,18 @@ function* iterateReadingElements(
               const children = originalChildNodes(element);
               const runs = siteRule ? [] : inlineReadingRuns(element, children);
               const runNodes = new Set(runs.flat());
-              const runStarts = new Map(runs.map((nodes) => [nodes[0], nodes]));
-              current.children = [];
-              // Inspect virtual runs at their DOM position, just like materialized anchors.
-              for (const node of children) {
-                const run = runStarts.get(node);
-                if (run) current.children.push(run);
-                else if (node instanceof Element && !runNodes.has(node))
-                  current.children.push(node);
+              for (const nodes of runs) {
+                const analysis = yield* analyzeFragments(element, nodes);
+                // Discovery would create a span for this run. Report the same unit without inserting it.
+                if (hasReadableText('SPAN', analysis.text)) {
+                  hasReadingUnit = true;
+                  current.owned = true;
+                  yield { nodes };
+                }
               }
+              current.children = children.filter(
+                (node): node is Element => node instanceof Element && !runNodes.has(node),
+              );
             } else {
               if (!siteRule) wrapInlineReadingRuns(element);
               current.children = Array.from(element.children);
@@ -344,14 +314,6 @@ function* iterateReadingElements(
           }
           const child = current.children[current.next++];
           if (child) {
-            if (Array.isArray(child)) {
-              const analysis = yield* analyzeFragments(element, child);
-              if (hasReadableText(analysis.text, !!element.closest(CONTROL_SELECTOR))) {
-                hasReadingUnit = true;
-                current.owned = true;
-                yield { nodes: child };
-              }
-            }
             if (child instanceof HTMLElement) stack.push(frame(child));
             continue;
           }
@@ -367,7 +329,6 @@ function* iterateReadingElements(
           // A semantic sentence retains its inline emphasis/text; layout divs still own separate items.
           if (
             inlineLayoutChild &&
-            !element.hasAttribute(READING_RUN_ATTRIBUTE) &&
             element.parentElement?.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
             !element.parentElement.querySelector(SEMANTIC_READING_ANCESTOR_SELECTOR)
           )
@@ -376,11 +337,7 @@ function* iterateReadingElements(
             ? element.matches(siteRule.includeSelectors.join(','))
             : element.matches(READING_BLOCK_SELECTOR) ||
               element.hasAttribute(READING_RUN_ATTRIBUTE) ||
-              inlineLayoutChild ||
-              (element.matches('span') &&
-                getTranslationUnitKind(element) === 'label' &&
-                (!hasInlineReadingOwner(element) ||
-                  (element.parentElement?.textContent?.trim().length ?? 0) < 20));
+              inlineLayoutChild;
           if (!matches || !isVisible(element)) continue;
           // Empty layout owners must not absorb controls or nested blocks rejected during discovery.
           if (
@@ -390,7 +347,7 @@ function* iterateReadingElements(
             continue;
           if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
           const analysis = yield* analyzeSourceFragments(element);
-          if (!hasReadableText(analysis.text, !!element.closest(CONTROL_SELECTOR))) {
+          if (!hasReadableText(element.tagName, analysis.text)) {
             if (!readOnly) unwrapReadingRun(element);
             continue;
           }
@@ -434,43 +391,18 @@ function wrapInlineReadingRuns(container: HTMLElement): void {
   for (const nodes of inlineReadingRuns(container, Array.from(container.childNodes))) {
     const anchor = container.ownerDocument.createElement('span');
     anchor.setAttribute(READING_RUN_ATTRIBUTE, '');
-    if (getTranslationUnitKind(container) === 'label') anchor.setAttribute(LABEL_ATTRIBUTE, '');
-    if (
-      getTranslationUnitKind(container) === 'label' &&
-      nodes.length === 1 &&
-      nodes[0].nodeType === Node.TEXT_NODE
-    ) {
-      registerLabelSource(anchor, nodes[0] as Text);
-    } else {
-      container.insertBefore(anchor, nodes[0]);
-      anchor.append(...nodes);
-    }
+    container.insertBefore(anchor, nodes[0]);
+    anchor.append(...nodes);
   }
 }
 
 /** Grouping is shared by materializing discovery and read-only inspection, including raw prose. */
 function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
-  if (container.hasAttribute(READING_RUN_ATTRIBUTE)) return [];
-  // Anchor only text, never the button or its icons/input/badge children.
-  if (getTranslationUnitKind(container) === 'label')
-    return children
-      .filter(
-        (node) =>
-          node.nodeType === Node.TEXT_NODE &&
-          !getLabelSource(node) &&
-          /\p{L}/u.test(node.textContent ?? ''),
-      )
-      .map((node) => [node]);
-  if (
-    !container.matches(
-      `main,article,section,div,form,fieldset,${SEMANTIC_READING_ANCESTOR_SELECTOR}`,
-    )
-  )
-    return [];
+  if (!container.matches('main,article,section,div,li,td,th,blockquote')) return [];
   if (hasLayoutRisk(container)) {
     if (
       container.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
-      !container.querySelector(`${SEMANTIC_READING_ANCESTOR_SELECTOR},${CONTROL_SELECTOR}`)
+      !container.querySelector(SEMANTIC_READING_ANCESTOR_SELECTOR)
     )
       return [];
     // A text node is an anonymous flex/grid item. Anchor only text runs, never reparent element items.
@@ -482,9 +414,7 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
   const blockSelector = `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,header,ul,ol,table,dl,details,summary,[${READING_RUN_ATTRIBUTE}]`;
   const isBoundary = (node: Node) =>
     node instanceof Element &&
-    (node.matches(blockSelector) ||
-      ((shouldSkipElement(node) || node.matches(CONTROL_SELECTOR) || node.matches('form')) &&
-        !node.matches(PROTECTED_SELECTOR)));
+    (node.matches(blockSelector) || (shouldSkipElement(node) && !node.matches(PROTECTED_SELECTOR)));
   if (!children.some(isBoundary)) return [];
   const runs: Node[][] = [];
   let run: Node[] = [];
@@ -512,7 +442,6 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
 /** Preserve host nodes and ignore only extension-owned feedback/container indirection. */
 function originalChildNodes(element: HTMLElement): Node[] {
   return Array.from(element.childNodes).flatMap((node) => {
-    if (getLabelSource(node)) return [];
     if (node instanceof HTMLElement && node.hasAttribute(TRANSLATION_ATTRIBUTE)) return [];
     if (node instanceof HTMLElement && node.hasAttribute(SOURCE_TEXT_ATTRIBUTE))
       return originalChildNodes(node);
@@ -521,7 +450,6 @@ function originalChildNodes(element: HTMLElement): Node[] {
 }
 
 function unwrapReadingRun(source: HTMLElement): void {
-  if (releaseLabelSource(source)) return;
   if (source.hasAttribute(READING_RUN_ATTRIBUTE)) source.replaceWith(...source.childNodes);
 }
 
@@ -534,52 +462,17 @@ export function cleanupReadingRuns(): void {
   sourceAnalysisCaches.delete(document);
 }
 
-/** Local discovery intersects the same page-level scopes used by initial discovery. */
 function* findPreferredReadingScopes(
   root: ParentNode,
-  options: CollectionOptions,
-): Generator<ParentNode[] | null> {
-  const isVisible = options.isVisible ?? canTraverseReadingSubtree;
-  const page = root.ownerDocument?.body;
-  const local = !!page && root instanceof Node && root !== page && page.contains(root);
-  const scopeRoot = local ? page : root;
-  const overlays = findScopes(scopeRoot, OVERLAY_SELECTOR, isVisible);
-  const mainScopes = findScopes(scopeRoot, MAIN_SCOPE_SELECTOR, isVisible);
-  const articleScopes = findScopes(scopeRoot, ARTICLE_SCOPE_SELECTOR, isVisible);
-  const groups = [
-    ...(mainScopes.length ? [[...mainScopes, ...overlays]] : []),
-    ...(articleScopes.length ? [[...articleScopes, ...overlays]] : []),
-    [scopeRoot],
-  ];
-  for (const scopes of groups) {
-    if (!local) {
-      yield scopes;
-      continue;
-    }
-    // Probe without changing DOM and stop at the first readable unit. Keep yielding traversal
-    // work so async discovery retains its budget even when a preferred scope is empty/hidden.
-    let readable = false;
-    for (const scope of scopes) {
-      for (const unit of iterateReadingElements(
-        scope,
-        { ...options, knownElements: undefined, viewportOnly: false },
-        true,
-        true,
-      )) {
-        if (unit) {
-          readable = true;
-          break;
-        }
-        yield null;
-      }
-      if (readable) break;
-    }
-    if (!readable) continue;
-    yield scopes.flatMap((scope) =>
-      scope.contains(root) ? [root] : root.contains(scope) ? [scope] : [],
-    );
-    return;
-  }
+  isVisible: (element: HTMLElement) => boolean,
+): Generator<ParentNode[]> {
+  // Try the next scope class only when traversal found no readable units in this one.
+  const mainScopes = findScopes(root, MAIN_SCOPE_SELECTOR, isVisible);
+  if (mainScopes.length > 0) yield mainScopes;
+
+  const articleScopes = findScopes(root, ARTICLE_SCOPE_SELECTOR, isVisible);
+  if (articleScopes.length > 0) yield articleScopes;
+  yield [root];
 }
 
 function findScopes(
@@ -664,7 +557,6 @@ function getSourceAnalysisCache(document: Document): SourceAnalysisCache {
     subtree: true,
     childList: true,
     characterData: true,
-    characterDataOldValue: true,
     attributes: true,
   });
   cache.drain = () => invalidate(observer.takeRecords());
@@ -683,13 +575,6 @@ function readSourceFragments(element: HTMLElement): SourceAnalysis {
 /** The same fragment walker serves synchronous validation and budgeted discovery. Protected
  * values remain local; only visible, unprotected text contributes to dominant typography. */
 function* analyzeSourceFragments(element: HTMLElement): Generator<null, SourceAnalysis> {
-  const label = getLabelText(element);
-  if (label !== undefined)
-    return {
-      text: label.replace(/\s+/gu, ' ').trim(),
-      protectedText: new Map(),
-      dominant: getLabelTextParent(element) ?? element,
-    };
   const cache = getSourceAnalysisCache(element.ownerDocument);
   const cached = cache.values.get(element);
   if (cached) return cached;
@@ -820,7 +705,6 @@ export function renderTranslationPending(source: HTMLElement, unitId: string): H
   const translation = ensureTranslationElement(source);
   setTranslationState(translation, 'pending');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
-  if (getTranslationUnitKind(source) === 'label') return translation;
   translation.setAttribute('aria-label', '正在翻译');
   translation.removeAttribute('role');
   translation.removeAttribute('tabindex');
@@ -834,14 +718,6 @@ export function renderTranslationError(source: HTMLElement, unitId: string): HTM
   const translation = ensureTranslationElement(source);
   setTranslationState(translation, 'error');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
-  if (getTranslationUnitKind(source) === 'label') {
-    if (!setLabelTextHidden(source, false)) setOriginalContentHidden(source, false);
-    translation.replaceChildren();
-    translation.removeAttribute('role');
-    translation.removeAttribute('tabindex');
-    translation.removeAttribute('aria-label');
-    return translation;
-  }
   translation.setAttribute('aria-label', '翻译失败 · 重试');
   translation.setAttribute('role', 'button');
   translation.tabIndex = 0;
@@ -858,7 +734,7 @@ interface TranslationElementPreparation {
 function prepareTranslationElement(source: HTMLElement): TranslationElementPreparation {
   return {
     typography: captureDominantTypography(source),
-    present: prepareSourcePresentation(source, getTranslationUnitKind(source) === 'label'),
+    present: prepareSourcePresentation(source),
   };
 }
 
@@ -871,7 +747,6 @@ function ensureTranslationElement(
 
   const { typography, present } = preparation ?? prepareTranslationElement(source);
   source.setAttribute(SOURCE_ATTRIBUTE, '');
-  if (getTranslationUnitKind(source) === 'label') source.setAttribute(LABEL_ATTRIBUTE, '');
   const translation = document.createElement('span');
   translation.setAttribute(TRANSLATION_ATTRIBUTE, '');
   translation.setAttribute('dir', 'auto');
@@ -928,9 +803,7 @@ export function setDocumentDisplayMode(mode: DisplayMode): void {
 export function setSourceDisplayMode(source: HTMLElement, mode: DisplayMode): void {
   const translationIsReady =
     getTranslationElement(source)?.getAttribute(TRANSLATION_STATE_ATTRIBUTE) === 'translated';
-  const hidden =
-    (mode === 'translation' || getTranslationUnitKind(source) === 'label') && translationIsReady;
-  if (!setLabelTextHidden(source, hidden)) setOriginalContentHidden(source, hidden);
+  setOriginalContentHidden(source, mode === 'translation' && translationIsReady);
 }
 
 export function restoreDocument(): void {
@@ -944,7 +817,6 @@ export function restoreSourceElement(source: HTMLElement): void {
 
   restoreSourcePresentation(source);
   source.removeAttribute(SOURCE_ATTRIBUTE);
-  source.removeAttribute(LABEL_ATTRIBUTE);
   unwrapReadingRun(source);
 }
 
@@ -954,27 +826,26 @@ function getTranslationElement(source: HTMLElement): HTMLElement | null {
 
 /** Reads raw original text without style/layout access for the final synchronous commit guard. */
 export function getOriginalSourceText(element: HTMLElement): string {
-  const label = getLabelText(element);
-  if (label !== undefined) return label;
   return originalChildNodes(element)
     .map((node) => node.textContent ?? '')
     .join('');
 }
 
-function hasReadableText(text: string, label = false): boolean {
+function hasReadableText(tagName: string, text: string): boolean {
   text = text.replace(PROTECTED_MARKER_PATTERN, '').trim();
   if (!text || !/\p{L}/u.test(text)) return false;
-  if (isMetadataOnly(text, label) || isCodeLikeText(text)) return false;
-  return true;
+  if (isMetadataOnly(text) || isCodeLikeText(text)) return false;
+  const minimumLength = ['DIV', 'ARTICLE', 'SECTION'].includes(tagName) ? 20 : 2;
+  return text.length >= minimumLength;
 }
 
-function isMetadataOnly(text: string, label: boolean): boolean {
+function isMetadataOnly(text: string): boolean {
   const compact = text.trim();
   if (/^(?:https?:\/\/|www\.)\S+$/iu.test(compact)) return true;
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(compact)) return true;
   if (/^\d{1,4}(?:[-/.]\d{1,2}){1,2}(?:\s+\d{1,2}:\d{2})?$/u.test(compact)) return true;
   if (/^\d{2,4}年(?:\d{1,2}月)?(?:\d{1,2}日)?$/u.test(compact)) return true;
-  return !label && /^[A-Z][A-Z0-9&.+-]{1,30}$/u.test(compact);
+  return /^[A-Z][A-Z0-9&.+-]{1,30}$/u.test(compact);
 }
 
 function isCodeLikeText(text: string): boolean {

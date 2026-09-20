@@ -1630,6 +1630,7 @@ describe('TranslationController', () => {
     await controller.start();
 
     const bodyScan = vi.spyOn(document.body, 'querySelectorAll');
+    const mainTraversal = vi.spyOn(document.querySelector('main')!, 'children', 'get');
     document
       .querySelector('main')!
       .insertAdjacentHTML('beforeend', '<p id="delta">Only this dynamic block is new.</p>');
@@ -1637,7 +1638,18 @@ describe('TranslationController', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(bodyScan).not.toHaveBeenCalled();
+    // Page-level landmark checks keep local eligibility consistent; actual materialization
+    // must stay inside the changed root rather than traversing the main content again.
+    expect(
+      bodyScan.mock.calls.every(([selector]) =>
+        [
+          'dialog,[role="dialog"],[role="listbox"],[role="menu"]',
+          'main,[role="main"]',
+          'article,[role="article"]',
+        ].includes(selector),
+      ),
+    ).toBe(true);
+    expect(mainTraversal).not.toHaveBeenCalled();
     expect(requestedTexts).toContain('Only this dynamic block is new.');
     controller.restore();
   });

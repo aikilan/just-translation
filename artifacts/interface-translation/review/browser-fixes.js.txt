@@ -1,0 +1,73 @@
+async () => {
+  window.jtAcceptance?.controller.restore();
+  const { TranslationController } = await import('/src/content/controller.ts');
+  const settings = { configured: true, profiles: [{id:'fixture',name:'Fixture',configured:true}], activeProfileId:'fixture',targetLanguage:'English',displayMode:'bilingual',translationConcurrency:4,translationRetryCount:0,translateDynamicContent:true,autoTranslateSites:[],excludedSites:[] };
+  const requests = [];
+  const results = [];
+  let finishFull, failBatch = false, finishBatch;
+  let holdBatch = false;
+  window.chrome.runtime = {sendMessage: async (request) => {
+    requests.push(request);
+    if (request.type === 'GET_PUBLIC_SETTINGS') return {ok:true,data:settings};
+    if (request.type === 'BEGIN_TRANSLATION_SESSION') return {ok:true,data:{configurationId:'config',context:{profileId:'fixture',targetLanguage:'English'}}};
+    if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES') return {ok:true,data:{missIds:request.candidates.map(unit=>unit.id),skippedIds:[],cachedTranslations:{}}};
+    if (request.type === 'TRANSLATE_FULL_DOCUMENT') return new Promise(resolve=>{finishFull=()=>resolve({ok:true,data:Object.fromEntries(request.units.map(unit=>[unit.id,'Full '+unit.text]))});});
+    if (request.type === 'TRANSLATE_BATCH') {
+      const response = {ok:true,data:{translations:Object.fromEntries(request.segments.map(unit=>[unit.requestId,'EN '+unit.text])),failures:{}}};
+      if (failBatch) return {ok:false,error:'Fixture error'};
+      if (holdBatch) { holdBatch=false; return new Promise(resolve=>{finishBatch=()=>resolve(response);}); }
+      return response;
+    }
+    return {ok:true,data:undefined};
+  }};
+  const delay = ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const wait = async condition => {const deadline=Date.now()+5000;while(!condition()){if(Date.now()>deadline)throw new Error('Timed out');await delay(20);}};
+  const assert = (condition,name)=>{results.push({name,passed:!!condition});if(!condition)throw new Error(name);};
+  let controller;
+  const setup = html=>{controller?.restore(); document.body.innerHTML=html;controller=new TranslationController();return controller;};
+  setup('<main><button>创建班级</button></main>');
+  let button=document.querySelector('button'); let original=button.firstChild;
+  await controller.start();
+  const before=requests.filter(r=>r.type==='TRANSLATE_BATCH').length;
+  original.data='创建班级';
+  await delay(1000);
+  assert(button.innerText==='EN 创建班级','same-text host write remains translation-only');
+  assert(requests.filter(r=>r.type==='TRANSLATE_BATCH').length===before,'same-text write reuses result without another request');
+  original.data=''; controller.restore();
+  assert(button.textContent==='','immediate restore preserves explicit host clear');
+  for(const mode of ['disabled','stopped']) {
+    settings.translateDynamicContent=mode!=='disabled';
+    setup('<main><button>创建班级</button></main>');
+    button=document.querySelector('button');original=button.firstChild;
+    await controller.start(); if(mode==='stopped')controller.stop();
+    original.data='';await delay(20);controller.restore();
+    assert(button.textContent==='',mode+' translation preserves host clear on restore');
+  }
+  settings.translateDynamicContent=true;
+  setup('<nav>ticker</nav><div id="outside"><button>账号管理</button></div><main><p style="display:flex">先选择 <button>班级</button> 再提交。</p></main>');
+  finishFull=undefined;
+  const full=controller.startFullDocument();await wait(()=>!!finishFull);finishFull();await full;
+  assert(controller.getStatus().phase==='complete' && controller.getStatus().translated===3,'full snapshot commits flex prose and control');
+  document.querySelector('main').insertAdjacentHTML('beforeend','<button id="late">创建班级</button>');
+  document.querySelector('#outside').insertAdjacentHTML('beforeend','<button id="external">切换机构</button>');
+  let count=0;const ticker=setInterval(()=>{document.querySelector('nav').textContent='tick '+ ++count;},100);
+  try {await wait(()=>document.querySelector('#late [data-justranslate-state="translated"]'));}
+  finally {clearInterval(ticker);}
+  assert(document.querySelector('#late').innerText==='EN 创建班级','navigation ticker does not starve full catch-up');
+  assert(!document.querySelector('#outside [data-justranslate-translation]'),'dynamic and initial scope both exclude outside controls');
+  assert(requests.filter(r=>r.type==='TRANSLATE_FULL_DOCUMENT').length===1,'only one full-document request');
+  failBatch=true;
+  document.querySelector('main').insertAdjacentHTML('beforeend','<p id="failed">Added content.</p>');
+  await wait(()=>controller.getStatus().failed===1);
+  controller.stop();failBatch=false;holdBatch=true;finishBatch=undefined;
+  const retry=controller.retryAllFailed();await wait(()=>!!finishBatch);
+  document.querySelector('#failed [data-justranslate-source-text]').firstChild.data='Updated content.';
+  finishBatch();await retry;
+  assert(controller.getStatus().mode==='full-document','retry rescan preserves full-document mode');
+  assert(document.querySelector('button [data-justranslate-translation]').textContent==='Full 班级','retry preserves successful full result');
+  assert(document.querySelector('#failed').innerText.includes('EN Updated content.'),'retry rescan translates current source');
+  controller.restore();
+  const report={passed:results.length,results,provider:'fixed responses',installedExtension:false};
+  window.jtReviewReport=report;
+  return report;
+}

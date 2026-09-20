@@ -318,3 +318,34 @@ describe('popup reading controls', () => {
     expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' });
   });
 });
+
+it('shows incremental full-mode progress and retries only failed additions', async () => {
+  const { tabSend } = mockExtension(READY_SETTINGS, {
+    ...IDLE_STATUS,
+    mode: 'full-document',
+    phase: 'error',
+    stage: 'incremental',
+    total: 7,
+    translated: 6,
+    failed: 1,
+  });
+  view = await mount(<PopupApp />);
+  expect(view.container.textContent).toContain('部分段落未完成');
+  expect(button(view.container, '重新全文翻译')).toBeDefined();
+  await click(view.container, '重试全部失败');
+  expect(tabSend).toHaveBeenCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' });
+});
+
+it('labels full-mode incremental work separately from the first full request', async () => {
+  mockExtension(READY_SETTINGS, {
+    ...IDLE_STATUS,
+    mode: 'full-document',
+    phase: 'translating',
+    stage: 'incremental',
+    total: 7,
+    translated: 6,
+  });
+  view = await mount(<PopupApp />);
+  expect(view.container.textContent).toContain('正在补译新内容');
+  expect(view.container.textContent).not.toContain('全文完成后统一显示译文');
+});

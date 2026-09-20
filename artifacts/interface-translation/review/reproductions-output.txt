@@ -1,0 +1,131 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/interface-review.repro.test.ts (8 tests | 7 failed) 5525ms
+   × keeps a same-text host write hidden behind the translated control label 1048ms
+   × restoration preserves an explicit empty host write with dynamic=true 24ms
+   × restoration preserves an explicit empty host write with dynamic=false 30ms
+   × does not starve post-full additions when an excluded navigation ticker keeps changing 2281ms
+   × keeps main-scope exclusion consistent for new short interface labels 1126ms
+   × retains surrounding prose in a flex paragraph containing controls 18ms
+   × preserves full mode and existing translations when stopped incremental retries need a rescan 973ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > keeps a same-text host write hidden behind the translated control label
+AssertionError: expected '普通译文 创建班级创建班级' to be '普通译文 创建班级' // Object.is equality
+
+Expected: "普通译文 创建班级"
+Received: "普通译文 创建班级创建班级"
+
+ ❯ src/content/interface-review.repro.test.ts:99:30
+     97|   text.data = '创建班级';
+     98|   await new Promise((resolve) => setTimeout(resolve, 1000));
+     99|   expect(button.textContent).toBe('普通译文 创建班级');
+       |                              ^
+    100| });
+    101|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > restoration preserves an explicit empty host write with dynamic=true
+ FAIL  src/content/interface-review.repro.test.ts > restoration preserves an explicit empty host write with dynamic=false
+AssertionError: expected '创建班级' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ 创建班级
+
+ ❯ src/content/interface-review.repro.test.ts:111:30
+    109|   if (!dynamic) await new Promise((resolve) => setTimeout(resolve, 20)…
+    110|   controller.restore();
+    111|   expect(button.textContent).toBe('');
+       |                              ^
+    112| });
+    113|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > does not starve post-full additions when an excluded navigation ticker keeps changing
+AssertionError: expected null not to be null
+ ❯ src/content/interface-review.repro.test.ts:122:88
+    120|   try {
+    121|     await new Promise((resolve) => setTimeout(resolve, 2200));
+    122|     expect(document.querySelector('#late [data-justranslate-state="tra…
+       |                                                                                        ^
+    123|   } finally { clearInterval(timer); }
+    124| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > keeps main-scope exclusion consistent for new short interface labels
+AssertionError: expected <span …(4)></span> to be null
+
+- Expected:
+null
+
++ Received:
+<span
+  data-justranslate-state="translated"
+  data-justranslate-translation=""
+  dir="auto"
+  style="color: buttontext; line-height: normal !important; letter-spacing: normal !important; word-spacing: normal !important; text-align: center !important; text-indent: 0 !important; text-shadow: none !important; text-transform: none !important; --justranslate-source-color: buttontext;"
+>
+  普通译文 账号管理
+</span>
+
+ ❯ src/content/interface-review.repro.test.ts:132:78
+    130|   document.querySelector('#chrome')!.insertAdjacentHTML('beforeend', '…
+    131|   await new Promise((resolve) => setTimeout(resolve, 1100));
+    132|   expect(document.querySelector('#outside [data-justranslate-translati…
+       |                                                                              ^
+    133| });
+    134|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > retains surrounding prose in a flex paragraph containing controls
+AssertionError: expected [ '班级' ] to deeply equal [ '先选择', '班级', '再提交。' ]
+
+- Expected
++ Received
+
+  [
+-   "先选择",
+    "班级",
+-   "再提交。",
+  ]
+
+ ❯ src/content/interface-review.repro.test.ts:137:107
+    135| it('retains surrounding prose in a flex paragraph containing controls'…
+    136|   document.body.innerHTML = '<main><p style="display:flex">先选择 <button…
+    137|   expect(collectTranslatableElements(document.body, { isVisible: () =>…
+       |                                                                                                           ^
+    138| });
+    139|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/content/interface-review.repro.test.ts > preserves full mode and existing translations when stopped incremental retries need a rescan
+AssertionError: expected 'segmented' to be 'full-document' // Object.is equality
+
+Expected: "full-document"
+Received: "segmented"
+
+ ❯ src/content/interface-review.repro.test.ts:164:39
+    162|   original.data = 'Changed original paragraph.';
+    163|   release!(); await retry;
+    164|   expect(controller.getStatus().mode).toBe('full-document');
+       |                                       ^
+    165|   expect(document.querySelector('h1 [data-justranslate-translation]')!…
+    166| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 1 passed (8)
+   Start at  14:03:27
+   Duration  5.94s (transform 94ms, setup 0ms, import 98ms, tests 5.52s, environment 241ms)
+

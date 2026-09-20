@@ -127,14 +127,13 @@ describe('full document lifecycle', () => {
     expect(document.body.textContent).toContain('PRIVATE_TOKEN');
   });
 
-  it.each(['add', 'remove', 'edit', 'reorder', 'protected', 'first'] as const)(
+  it.each(['remove', 'edit', 'reorder', 'protected', 'first'] as const)(
     'discards the full result after source %s',
     async (kind) => {
       const { work } = await pending();
       const main = document.querySelector('main')!;
       if (kind === 'protected') main.querySelector('code')!.textContent = 'CHANGED_TOKEN';
       if (kind === 'first') main.firstElementChild!.append(' Changed.');
-      if (kind === 'add') main.insertAdjacentHTML('beforeend', '<p>A new paragraph appeared.</p>');
       if (kind === 'remove') main.lastElementChild!.remove();
       if (kind === 'edit') main.lastElementChild!.append(' Changed.');
       if (kind === 'reorder') main.append(main.children[1]);
@@ -185,16 +184,21 @@ describe('full document lifecycle', () => {
     },
   );
 
-  it('keeps completed full-document mode manual even when dynamic translation is enabled', async () => {
+  it('incrementally translates new content after full completion', async () => {
     const { work } = await pending();
     finish();
     await work;
     document
       .querySelector('main')!
       .insertAdjacentHTML('beforeend', '<p>Later reading content.</p>');
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    await vi.waitFor(() => expect(resultNodes()).toHaveLength(7), { timeout: 2200 });
     expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(1);
-    expect(resultNodes()).toHaveLength(6);
+    expect(controller.getStatus()).toMatchObject({
+      mode: 'full-document',
+      total: 7,
+      translated: 7,
+    });
+    expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_BATCH')).toHaveLength(1);
   });
 
   it('restarts with new settings in full mode and keeps originals visible while switching display modes', async () => {
@@ -268,9 +272,7 @@ describe('full document lifecycle', () => {
     const observer = new MutationObserver(() => {
       if (resultNodes().length) {
         observer.disconnect();
-        document
-          .querySelector('main')!
-          .insertAdjacentHTML('beforeend', '<p>New content during commit.</p>');
+        document.querySelector('main')!.querySelector('p')!.append(' Changed during commit.');
         expect(document.documentElement.hasAttribute('data-justranslate-full-pending')).toBe(true);
         expect(document.querySelector('[data-justranslate-source-content][hidden]')).toBeNull();
       }
@@ -299,7 +301,7 @@ describe('full document lifecycle', () => {
     expect(controller.getStatus().phase).toBe('stopped');
   });
 
-  it('rejects new reading units inserted into an already-scanned branch during final validation', async () => {
+  it('rejects changed original text in an already-scanned branch during final validation', async () => {
     const { work } = await pending();
     const main = document.querySelector('main')!;
     const last = main.lastElementChild;
@@ -309,7 +311,7 @@ describe('full document lifecycle', () => {
     ) {
       if (!changed && this === last && resultNodes().length === 6) {
         changed = true;
-        main.insertAdjacentHTML('afterbegin', '<p>Inserted into the already scanned start.</p>');
+        main.querySelector('h1')!.append(' Changed during validation.');
       }
       return { length: 1 } as DOMRectList;
     });
@@ -383,7 +385,7 @@ describe('full document lifecycle', () => {
   });
 
   it.each(['raw', 'new-scope', 'visibility'] as const)(
-    'rejects changed reading membership: %s',
+    'queues added reading membership but rejects lost eligibility: %s',
     async (change) => {
       const { work } = await pending();
       if (change === 'raw') document.querySelector('main')!.prepend('New opening raw prose.');
@@ -395,8 +397,13 @@ describe('full document lifecycle', () => {
       if (change === 'visibility') document.querySelector('h1')!.hidden = true;
       finish();
       await work;
-      expect(controller.getStatus().error).toContain('正文已变化');
-      expect(resultNodes()).toHaveLength(0);
+      if (change === 'visibility') {
+        expect(controller.getStatus().error).toContain('正文已变化');
+        expect(resultNodes()).toHaveLength(0);
+      } else {
+        expect(controller.getStatus().error).toBeUndefined();
+        await vi.waitFor(() => expect(resultNodes()).toHaveLength(7), { timeout: 2200 });
+      }
     },
   );
   it('accepts a layout-only change when the same reading leaf remains eligible', async () => {
@@ -417,4 +424,210 @@ describe('full document lifecycle', () => {
     expect(controller.getStatus().error).toContain('正文已变化');
     expect(resultNodes()).toHaveLength(0);
   });
+});
+
+describe('full snapshot to incremental handoff', () => {
+  it('queues additions during the first request and adopts completed sources without retranslating them', async () => {
+    const { work } = await pending();
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', '<button>创建班级</button>');
+    finish();
+    await work;
+    expect(controller.getStatus().error).toBeUndefined();
+    await vi.waitFor(() => expect(resultNodes()).toHaveLength(7), { timeout: 2200 });
+    const batches = send.mock.calls.map(([r]) => r).filter((r) => r.type === 'TRANSLATE_BATCH');
+    expect(batches.flatMap((r) => r.segments.map((s) => s.text))).toEqual(['创建班级']);
+    await vi.waitFor(() =>
+      expect(controller.getStatus()).toMatchObject({
+        mode: 'full-document',
+        phase: 'complete',
+        translated: 7,
+      }),
+    );
+  });
+
+  it('respects the dynamic toggle and stops observing after stop', async () => {
+    settings.translateDynamicContent = false;
+    const { work } = await pending();
+    finish();
+    await work;
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', '<p>New disabled content.</p>');
+    await new Promise((resolve) => setTimeout(resolve, 950));
+    expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')).toBe(false);
+    controller.stop();
+    expect(controller.getStatus().phase).toBe('stopped');
+    expect(resultNodes()).toHaveLength(6);
+  });
+
+  it('retranslates edited originals after full completion and preserves other translations', async () => {
+    const { work } = await pending();
+    finish();
+    await work;
+    const heading = document.querySelector('h1')!;
+    heading.textContent = 'Changed heading';
+    await vi.waitFor(
+      () =>
+        expect(heading.querySelector('[data-justranslate-state="translated"]')?.textContent).toBe(
+          '普通译文 Changed heading',
+        ),
+      { timeout: 2200 },
+    );
+    expect(resultNodes()).toHaveLength(6);
+    expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(1);
+  });
+
+  it('pauses incremental requests when the configuration fingerprint changes', async () => {
+    const { work } = await pending();
+    finish();
+    await work;
+    const normal = send.getMockImplementation()!;
+    send.mockImplementation((request) =>
+      request.type === 'BEGIN_TRANSLATION_SESSION'
+        ? Promise.resolve({
+            ok: true,
+            data: {
+              configurationId: 'new-config',
+              context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+            },
+          })
+        : normal(request),
+    );
+    document
+      .querySelector('main')!
+      .insertAdjacentHTML('beforeend', '<p>New content after settings edit.</p>');
+    await vi.waitFor(() => expect(controller.getStatus().needsRestart).toBe(true), {
+      timeout: 2200,
+    });
+    expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')).toBe(false);
+    expect(resultNodes()).toHaveLength(6);
+  });
+});
+
+it('preserves successful full translations when incremental requests fail and retries only additions', async () => {
+  settings.translationRetryCount = 0;
+  const { work } = await pending();
+  finish();
+  await work;
+  const normal = send.getMockImplementation()!;
+  let failBatch = true;
+  send.mockImplementation((request) =>
+    request.type === 'TRANSLATE_BATCH' && failBatch
+      ? Promise.resolve({ ok: false, error: 'Incremental failure' })
+      : normal(request),
+  );
+  document.querySelector('main')!.insertAdjacentHTML('beforeend', '<button>添加学员</button>');
+  await vi.waitFor(
+    () => expect(controller.getStatus()).toMatchObject({ failed: 1, phase: 'error' }),
+    { timeout: 2200 },
+  );
+  expect(resultNodes()).toHaveLength(6);
+  expect(controller.getStatus()).toMatchObject({
+    mode: 'full-document',
+    stage: 'incremental',
+    phase: 'error',
+  });
+  expect(document.querySelector('button')!.textContent).toBe('添加学员');
+  failBatch = false;
+  await controller.retryAllFailed();
+  expect(controller.getStatus()).toMatchObject({ failed: 0, translated: 7, phase: 'complete' });
+  expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(1);
+});
+
+it('cancels incremental work and ignores late results while preserving the completed snapshot', async () => {
+  const { work } = await pending();
+  finish();
+  await work;
+  const normal = send.getMockImplementation()!;
+  let release: (() => void) | undefined;
+  send.mockImplementation((request) =>
+    request.type === 'TRANSLATE_BATCH'
+      ? new Promise((resolve) => {
+          release = () => {
+            void normal(request).then(resolve);
+          };
+        })
+      : normal(request),
+  );
+  document.querySelector('main')!.insertAdjacentHTML('beforeend', '<p>Late content.</p>');
+  await vi.waitFor(() => expect(release).toBeDefined(), { timeout: 2200 });
+  controller.stop();
+  release!();
+  await new Promise((resolve) => setTimeout(resolve, 950));
+  expect(controller.getStatus()).toMatchObject({ phase: 'stopped', translated: 6 });
+  expect(resultNodes()).toHaveLength(6);
+  document.querySelector('main')!.insertAdjacentHTML('beforeend', '<p>After stop.</p>');
+  await new Promise((resolve) => setTimeout(resolve, 950));
+  expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_BATCH')).toHaveLength(1);
+  controller.restore();
+  expect(resultNodes()).toHaveLength(0);
+});
+
+it('keeps a stop at the atomic commit boundary from re-enabling observation', async () => {
+  const { work } = await pending();
+  const observer = new MutationObserver(() => {
+    if (
+      !document.documentElement.hasAttribute('data-justranslate-full-pending') &&
+      resultNodes().length === 6
+    ) {
+      observer.disconnect();
+      controller.stop();
+    }
+  });
+  observer.observe(document.documentElement, { attributes: true });
+  finish();
+  await work;
+  observer.disconnect();
+  expect(controller.getStatus().phase).toBe('stopped');
+  document.querySelector('main')!.insertAdjacentHTML('beforeend', '<p>After atomic stop.</p>');
+  await new Promise((resolve) => setTimeout(resolve, 950));
+  expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_BATCH')).toBe(false);
+});
+
+it('rejects captured text changed between the atomic reveal and controller handoff', async () => {
+  const { work } = await pending();
+  const observer = new MutationObserver(() => {
+    if (
+      !document.documentElement.hasAttribute('data-justranslate-full-pending') &&
+      resultNodes().length === 6
+    ) {
+      observer.disconnect();
+      document.querySelector('h1')!.textContent = 'Changed at handoff';
+    }
+  });
+  observer.observe(document.documentElement, { attributes: true });
+  finish();
+  await work;
+  observer.disconnect();
+  expect(controller.getStatus().phase).toBe('error');
+  expect(controller.getStatus().error).toContain('正文已变化');
+  expect(resultNodes()).toHaveLength(0);
+});
+
+it('switches from an active ordinary request to full translation and ignores its late result', async () => {
+  const normal = send.getMockImplementation()!;
+  const releases: Array<() => void> = [];
+  send.mockImplementation((request) =>
+    request.type === 'TRANSLATE_BATCH'
+      ? new Promise((resolve) => {
+          releases.push(() => {
+            void normal(request).then(resolve);
+          });
+        })
+      : normal(request),
+  );
+  const ordinary = controller.start();
+  await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+  const full = controller.startFullDocument();
+  await vi.waitFor(() =>
+    expect(send.mock.calls.some(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toBe(true),
+  );
+  releases.forEach((release) => release());
+  finish();
+  await ordinary;
+  await full;
+  expect(controller.getStatus()).toMatchObject({
+    mode: 'full-document',
+    phase: 'complete',
+    translated: 6,
+  });
+  expect([...resultNodes()].every((node) => node.textContent?.startsWith('译文 '))).toBe(true);
 });

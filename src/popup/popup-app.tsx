@@ -174,32 +174,38 @@ export function PopupApp() {
   const saving = Object.values(feedback).some((value) => value?.status === 'saving');
   const canTranslate = Boolean(page?.available && settings?.configured && !excluded);
   const fullDocument = status.mode === 'full-document';
+  const incremental = fullDocument && status.stage === 'incremental';
   const action = needsRestart
     ? '用新设置重新翻译'
     : status.phase === 'translating'
       ? '停止翻译'
-      : fullDocument
-        ? '重新全文翻译'
-        : status.failed > 0
-          ? '重试全部失败'
-          : status.phase === 'stopped'
-            ? '继续翻译'
-            : status.phase === 'complete'
-              ? '翻译新内容'
-              : status.phase === 'error'
-                ? '重新翻译'
-                : '翻译此网页';
+      : incremental && status.failed > 0
+        ? '重试全部失败'
+        : fullDocument
+          ? '重新全文翻译'
+          : status.failed > 0
+            ? '重试全部失败'
+            : status.phase === 'stopped'
+              ? '继续翻译'
+              : status.phase === 'complete'
+                ? '翻译新内容'
+                : status.phase === 'error'
+                  ? '重新翻译'
+                  : '翻译此网页';
   const title = needsRestart
     ? '新设置已就绪'
     : status.phase === 'translating'
       ? fullDocument
-        ? { collecting: '收集全文', requesting: '全文翻译中', applying: '回填译文' }[
-            status.stage ?? 'collecting'
-          ]
+        ? {
+            collecting: '收集全文',
+            requesting: '全文翻译中',
+            applying: '回填译文',
+            incremental: '正在补译新内容',
+          }[status.stage ?? 'collecting']
         : '正在翻译'
-      : fullDocument && status.phase === 'error'
+      : fullDocument && !incremental && status.phase === 'error'
         ? '全文翻译失败'
-        : !fullDocument && status.failed > 0
+        : (!fullDocument || incremental) && status.failed > 0
           ? '部分段落未完成'
           : status.phase === 'complete'
             ? status.total
@@ -291,7 +297,7 @@ export function PopupApp() {
             <p className="status-description" role="status">
               {needsRestart
                 ? `当前译文保留${status.context ? `（${languageLabel(status.context.targetLanguage)}）` : ''}，重新翻译后应用新设置。`
-                : fullDocument && status.phase === 'translating'
+                : fullDocument && !incremental && status.phase === 'translating'
                   ? `${status.total ? `共 ${status.total} 个段落，` : ''}全文完成后统一显示译文。`
                   : status.total > 0
                     ? `已翻译 ${status.translated} / ${status.total} 个段落${status.failed ? ` · ${status.failed} 个失败` : ''}`
@@ -299,7 +305,7 @@ export function PopupApp() {
                       ? '正在查找需要翻译的内容…'
                       : '译文将显示在原文下方。'}
             </p>
-            {!fullDocument && status.phase === 'translating' && status.total > 0 ? (
+            {!fullDocument && !incremental && status.phase === 'translating' && status.total > 0 ? (
               <div
                 className="progress-track"
                 role="progressbar"
@@ -319,6 +325,7 @@ export function PopupApp() {
               onClick={() => {
                 if (needsRestart) void run('RESTART_TRANSLATION');
                 else if (status.phase === 'translating') void run('STOP_TRANSLATION');
+                else if (incremental && status.failed > 0) void run('RETRY_FAILED_TRANSLATIONS');
                 else if (fullDocument) void run('START_FULL_DOCUMENT_TRANSLATION');
                 else if (status.failed > 0) void run('RETRY_FAILED_TRANSLATIONS');
                 else void run('START_TRANSLATION');
@@ -328,14 +335,14 @@ export function PopupApp() {
                 <LoaderCircle className="spin" aria-hidden="true" />
               ) : status.phase === 'translating' && !needsRestart ? (
                 <Square aria-hidden="true" />
-              ) : !fullDocument && status.failed > 0 && !needsRestart ? (
+              ) : (!fullDocument || incremental) && status.failed > 0 && !needsRestart ? (
                 <RotateCcw aria-hidden="true" />
               ) : (
                 <Play aria-hidden="true" />
               )}
               {action}
             </button>
-            {!fullDocument ? (
+            {!fullDocument || (incremental && status.failed > 0) ? (
               <button
                 type="button"
                 className="text-button full-document-action"
@@ -344,12 +351,12 @@ export function PopupApp() {
                 onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
               >
                 <FileText aria-hidden="true" />
-                全文完整翻译
+                {fullDocument ? '重新全文翻译' : '全文完整翻译'}
               </button>
             ) : null}
             {status.failed ? (
               <p className="retry-guidance">
-                {fullDocument
+                {fullDocument && !incremental
                   ? '原文已保留，重试会重新提交全文。'
                   : '仅重试失败段落，已完成的译文会保留。'}
               </p>

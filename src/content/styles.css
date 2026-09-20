@@ -74,3 +74,16 @@ th > [data-justranslate-translation] {
   [data-justranslate-translation][data-justranslate-state='translated'] {
   display: none !important;
 }
+
+/* Interface text stays inside its original control; pending/error never intercept business input. */
+[data-justranslate-label] > [data-justranslate-translation] {
+  display: inline !important;
+  margin: 0 !important;
+  white-space: inherit !important;
+  flex-basis: auto !important;
+  grid-column: auto !important;
+}
+[data-justranslate-label]
+  > [data-justranslate-translation]:not([data-justranslate-state='translated']) {
+  display: none !important;
+}

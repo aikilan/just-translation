@@ -1,3 +1,4 @@
+import { getLabelText } from './label-presentation';
 import type { TranslationUnit } from '../shared/batching';
 import { sendRuntimeMessage } from '../shared/chrome-api';
 import {
@@ -31,7 +32,13 @@ interface SourceUnit extends TranslationUnit {
 const COMMIT_ATTRIBUTE = 'data-justranslate-full-pending';
 const SOURCE_CHANGED = '正文已变化，请重新全文翻译';
 
-/** One immutable document snapshot, one request, and one atomic visible commit. No cache or automatic dynamic translation. */
+/** Completed snapshot handed to the ordinary scheduler without exposing provider configuration. */
+export interface FullDocumentResult {
+  session: TranslationSessionInfo;
+  sources: Array<SourceUnit & { translatedText: string }>;
+}
+
+/** One immutable initial snapshot and one atomic commit; the controller owns later additions. */
 export class FullDocumentTranslationTask {
   private readonly abort = new AbortController();
   private readonly sessionId = crypto.randomUUID();
@@ -48,7 +55,10 @@ export class FullDocumentTranslationTask {
     displayMode: 'bilingual',
   };
 
-  constructor(private readonly readSettings: () => Promise<PublicTranslatorSettings>) {}
+  constructor(
+    private readonly readSettings: () => Promise<PublicTranslatorSettings>,
+    private readonly onCollect: (settings: PublicTranslatorSettings) => void,
+  ) {}
 
   getStatus(): PageTranslationStatus {
     return { ...this.status };
@@ -57,7 +67,7 @@ export class FullDocumentTranslationTask {
     return this.metrics.snapshot();
   }
 
-  async start(): Promise<void> {
+  async start(): Promise<FullDocumentResult | undefined> {
     let sessionStarted = false;
     try {
       const finishPreflight = this.metrics.start('preflight');
@@ -74,7 +84,9 @@ export class FullDocumentTranslationTask {
       if (!session.ok) throw new Error(session.error);
       sessionStarted = true;
       this.abort.signal.throwIfAborted();
+      if (!session.data?.configurationId) throw new Error('翻译会话缺少配置指纹');
       this.status.context = session.data.context;
+      this.onCollect(settings);
       finishPreflight();
       const finishDiscovery = this.metrics.start('discovery');
       this.sources = (await this.collect()).map((element, index) => ({
@@ -106,7 +118,7 @@ export class FullDocumentTranslationTask {
           units,
         });
       });
-      if (!response) return;
+      if (!response) return { session: session.data, sources: [] };
       this.abort.signal.throwIfAborted();
       if (!response.ok) throw new Error(response.error);
       assertCompleteResult(this.sources, response.data);
@@ -133,6 +145,14 @@ export class FullDocumentTranslationTask {
         finishRender();
         this.metrics.markFirstTranslation();
       });
+      this.abort.signal.throwIfAborted();
+      return {
+        session: session.data,
+        sources: this.sources.map((source) => ({
+          ...source,
+          translatedText: response.data[source.id],
+        })),
+      };
     } catch (error) {
       if (this.abort.signal.aborted) return;
       this.render.stop();
@@ -148,6 +168,7 @@ export class FullDocumentTranslationTask {
       // Only a generic full retry enters page text; diagnostics remain in the popup.
       if (first) {
         const control = renderTranslationError(first, 'full-retry');
+        if (control.getAttribute('role') !== 'button') return;
         control.textContent = '全文翻译失败 · 重试全文';
         control.setAttribute('aria-label', control.textContent);
         // The first reading unit can be a heading; feedback stays compact at that location.
@@ -167,7 +188,30 @@ export class FullDocumentTranslationTask {
     }
   }
 
+  /** Close the last await boundary before the controller adopts these exact source identities. */
+  confirmHandoff(): boolean {
+    try {
+      this.assertMatchingSources(
+        collectOriginalReadingUnits(document.body, { url: location.href }),
+      );
+      return true;
+    } catch (error) {
+      restoreDocument();
+      this.status.phase = 'error';
+      this.status.translated = 0;
+      this.status.failed = this.sources.length;
+      this.status.error = getErrorMessage(error);
+      return false;
+    }
+  }
+
   stop(): void {
+    if (this.status.phase === 'complete') {
+      // Stop can arrive between the atomic commit and the controller's asynchronous handoff.
+      this.abort.abort();
+      this.status.phase = 'stopped';
+      return;
+    }
     if (this.status.phase !== 'translating') return;
     this.abort.abort();
     this.render.stop();
@@ -240,13 +284,15 @@ export class FullDocumentTranslationTask {
   }
 
   private assertMatchingSources(units: OriginalReadingUnit[]): void {
-    // A newly discovered raw-prose run lacks a captured anchor and therefore is a new unit.
-    const elements = units.filter((unit): unit is HTMLElement => unit instanceof HTMLElement);
+    // New independent units are queued for incremental translation; captured units must survive unchanged.
+    const captured = new Set(this.sources.map((source) => source.element));
+    const elements = units.filter(
+      (unit): unit is HTMLElement => unit instanceof HTMLElement && captured.has(unit),
+    );
     elements.sort((left, right) =>
       left === right ? 0 : left.compareDocumentPosition(right) & 4 ? -1 : 1,
     );
     if (
-      elements.length !== units.length ||
       elements.length !== this.sources.length ||
       this.sources.some(
         (source, index) =>
@@ -262,6 +308,8 @@ export class FullDocumentTranslationTask {
 
 /** Ignores our feedback and wrapper nodes; protected values participate locally but never leave here. */
 function originalText(element: HTMLElement): string {
+  const label = getLabelText(element);
+  if (label !== undefined) return label;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
       node.parentElement?.closest('[data-justranslate-translation]')

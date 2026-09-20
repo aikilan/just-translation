@@ -1134,3 +1134,65 @@ describe('presentation ownership during dynamic updates', () => {
     expect(original.hasAttribute('data-justranslate-source-content')).toBe(false);
   });
 });
+
+describe('dynamic interface translation', () => {
+  it('translates inserted controls, revealed options and label replacements without taking business clicks', async () => {
+    document.body.innerHTML =
+      '<main><p>Original paragraph.</p><div role="listbox" style="display:none"><div role="option">关联课程</div></div></main>';
+    const batches: Batch[] = [];
+    installRuntime((request) => {
+      if (request.type === 'TRANSLATE_BATCH') batches.push(request);
+      return undefined;
+    });
+    const instance = controller();
+    await instance.start();
+    const main = document.querySelector('main')!;
+    main.insertAdjacentHTML('beforeend', '<button><span>创建班级</span><svg></svg></button>');
+    (document.querySelector('[role="listbox"]') as HTMLElement).style.display = 'block';
+    await vi.waitFor(
+      () =>
+        expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(3),
+      { timeout: 2200 },
+    );
+    const button = document.querySelector('button')!;
+    button.querySelector('span')!.textContent = '添加学员';
+    await vi.waitFor(
+      () =>
+        expect(button.querySelector('[data-justranslate-state="translated"]')?.textContent).toBe(
+          '译文 添加学员',
+        ),
+      { timeout: 2200 },
+    );
+    expect(button.querySelector('svg')?.closest('[hidden]')).toBeNull();
+    const texts = batches.flatMap((batch) => batch.segments.map((segment) => segment.text));
+    expect(texts.filter((text) => text === '创建班级')).toHaveLength(1);
+    expect(texts.filter((text) => text === '关联课程')).toHaveLength(1);
+  });
+});
+
+it('tracks host edits and removal of a label Text node without changing its parent', async () => {
+  document.body.innerHTML = '<main><button>创建班级<svg></svg></button></main>';
+  const button = document.querySelector('button')!;
+  const text = button.firstChild as Text;
+  installRuntime(() => undefined);
+  const instance = controller();
+  await instance.start();
+  expect(text.parentNode).toBe(button);
+  expect(button.textContent).toBe('译文 创建班级');
+  text.data = '添加学员';
+  await vi.waitFor(() => expect(button.textContent).toBe('译文 添加学员'), { timeout: 2200 });
+  text.data = '';
+  await vi.waitFor(
+    () => expect(button.querySelector('[data-justranslate-translation]')).toBeNull(),
+    { timeout: 2200 },
+  );
+  expect(text.data).toBe('');
+  text.data = '移除学员';
+  await vi.waitFor(() => expect(button.textContent).toBe('译文 移除学员'), { timeout: 2200 });
+  button.removeChild(text);
+  await vi.waitFor(() =>
+    expect(button.querySelector('[data-justranslate-translation]')).toBeNull(),
+  );
+  expect(instance.getStatus().total).toBe(0);
+  expect(button.querySelector('svg')).not.toBeNull();
+});

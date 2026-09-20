@@ -32,7 +32,7 @@ export function registerRetryInteractions(
 function getRetryableSource(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   const retryControl = target.closest<HTMLElement>(
-    '[data-justranslate-translation][data-justranslate-state="error"]',
+    '[data-justranslate-translation][data-justranslate-state="error"][role="button"]',
   );
   return retryControl?.closest<HTMLElement>('[data-justranslate-source]') ?? null;
 }

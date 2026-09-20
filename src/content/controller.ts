@@ -1,3 +1,4 @@
+import { getLabelSource } from './label-presentation';
 import { isSourcePresentationMutation, synchronizeSourcePresentation } from './source-presentation';
 import PQueue from 'p-queue';
 import { getElementTranslationPriority } from './viewport';
@@ -165,6 +166,8 @@ interface ActiveTranslationPass {
 
 export class TranslationController {
   private fullDocument: FullDocumentTranslationTask | undefined;
+  /** Locks follow-up requests to the configuration used for the accepted full snapshot. */
+  private fullConfigurationId: string | undefined;
   private status: PageTranslationStatus = {
     mode: 'segmented',
     phase: 'idle',
@@ -196,7 +199,10 @@ export class TranslationController {
     this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
   };
   private observerTimer: number | undefined;
-  private readonly dynamicRoots = new Map<HTMLElement, number>();
+  private readonly dynamicRoots = new Map<
+    HTMLElement,
+    { changedAt: number; fixedDeadline: boolean }
+  >();
   private dynamicContentEnabled = false;
   private nextUnitNumber = 0;
   private readonly records = new Map<HTMLElement, TranslationRecord>();
@@ -270,7 +276,7 @@ export class TranslationController {
   }
 
   async start(): Promise<void> {
-    if (this.fullDocument) this.restore();
+    if (this.getStatus().mode === 'full-document') this.restore();
     return this.startTranslation();
   }
 
@@ -278,14 +284,43 @@ export class TranslationController {
   async startFullDocument(): Promise<void> {
     if (this.fullDocument?.getStatus().phase === 'translating') return;
     this.restore();
-    const task = new FullDocumentTranslationTask(() => this.readValidSettings());
+    const task = new FullDocumentTranslationTask(
+      () => this.readValidSettings(),
+      (settings) => {
+        if (this.fullDocument !== task) return;
+        this.dynamicContentEnabled = settings.translateDynamicContent;
+        if (this.dynamicContentEnabled) this.observeDynamicContent();
+      },
+    );
     this.fullDocument = task;
-    await task.start();
+    const result = await task.start();
+    if (this.fullDocument !== task) return;
+    if (!result || task.getStatus().phase === 'stopped' || !task.confirmHandoff()) {
+      this.disconnectObserver();
+      return;
+    }
+    // Drain while still in snapshot mode: initial rendering must not invalidate the adopted records.
+    this.consumeObservedMutations();
+    this.status = task.getStatus();
+    this.fullConfigurationId = result.session.configurationId;
+    for (const source of result.sources) {
+      const record = this.createRecord(source.element, source.text);
+      record.phase = 'translated';
+      record.outcome = { kind: 'translated', translatedText: source.translatedText };
+      record.outcomeAt = performance.now();
+    }
+    this.fullDocument = undefined;
+    this.syncStatusCounts();
+    if (this.dynamicContentEnabled) {
+      // One catch-up scan closes the asynchronous commit/handoff gap, including new portal roots.
+      this.addDynamicRoot(document.body, true);
+      this.resumeDynamicObserver();
+    }
   }
 
   /** Explicitly discards the old page session before translating with current preferences. */
   async restart(): Promise<void> {
-    const fullDocument = this.fullDocument !== undefined;
+    const fullDocument = this.getStatus().mode === 'full-document';
     this.restore();
     if (fullDocument) await this.startFullDocument();
     else await this.start();
@@ -298,6 +333,7 @@ export class TranslationController {
     const sessionId = crypto.randomUUID();
     this.mainSessionId = sessionId;
     this.status.phase = 'translating';
+    if (this.status.mode === 'full-document') this.status.stage = 'incremental';
     this.status.error = undefined;
     this.syncStatusCounts();
     this.discoveryAbort = new AbortController();
@@ -372,7 +408,10 @@ export class TranslationController {
       if (this.mainSessionId !== sessionId) return;
       this.mainSessionId = null;
       const message = getErrorMessage(error);
-      this.failPendingRecords(message);
+      if (this.status.needsRestart) {
+        for (const record of [...this.records.values()])
+          if (record.phase === 'queued' || record.phase === 'pending') this.discardRecord(record);
+      } else this.failPendingRecords(message);
       this.syncStatusCounts();
       this.status.phase = 'error';
       this.status.error = message;
@@ -397,6 +436,7 @@ export class TranslationController {
     };
     this.bulkRetry = operation;
     this.status.phase = 'translating';
+    if (this.status.mode === 'full-document') this.status.stage = 'incremental';
     this.status.error = undefined;
     this.syncStatusCounts();
     let error: string | undefined;
@@ -417,7 +457,8 @@ export class TranslationController {
       if (this.bulkRetry === operation) {
         this.bulkRetry = null;
         this.settleStatus(error);
-        if (operation.requiresRescan && !this.hasActiveOperation()) await this.start();
+        // Internal continuation preserves full mode, its fingerprint, and completed records.
+        if (operation.requiresRescan && !this.hasActiveOperation()) await this.startTranslation();
         else this.resumeDynamicObserver();
         if (!this.hasActiveOperation()) this.metrics.finish();
       }
@@ -447,6 +488,7 @@ export class TranslationController {
     renderTranslationPending(source, record.id);
     this.consumeObservedMutations();
     this.status.phase = 'translating';
+    if (this.status.mode === 'full-document') this.status.stage = 'incremental';
     this.status.error = undefined;
     this.syncStatusCounts();
     let requiresRescan = false;
@@ -593,7 +635,7 @@ export class TranslationController {
         if (requiresRescan && bulkRetry && this.bulkRetry === bulkRetry) {
           bulkRetry.requiresRescan = true;
         }
-        if (requiresRescan && !this.hasActiveOperation()) await this.start();
+        if (requiresRescan && !this.hasActiveOperation()) await this.startTranslation();
         else this.resumeDynamicObserver();
       }
       if (!this.hasActiveOperation()) this.metrics.finish();
@@ -603,6 +645,7 @@ export class TranslationController {
   stop(): void {
     if (this.fullDocument) {
       this.fullDocument.stop();
+      this.disconnectObserver();
       return;
     }
     const activeSessionIds = [
@@ -640,6 +683,7 @@ export class TranslationController {
     const displayMode = this.getStatus().displayMode;
     this.stop();
     this.fullDocument = undefined;
+    this.fullConfigurationId = undefined;
     restoreDocument();
     this.records.clear();
     this.nextUnitNumber = 0;
@@ -657,7 +701,7 @@ export class TranslationController {
   toggle(): void {
     const status = this.getStatus();
     if (status.phase === 'idle' || status.phase === 'stopped') {
-      if (this.fullDocument) void this.startFullDocument();
+      if (status.mode === 'full-document') void this.startFullDocument();
       else void this.start();
     } else this.restore();
   }
@@ -1762,6 +1806,16 @@ export class TranslationController {
     );
     if (!response.ok) throw new Error(response.error);
     if (!response.data?.configurationId) throw new Error('翻译会话缺少配置指纹');
+    if (
+      (this.mainSessionId === sessionId || this.retrySessionIds.has(sessionId)) &&
+      this.fullConfigurationId &&
+      response.data.configurationId !== this.fullConfigurationId
+    ) {
+      this.status.needsRestart = true;
+      this.disconnectObserver();
+      await this.endTranslationSession(sessionId);
+      throw new Error('翻译设置已改变，请用新设置重新全文翻译');
+    }
     this.sessionConfigurations.set(sessionId, response.data.configurationId);
     return response.data.context;
   }
@@ -1784,6 +1838,7 @@ export class TranslationController {
       childList: true,
       subtree: true,
       characterData: true,
+      characterDataOldValue: true,
       attributes: true,
     });
     for (const event of ['transitionend', 'animationend', 'toggle'])
@@ -1803,6 +1858,11 @@ export class TranslationController {
       const targetElement = getMutationTargetElement(mutation.target);
       if (targetElement?.closest('[data-justranslate-translation]')) continue;
       if (isSourcePresentationMutation(mutation)) continue;
+      if (this.fullDocument) {
+        // The full task validates its captured sources; additions wait for successful handoff.
+        if (targetElement instanceof HTMLElement) this.addDynamicRoot(targetElement);
+        continue;
+      }
       const source = targetElement?.closest<HTMLElement>('[data-justranslate-source]') ?? null;
       if (source) {
         synchronizeSourcePresentation(source);
@@ -1813,8 +1873,12 @@ export class TranslationController {
           record &&
           this.isRecordSourceCurrent(record) &&
           source.querySelector(':scope > [data-justranslate-translation]')
-        )
+        ) {
+          // A host may write the same label back without changing its translation identity.
+          // Reconcile glyph visibility even when the completed record can be reused.
+          setSourceDisplayMode(source, this.status.displayMode);
           continue;
+        }
         const parent = source.parentElement;
         if (source.isConnected) this.activePass?.markStale();
         if (record) this.discardRecord(record);
@@ -1846,6 +1910,13 @@ export class TranslationController {
         requiresTranslation = true;
       }
       for (const removedNode of mutation.removedNodes) {
+        const label = getLabelSource(removedNode);
+        if (label) {
+          const record = this.records.get(label);
+          if (record) this.discardRecord(record);
+          else restoreSourceElement(label);
+          removedRecord = true;
+        }
         if (removedNode.nodeType !== 1) continue;
         const removedElement = removedNode as Element;
         for (const record of [...this.records.values()]) {
@@ -1895,7 +1966,8 @@ export class TranslationController {
   private scheduleDynamicTranslation(delayMs: number): void {
     window.clearTimeout(this.observerTimer);
     if (this.dynamicRoots.size === 0) return;
-    const earliest = Math.min(...this.dynamicRoots.values()) + delayMs;
+    const earliest =
+      Math.min(...[...this.dynamicRoots.values()].map((pending) => pending.changedAt)) + delayMs;
     this.observerTimer = window.setTimeout(
       () => {
         const pass = this.activePass;
@@ -1940,23 +2012,31 @@ export class TranslationController {
     if (clearPending) this.dynamicRoots.clear();
   }
 
-  /** Coalesces overlapping mutation roots so one subtree is never scanned twice. */
-  private addDynamicRoot(root: HTMLElement): void {
+  /** Coalesce subtrees; the one full-document catch-up deadline cannot slide with page activity. */
+  private addDynamicRoot(root: HTMLElement, fixedDeadline = false): void {
     if (!root.isConnected) return;
-    for (const existing of this.dynamicRoots.keys()) {
+    let changedAt = performance.now();
+    for (const [existing, pending] of this.dynamicRoots) {
       if (existing.contains(root)) {
-        this.dynamicRoots.set(existing, performance.now());
+        if (!pending.fixedDeadline) pending.changedAt = changedAt;
+        pending.fixedDeadline ||= fixedDeadline;
         return;
       }
-      if (root.contains(existing)) this.dynamicRoots.delete(existing);
+      if (root.contains(existing)) {
+        if (pending.fixedDeadline) {
+          fixedDeadline = true;
+          changedAt = Math.min(changedAt, pending.changedAt);
+        }
+        this.dynamicRoots.delete(existing);
+      }
     }
-    this.dynamicRoots.set(root, performance.now());
+    this.dynamicRoots.set(root, { changedAt, fixedDeadline });
   }
 
   private takeDynamicRoots(): HTMLElement[] {
     const now = performance.now();
     const roots: HTMLElement[] = [];
-    for (const [root, changedAt] of this.dynamicRoots) {
+    for (const [root, { changedAt }] of this.dynamicRoots) {
       if (!root.isConnected) this.dynamicRoots.delete(root);
       else if (now - changedAt >= DYNAMIC_CONTENT_DEBOUNCE_MS) {
         roots.push(root);
@@ -1967,7 +2047,7 @@ export class TranslationController {
   }
 
   private resumeDynamicObserver(): void {
-    if (this.dynamicContentEnabled && !this.hasActiveOperation()) {
+    if (this.dynamicContentEnabled && !this.status.needsRestart && !this.hasActiveOperation()) {
       if (!this.observer) this.observeDynamicContent();
       this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
     }
@@ -2048,7 +2128,12 @@ export class TranslationController {
   }
 
   private hasActiveOperation(): boolean {
-    return this.mainSessionId !== null || this.retrySessionIds.size > 0 || this.bulkRetry !== null;
+    return (
+      this.fullDocument?.getStatus().phase === 'translating' ||
+      this.mainSessionId !== null ||
+      this.retrySessionIds.size > 0 ||
+      this.bulkRetry !== null
+    );
   }
 
   private settleStatus(fallbackError?: string): void {
@@ -2096,7 +2181,9 @@ function getPriorityRank(priority: TranslationPriority): number {
 
 function getMutationTargetElement(target: Node): Element | null {
   // nodeType is realm-independent, unlike the page's global Node constructor.
-  return target.nodeType === 1 ? (target as Element) : target.parentElement;
+  return (
+    getLabelSource(target) ?? (target.nodeType === 1 ? (target as Element) : target.parentElement)
+  );
 }
 
 /** Bounds control-plane calls so a lost service-worker response cannot leave page spinners forever. */

@@ -1,3 +1,5 @@
+import { isLabelPresentationMutation } from './label-presentation';
+
 export const SOURCE_CONTENT_ATTRIBUTE = 'data-justranslate-source-content';
 export const SOURCE_TEXT_ATTRIBUTE = 'data-justranslate-source-text';
 
@@ -26,7 +28,7 @@ const presentations = new Map<HTMLElement, PresentationState>();
 /** Read layout before committing. Only a claimed reading unit may expand to fit its translation;
  * scrolling/layout ancestors and page controls are never rewritten.
  */
-export function prepareSourcePresentation(source: HTMLElement): () => void {
+export function prepareSourcePresentation(source: HTMLElement, inlineLabel = false): () => void {
   if (presentations.has(source)) return () => synchronizeSourcePresentation(source);
   const computed = getComputedStyle(source);
   const overrides: Record<string, string> = {};
@@ -34,7 +36,7 @@ export function prepareSourcePresentation(source: HTMLElement): () => void {
     /^(hidden|clip)$/.test(value),
   );
   const clamp = computed.getPropertyValue('-webkit-line-clamp');
-  if (clips || (clamp && clamp !== 'none' && clamp !== 'unset')) {
+  if (!inlineLabel && (clips || (clamp && clamp !== 'none' && clamp !== 'unset'))) {
     Object.assign(overrides, {
       'overflow-x': 'visible',
       'overflow-y': 'visible',
@@ -47,7 +49,8 @@ export function prepareSourcePresentation(source: HTMLElement): () => void {
   }
   // A direct-text flex leaf needs a new line for the translation item. Existing child items
   // are discovered separately; their layout owner does not reach this presentation path.
-  if (['flex', 'inline-flex'].includes(computed.display)) overrides['flex-wrap'] = 'wrap';
+  if (!inlineLabel && ['flex', 'inline-flex'].includes(computed.display))
+    overrides['flex-wrap'] = 'wrap';
   return () => {
     if (presentations.has(source)) {
       synchronizeSourcePresentation(source);
@@ -184,6 +187,7 @@ export function restoreSourcePresentation(source: HTMLElement): void {
 
 /** Ignore only extension-authored attributes, never page class/style/data changes on original children. */
 export function isSourcePresentationMutation(mutation: MutationRecord): boolean {
+  if (isLabelPresentationMutation(mutation)) return true;
   if (mutation.type !== 'attributes' || !(mutation.target instanceof HTMLElement)) return false;
   if (mutation.attributeName?.startsWith('data-justranslate-')) return true;
   const element = mutation.target;
