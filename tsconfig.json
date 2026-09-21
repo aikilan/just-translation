@@ -3,7 +3,7 @@
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "allowJs": false,
+    "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -22,5 +22,11 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "manifest.config.ts", "vite.config.ts", "eslint.config.js"]
+  "include": [
+    "src",
+    "scripts/build.mjs",
+    "manifest.config.ts",
+    "vite.config.ts",
+    "eslint.config.js"
+  ]
 }
