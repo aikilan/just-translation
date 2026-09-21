@@ -1,3 +1,4 @@
+import { getTitleSourceText, isDocumentTitle } from './document-title';
 import { getLabelText } from './label-presentation';
 import type { TranslationUnit } from '../shared/batching';
 import { sendRuntimeMessage } from '../shared/chrome-api';
@@ -103,8 +104,11 @@ export class FullDocumentTranslationTask {
           this.status.phase = 'complete';
           return undefined;
         }
-        const pending = renderTranslationPending(this.sources[0].element, this.sources[0].id);
-        pending.setAttribute('aria-label', '正在翻译全文');
+        const firstBodySource = this.sources.find((source) => !isDocumentTitle(source.element));
+        if (firstBodySource) {
+          const pending = renderTranslationPending(firstBodySource.element, firstBodySource.id);
+          pending.setAttribute('aria-label', '正在翻译全文');
+        }
         this.status.stage = 'requesting';
         // Only IDs and protected source text cross the extension message boundary.
         const units = this.sources.map(({ id, text }) => ({ id, text }));
@@ -160,7 +164,9 @@ export class FullDocumentTranslationTask {
       document.documentElement.removeAttribute(COMMIT_ATTRIBUTE);
       // Restoring raw-prose anchors may remove our original element references. Recollect the
       // current first reading unit, remaining cancellable until the error control is committed.
-      const first = this.sources.length ? (await this.collect().catch(() => []))[0] : undefined;
+      const first = this.sources.length
+        ? (await this.collect().catch(() => [])).find((element) => !isDocumentTitle(element))
+        : undefined;
       if (this.abort.signal.aborted) return;
       this.status.phase = 'error';
       this.status.failed = this.sources.length;
@@ -308,6 +314,7 @@ export class FullDocumentTranslationTask {
 
 /** Ignores our feedback and wrapper nodes; protected values participate locally but never leave here. */
 function originalText(element: HTMLElement): string {
+  if (isDocumentTitle(element)) return getTitleSourceText(element);
   const label = getLabelText(element);
   if (label !== undefined) return label;
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {

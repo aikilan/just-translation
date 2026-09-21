@@ -1,3 +1,4 @@
+import { isDocumentTitle } from './document-title';
 import { getLabelSource } from './label-presentation';
 import { isSourcePresentationMutation, synchronizeSourcePresentation } from './source-presentation';
 import PQueue from 'p-queue';
@@ -1861,6 +1862,20 @@ export class TranslationController {
       if (this.fullDocument) {
         // The full task validates its captured sources; additions wait for successful handoff.
         if (targetElement instanceof HTMLElement) this.addDynamicRoot(targetElement);
+        continue;
+      }
+      // Title writes have no body presentation marker. Reuse source identity to ignore our
+      // own writes and invalidate page-authored replacements before scheduling a fresh pass.
+      const title = targetElement?.closest('title');
+      if (title && isDocumentTitle(title)) {
+        const record = this.records.get(title);
+        if (record && this.isRecordSourceCurrent(record)) {
+          if (record.phase === 'translated') setSourceDisplayMode(title, this.status.displayMode);
+          continue;
+        }
+        if (record) this.discardRecord(record);
+        this.addDynamicRoot(title);
+        requiresTranslation = true;
         continue;
       }
       const source = targetElement?.closest<HTMLElement>('[data-justranslate-source]') ?? null;

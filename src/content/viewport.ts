@@ -1,7 +1,9 @@
+import { isDocumentTitle } from './document-title';
 import type { TranslationPriority } from '../shared/messages';
 
 /** Classifies a reading block against both viewport axes and ancestor scroll clipping. */
 export function getElementTranslationPriority(element: HTMLElement): TranslationPriority {
+  if (isDocumentTitle(element)) return 'visible';
   const height = window.innerHeight || document.documentElement.clientHeight;
   const width = window.innerWidth || document.documentElement.clientWidth;
   const bounds = element.getBoundingClientRect();

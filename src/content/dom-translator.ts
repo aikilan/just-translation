@@ -1,3 +1,12 @@
+import {
+  applyDocumentTitleTranslations,
+  applyTitleTranslation,
+  getTitleSourceText,
+  isDocumentTitle,
+  restoreDocumentTitles,
+  restoreTitle,
+  stageTitleTranslation,
+} from './document-title';
 import { getElementTranslationPriority } from './viewport';
 import type { DisplayMode } from '../shared/settings';
 import { getTranslationSiteRule } from './site-rules';
@@ -256,6 +265,18 @@ function* iterateReadingElements(
   // eligibility without hitting the incremental cache's ordinary translation invalidators.
   const ownerDocument = root instanceof Document ? root : root.ownerDocument;
   if (readOnly && ownerDocument) getSourceAnalysisCache(ownerDocument).values = new WeakMap();
+  // A page scan includes its tab title even though the normal reading root is body.
+  // Scoped rescans include it only when the changed subtree actually owns the title.
+  const title = ownerDocument?.head?.querySelector('title');
+  if (
+    title &&
+    !withinScope &&
+    (root === ownerDocument?.body || root === ownerDocument || root.contains(title)) &&
+    !options.knownElements?.has(title) &&
+    !title.closest('[translate="no" i],.notranslate') &&
+    /\p{L}/u.test(getTitleSourceText(title))
+  )
+    yield title;
   const isVisible = options.isVisible ?? isElementVisible;
   const siteRule = getTranslationSiteRule(options.url);
   const scopeGroups =
@@ -608,6 +629,7 @@ function hasLayoutRisk(element: HTMLElement): boolean {
 }
 
 export function getElementSourceText(element: HTMLElement): string {
+  if (isDocumentTitle(element)) return getTitleSourceText(element).replace(/\s+/gu, ' ').trim();
   return readSourceFragments(element).text;
 }
 
@@ -796,6 +818,11 @@ export function prepareTranslationRender(
   source: HTMLElement,
   translatedText: string,
 ): () => HTMLElement {
+  if (isDocumentTitle(source))
+    return () => {
+      stageTitleTranslation(source, translatedText);
+      return source;
+    };
   const preparation = getTranslationElement(source) ? undefined : prepareTranslationElement(source);
   const { protectedText } = readSourceFragments(source);
   let text = translatedText;
@@ -817,6 +844,7 @@ export function prepareTranslationRender(
 
 /** Creates immediate per-node feedback before any API request is awaited. */
 export function renderTranslationPending(source: HTMLElement, unitId: string): HTMLElement {
+  if (isDocumentTitle(source)) return source;
   const translation = ensureTranslationElement(source);
   setTranslationState(translation, 'pending');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
@@ -831,6 +859,7 @@ export function renderTranslationPending(source: HTMLElement, unitId: string): H
 
 /** Exposes a generic, keyboard-accessible retry control without leaking provider details. */
 export function renderTranslationError(source: HTMLElement, unitId: string): HTMLElement {
+  if (isDocumentTitle(source)) return source;
   const translation = ensureTranslationElement(source);
   setTranslationState(translation, 'error');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
@@ -919,6 +948,7 @@ function applyTranslationTypography(
 }
 
 export function setDocumentDisplayMode(mode: DisplayMode): void {
+  applyDocumentTitleTranslations();
   document.querySelectorAll<HTMLElement>(`[${SOURCE_ATTRIBUTE}]`).forEach((source) => {
     setSourceDisplayMode(source, mode);
   });
@@ -926,6 +956,10 @@ export function setDocumentDisplayMode(mode: DisplayMode): void {
 
 /** Batch commits touch their own nodes only; a full-page walk is reserved for explicit mode changes. */
 export function setSourceDisplayMode(source: HTMLElement, mode: DisplayMode): void {
+  if (isDocumentTitle(source)) {
+    applyTitleTranslation(source);
+    return;
+  }
   const translationIsReady =
     getTranslationElement(source)?.getAttribute(TRANSLATION_STATE_ATTRIBUTE) === 'translated';
   const hidden =
@@ -934,11 +968,16 @@ export function setSourceDisplayMode(source: HTMLElement, mode: DisplayMode): vo
 }
 
 export function restoreDocument(): void {
+  restoreDocumentTitles();
   getPresentedSources(document).forEach(restoreSourceElement);
   cleanupReadingRuns();
 }
 
 export function restoreSourceElement(source: HTMLElement): void {
+  if (isDocumentTitle(source)) {
+    restoreTitle(source);
+    return;
+  }
   const translation = getTranslationElement(source);
   translation?.remove();
 
@@ -954,6 +993,7 @@ function getTranslationElement(source: HTMLElement): HTMLElement | null {
 
 /** Reads raw original text without style/layout access for the final synchronous commit guard. */
 export function getOriginalSourceText(element: HTMLElement): string {
+  if (isDocumentTitle(element)) return getTitleSourceText(element);
   const label = getLabelText(element);
   if (label !== undefined) return label;
   return originalChildNodes(element)
