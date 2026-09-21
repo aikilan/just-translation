@@ -926,10 +926,15 @@ function setTranslationState(
 function captureDominantTypography(source: HTMLElement): TranslationTypography {
   const reference = readSourceFragments(source).dominant;
   const computedStyle = getComputedStyle(reference);
+  // Browsers conceal :visited colors in computed styles. A translation inside a link
+  // must inherit its live color, including when the saved color is reapplied on retry.
+  const inheritsLinkColor = source.closest('a[href]') !== null;
   return Object.fromEntries(
     TRANSLATION_TYPOGRAPHY_PROPERTIES.map((property) => [
       property,
-      computedStyle.getPropertyValue(property),
+      property === 'color' && inheritsLinkColor
+        ? 'inherit'
+        : computedStyle.getPropertyValue(property),
     ]),
   ) as TranslationTypography;
 }

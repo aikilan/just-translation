@@ -492,6 +492,45 @@ describe('DOM translation rendering', () => {
     expect(error.getAttribute('tabindex')).toBeNull();
   });
 
+  it.each([
+    '<a id="source" href="/visited">A sufficiently long linked article title</a>',
+    '<a href="/visited"><span id="source">A sufficiently long linked article title</span></a>',
+  ])('preserves live link color inheritance through translation states: %s', (html) => {
+    // Real browsers conceal :visited colors from getComputedStyle. Verify the inheritance
+    // contract here; actual visited paint must be checked in a browser, not jsdom.
+    document.body.innerHTML = html;
+    const source = document.querySelector<HTMLElement>('#source')!;
+    source.style.color = 'rgb(0, 0, 0)';
+    const originalHtml = document.body.innerHTML;
+    const translation = renderTranslationPending(source, 'linked-title');
+    const expectInheritedColor = () => {
+      expect(translation.parentElement).toBe(source);
+      expect(translation.style.getPropertyValue('color')).toBe('inherit');
+      expect(translation.style.getPropertyPriority('color')).toBe('important');
+      expect(translation.style.getPropertyValue('--justranslate-source-color')).toBe('inherit');
+    };
+    expectInheritedColor();
+    renderTranslationError(source, 'linked-title');
+    expectInheritedColor();
+    renderTranslationPending(source, 'linked-title');
+    expectInheritedColor();
+    renderTranslation(source, '足够长的文章标题');
+    expectInheritedColor();
+    setDocumentDisplayMode('translation');
+    expectInheritedColor();
+    setDocumentDisplayMode('bilingual');
+    restoreDocument();
+    expect(document.body.innerHTML).toBe(originalHtml);
+  });
+
+  it('keeps static dominant colors for anchors without a link destination', () => {
+    document.body.innerHTML =
+      '<a id="source"><strong style="color:rgb(17, 34, 51)">A sufficiently long named anchor title</strong></a>';
+    const source = document.querySelector<HTMLElement>('#source')!;
+    const translation = renderTranslation(source, '没有链接目标的标题');
+    expect(translation.style.color).toBe('rgb(17, 34, 51)');
+  });
+
   it('copies the dominant original text typography before wrapping Hacker News cells', () => {
     document.body.innerHTML = `
       <table>
