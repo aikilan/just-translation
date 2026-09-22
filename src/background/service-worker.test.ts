@@ -1,3 +1,4 @@
+import { renderMessage } from '../shared/i18n';
 import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +21,7 @@ describe('background document lifecycle', () => {
   let committed: (details: { tabId: number; frameId: number; documentId: string }) => void;
   let documentId: string;
   let session: Record<string, unknown>;
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof vi.fn<(_url: string, init: RequestInit) => Promise<Response>>>;
   let holdSessionRead: (() => Promise<void>) | undefined;
   let holdSettings: (() => Promise<void>) | undefined;
   let translationRetryCount: number;
@@ -59,7 +60,10 @@ describe('background document lifecycle', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('chrome', {
+      i18n: { getUILanguage: () => 'zh-CN' },
+      action: { setTitle: vi.fn().mockResolvedValue(undefined) },
       storage: {
+        onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
         local: {
           setAccessLevel: vi.fn(),
           get: async () => {
@@ -97,6 +101,7 @@ describe('background document lifecycle', () => {
       },
       alarms: { get: () => Promise.resolve({ name: 'cleanup' }), onAlarm: event() },
       contextMenus: {
+        update: vi.fn().mockResolvedValue(undefined),
         removeAll: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
         create: vi.fn((_properties, callback: () => void) => {
@@ -127,6 +132,142 @@ describe('background document lifecycle', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('requeues only never-sent offscreen batches and preserves admitted HTTP', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'viewport',
+      mode: 'segmented',
+    });
+    const jobs = Array.from({ length: 8 }, (_, index) =>
+      send({
+        type: 'TRANSLATE_BATCH',
+        sessionId: 'viewport',
+        batchId: `job-${index}`,
+        priority: 'visible',
+        segments: [
+          { requestId: `p${index}`, unitId: `p${index}`, partIndex: 0, text: `Paragraph ${index}` },
+        ],
+      }),
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    const signals = fetchMock.mock.calls.map(([, init]) => init.signal!);
+    await send({
+      type: 'UPDATE_TRANSLATION_PRIORITIES',
+      sessionId: 'viewport',
+      revision: 1,
+      batches: Array.from({ length: 8 }, (_, index) => ({
+        batchId: `job-${index}`,
+        priority: 'background',
+      })),
+      requeueUnsent: true,
+    });
+    expect(await jobs[6]).toEqual({ ok: true, data: { deferred: true } });
+    expect(await jobs[7]).toEqual({ ok: true, data: { deferred: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    await send({ type: 'CANCEL_TRANSLATION_REQUESTS', sessionId: 'viewport' });
+    await Promise.all(jobs);
+  });
+
+  it('returns work still awaiting session lookup without ever submitting HTTP', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      profileId: DEFAULT_SETTINGS.activeProfileId,
+      sessionId: 'preflight',
+      mode: 'segmented',
+    });
+    let release!: () => void;
+    holdSessionRead = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const work = send({
+      type: 'TRANSLATE_BATCH',
+      sessionId: 'preflight',
+      batchId: 'waiting',
+      priority: 'background',
+      segments: [{ requestId: 'a', unitId: 'a', partIndex: 0, text: 'Paragraph' }],
+    });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    holdSessionRead = undefined;
+    await send({
+      type: 'UPDATE_TRANSLATION_PRIORITIES',
+      sessionId: 'preflight',
+      revision: 1,
+      batches: [{ batchId: 'waiting', priority: 'background' }],
+      requeueUnsent: true,
+    });
+    release();
+    expect(await work).toEqual({ ok: true, data: { deferred: true } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores late priority snapshots and keeps the strict rate window when reordering', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string) as { messages: { content: string }[] };
+        const input = JSON.parse(body.messages[1].content) as { segments: { id: string }[] };
+        return Promise.resolve(
+          completionResponse(input.segments.map(({ id }) => ({ id, text: '译文' }))),
+        );
+      });
+      await send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        profileId: DEFAULT_SETTINGS.activeProfileId,
+        sessionId: 'order',
+        mode: 'segmented',
+      });
+      const jobs = Array.from({ length: 8 }, (_, index) =>
+        send({
+          type: 'TRANSLATE_BATCH',
+          sessionId: 'order',
+          batchId: `job-${index}`,
+          priority: index === 6 ? 'visible' : 'background',
+          segments: [
+            {
+              requestId: `p${index}`,
+              unitId: `p${index}`,
+              partIndex: 0,
+              text: `Paragraph ${index}`,
+            },
+          ],
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      await send({
+        type: 'UPDATE_TRANSLATION_PRIORITIES',
+        sessionId: 'order',
+        revision: 2,
+        batches: [
+          { batchId: 'job-6', priority: 'background' },
+          { batchId: 'job-7', priority: 'visible' },
+        ],
+        requeueUnsent: false,
+      });
+      await send({
+        type: 'UPDATE_TRANSLATION_PRIORITIES',
+        sessionId: 'order',
+        revision: 1,
+        batches: [
+          { batchId: 'job-6', priority: 'visible' },
+          { batchId: 'job-7', priority: 'background' },
+        ],
+        requeueUnsent: true,
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock.mock.calls[6][1].body).toContain('Paragraph 7');
+      expect(fetchMock.mock.calls[7][1].body).toContain('Paragraph 6');
+      expect((await Promise.all(jobs)).every((result) => result.ok)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('executes selection requests through the real queue without creating page sessions', async () => {
     fetchMock.mockResolvedValue(completionResponse([{ id: 'selection', text: '选区译文' }]));
     const response = await send({
@@ -140,7 +281,7 @@ describe('background document lifecycle', () => {
     });
     expect(Object.keys(session)).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledOnce();
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       messages: { content: string }[];
     };
     expect(JSON.parse(body.messages[1].content)).toEqual({
@@ -171,8 +312,8 @@ describe('background document lifecycle', () => {
     await send({ type: 'CANCEL_SELECTION_TRANSLATION', requestId: 'selected' });
     expect(await selection).toMatchObject({ ok: false });
     const pageInit = fetchMock.mock.calls.find(([, init]) =>
-      ((init as RequestInit).body as string).includes('Page paragraph'),
-    )![1] as RequestInit;
+      (init.body as string).includes('Page paragraph'),
+    )![1];
     expect(pageInit.signal!.aborted).toBe(false);
     await send({ type: 'CANCEL_TRANSLATION_REQUESTS', sessionId: 'page' });
     await page;
@@ -214,7 +355,7 @@ describe('background document lifecycle', () => {
     }
     expect(
       fetchMock.mock.calls.map((call) => {
-        const init = call[1] as RequestInit;
+        const init = call[1];
         const body = JSON.parse(init.body as string) as { thinking: { type: string } };
         return body.thinking.type;
       }),
@@ -304,9 +445,13 @@ describe('background document lifecycle', () => {
   });
 
   it('rejects settings mutations from a web content script', async () => {
+    await expect(send({ type: 'UPDATE_UI_LANGUAGE', uiLanguage: 'ar' })).resolves.toEqual({
+      ok: false,
+      error: { key: '设置只能由扩展页面修改' },
+    });
     await expect(
       send({ type: 'UPDATE_READING_PREFERENCES', patch: { targetLanguage: 'Japanese' } }),
-    ).resolves.toEqual({ ok: false, error: '设置只能由扩展页面修改' });
+    ).resolves.toEqual({ ok: false, error: { key: '设置只能由扩展页面修改' } });
   });
 
   it('executes a full-document session once without partial publication or access to paragraph cache commands', async () => {
@@ -413,7 +558,7 @@ describe('background document lifecycle', () => {
       const result = await work;
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('Expected timeout');
-      expect(result.error).toContain('超时');
+      expect(renderMessage(result.error)).toContain('超时');
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -424,7 +569,7 @@ describe('background document lifecycle', () => {
     const request = JSON.parse('{"type":"UNSUPPORTED_COMMAND"}') as RuntimeRequest;
     await expect(send(request)).resolves.toEqual({
       ok: false,
-      error: '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面',
+      error: { key: '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面' },
     });
   });
 

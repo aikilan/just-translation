@@ -1,3 +1,4 @@
+import { message, LocalizedError } from './i18n';
 import PQueue from 'p-queue';
 import { SETTINGS_STORAGE_KEY, mergeSettings, type TranslatorSettings } from './settings';
 
@@ -20,7 +21,7 @@ export function updateStoredSettings(
     const stored = await getSettings();
     // Compare the same canonical schema: Chrome message/storage dictionaries may reorder keys.
     if (JSON.stringify(stored) !== JSON.stringify(mergeSettings(next))) {
-      throw new Error('设置写入后回读不一致，请重新加载扩展后重试');
+      throw new LocalizedError(message('设置写入后回读不一致，请重新加载扩展后重试'));
     }
     return stored;
   });

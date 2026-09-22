@@ -1,3 +1,4 @@
+import { message, LocalizedError, toUiMessage, type UiMessage } from './i18n';
 import { buildProtocolRequest } from './protocol-request';
 import type { TranslationSegment, TranslationUnit } from './batching';
 import type { TranslationBatchResult } from './messages';
@@ -38,9 +39,9 @@ export interface TranslationRequestOptions {
   onRateLimit?: (delayMs: number) => void;
 }
 
-class ProviderHttpError extends Error {
+class ProviderHttpError extends LocalizedError {
   constructor(
-    message: string,
+    message: UiMessage,
     readonly retryAfterMs?: number,
     readonly code?: string,
   ) {
@@ -62,7 +63,7 @@ export async function translateFullDocument(
   const ids = new Set<string>();
   for (const unit of units) {
     if (!unit.id || ids.has(unit.id) || typeof unit.text !== 'string' || !unit.text.trim())
-      throw new Error('全文段落数据无效');
+      throw new LocalizedError(message('全文段落数据无效'));
     ids.add(unit.id);
   }
   if (units.length === 0) return {};
@@ -79,7 +80,7 @@ export async function translateFullDocument(
       true,
     );
     if (Object.keys(result).length !== units.length)
-      throw new Error('全文译文不完整，请重新全文翻译');
+      throw new LocalizedError(message('全文译文不完整，请重新全文翻译'));
     return result;
   };
   try {
@@ -87,10 +88,10 @@ export async function translateFullDocument(
   } catch (error) {
     if (signal?.aborted) throw getAbortError(signal);
     if (error instanceof StreamOutputLimitError)
-      throw new Error('全文输出被模型截断，请使用支持更长输出的模型后重试');
+      throw new LocalizedError(message('全文输出被模型截断，请使用支持更长输出的模型后重试'));
     if (error instanceof ProviderHttpError && error.code === 'context_length_exceeded')
-      throw new Error('全文超过当前模型上下文限制，请使用更长上下文的模型后重试');
-    throw new Error(getBoundedErrorMessage(error, settings.apiKey));
+      throw new LocalizedError(message('全文超过当前模型上下文限制，请使用更长上下文的模型后重试'));
+    throw new LocalizedError(getBoundedErrorMessage(error, settings.apiKey));
   }
 }
 
@@ -112,13 +113,13 @@ export async function translateBatch(
   const translations: Record<string, string> = {};
   const missing = () =>
     segments.filter((segment) => !Object.hasOwn(translations, segment.requestId));
-  let failure = 'AI 返回中缺少该段译文';
+  let failure = message('AI 返回中缺少该段译文');
   try {
     await translateBatchWithRetries(settings, segments, fetcher, signal, options, translations);
   } catch (error) {
     if (signal?.aborted) throw getAbortError(signal);
     failure = getBoundedErrorMessage(error, settings.apiKey);
-    if (Object.keys(translations).length === 0) throw new Error(failure);
+    if (Object.keys(translations).length === 0) throw new LocalizedError(failure);
     if (missing().length === 0) {
       // All independently validated items remain usable. Never log a raw provider body/key.
       console.warn('翻译段落已完整接收，但流式响应尾部异常');
@@ -208,9 +209,28 @@ async function translateBatchWithRetries(
   }
 }
 
-function getBoundedErrorMessage(error: unknown, apiKey: string): string {
-  const message = error instanceof Error ? error.message : 'AI 返回中缺少该段译文';
-  return (apiKey.trim() ? message.replaceAll(apiKey.trim(), '[REDACTED]') : message).slice(0, 300);
+function getBoundedErrorMessage(error: unknown, apiKey: string): UiMessage {
+  const value = toUiMessage(error);
+  // Redact every external detail while retaining the product message key for later rendering.
+  const redact = (item: UiMessage): UiMessage => {
+    const clean = (text: string) =>
+      (apiKey.trim() ? text.replaceAll(apiKey.trim(), '[REDACTED]') : text).slice(0, 240);
+    if ('text' in item) return { text: clean(item.text) };
+    return {
+      ...item,
+      ...(item.params
+        ? {
+            params: Object.fromEntries(
+              Object.entries(item.params).map(([key, v]) => [
+                key,
+                typeof v === 'object' ? redact(v) : typeof v === 'string' ? clean(v) : v,
+              ]),
+            ),
+          }
+        : {}),
+    };
+  };
+  return redact(value);
 }
 
 async function translateBatchOnce(
@@ -239,7 +259,9 @@ async function translateBatchOnce(
   const request = buildProtocolRequest(settings, system, content, fullDocument);
   const body = JSON.stringify(request.body);
   if (fullDocument && new TextEncoder().encode(body).byteLength > 1_048_576)
-    throw new Error('全文请求超过 1 MiB 上限，请缩小正文范围后重试；未发送或拆分正文');
+    throw new LocalizedError(
+      message('全文请求超过 1 MiB 上限，请缩小正文范围后重试；未发送或拆分正文'),
+    );
   const response = await fetcher(request.url, {
     method: 'POST',
     headers: request.headers,
@@ -271,7 +293,11 @@ async function translateBatchOnce(
       ? rawDetail.replaceAll(settings.apiKey.trim(), '[REDACTED]')
       : rawDetail;
     throw new ProviderHttpError(
-      `API 请求失败 (${response.status} ${response.statusText})${detail ? `: ${detail}` : ''}`,
+      message('API 请求失败 ({{p0}} {{p1}}){{p2}}', {
+        p0: response.status,
+        p1: response.statusText,
+        p2: detail ? `: ${detail}` : '',
+      }),
       retryAfterMs,
       code,
     );
@@ -285,10 +311,11 @@ async function translateBatchOnce(
     settings.protocol,
     (item) => {
       if (!expected.has(item.id) || seen.has(item.id))
-        throw new StreamProtocolError('AI 返回的段落 id 与请求不匹配');
+        throw new StreamProtocolError(message('AI 返回的段落 id 与请求不匹配'));
       seen.add(item.id);
       if (!item.text.trim() || !preservesProtectedMarkers(expected.get(item.id)!, item.text)) {
-        if (fullDocument) throw new StreamProtocolError('全文译文存在空段落或原样保留标记损坏');
+        if (fullDocument)
+          throw new StreamProtocolError(message('全文译文存在空段落或原样保留标记损坏'));
         return;
       }
       result[item.id] = item.text;
@@ -328,7 +355,9 @@ function sleepWithSignal(delayMs: number, signal?: AbortSignal): Promise<void> {
 }
 
 function getAbortError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error ? signal.reason : new Error('API 请求已取消');
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new LocalizedError(message('API 请求已取消'));
 }
 
 /** Combines user-owned translation guidance with non-editable transport rules. */
@@ -341,7 +370,7 @@ function buildSystemPrompt(
   const customInstruction = translationPrompt
     .trim()
     .replaceAll('{{targetLanguage}}', normalizedTargetLanguage);
-  if (!customInstruction) throw new Error('翻译 Prompt 不能为空');
+  if (!customInstruction) throw new LocalizedError(message('翻译 Prompt 不能为空'));
   return [
     `Target language: ${normalizedTargetLanguage}.`,
     `User-configured translation instructions: ${customInstruction}`,

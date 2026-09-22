@@ -6,6 +6,40 @@ describe('ProviderRequestQueue', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it('demotes stale visible attempts and promotes the latest viewport before admission', async () => {
+    const queue = new ProviderRequestQueue();
+    queue.defer('https://gateway.example.com', 100);
+    const order: string[] = [];
+    const signal = new AbortController().signal;
+    const old = queue.run(
+      'https://gateway.example.com',
+      'visible',
+      signal,
+      1000,
+      () => {
+        order.push('old');
+        return Promise.resolve();
+      },
+      'old',
+    );
+    const next = queue.run(
+      'https://gateway.example.com',
+      'background',
+      signal,
+      1000,
+      () => {
+        order.push('next');
+        return Promise.resolve();
+      },
+      'next',
+    );
+    queue.updatePriority('https://gateway.example.com', 'old', 'background');
+    queue.updatePriority('https://gateway.example.com', 'next', 'visible');
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.all([old, next]);
+    expect(order).toEqual(['next', 'old']);
+  });
+
   it('promotes an already admitted but unsent batch by ID, without preempting active HTTP', async () => {
     const queue = new ProviderRequestQueue();
     const signal = new AbortController().signal;
@@ -24,11 +58,11 @@ describe('ProviderRequestQueue', () => {
         `job-${index}`,
       ),
     );
-    queue.promote('https://gateway.example.com', 'job-7', 'visible');
-    queue.promote('https://gateway.example.com', 'missing-job', 'visible');
+    queue.updatePriority('https://gateway.example.com', 'job-7', 'visible');
+    queue.updatePriority('https://gateway.example.com', 'missing-job', 'visible');
     await vi.advanceTimersByTimeAsync(100);
     expect(order).toEqual([7, 0, 1, 2, 3, 4]);
-    queue.promote('https://gateway.example.com', 'job-7', 'visible');
+    queue.updatePriority('https://gateway.example.com', 'job-7', 'visible');
     await vi.advanceTimersByTimeAsync(1000);
     await Promise.all(work);
   });

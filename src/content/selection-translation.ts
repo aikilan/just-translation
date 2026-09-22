@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import { sendRuntimeMessage } from '../shared/chrome-api';
 import {
   getErrorMessage,
@@ -54,8 +55,9 @@ export class SelectionTranslationController {
         text: task.text,
       });
       if (this.active !== task) return;
-      if (!result.ok) throw new Error(result.error);
-      if (!isTranslationResult(result.data)) throw new Error('后台未返回有效译文，请重试');
+      if (!result.ok) throw new LocalizedError(result.error);
+      if (!isTranslationResult(result.data))
+        throw new LocalizedError(message('后台未返回有效译文，请重试'));
       task.view.success(result.data);
     } catch (error) {
       if (this.active === task) task.view.error(getErrorMessage(error));

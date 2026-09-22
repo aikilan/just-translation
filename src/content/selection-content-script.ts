@@ -1,3 +1,4 @@
+import { initializeContentLanguage } from './ui-language';
 import type { PageCommand } from '../shared/messages';
 import { SelectionTranslationController, captureSelectionAnchor } from './selection-translation';
 import type { SelectionAnchor } from './selection-translation-view';
@@ -19,3 +20,5 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, respond) =>
   if (anchor) controller.start(command.text, anchor);
   respond({ ok: Boolean(anchor) });
 });
+
+initializeContentLanguage();

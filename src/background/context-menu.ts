@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import type { PageCommand } from '../shared/messages';
 
 export const PAGE_TRANSLATION_MENU_ID = 'just-translate-page';
@@ -15,27 +16,27 @@ type TabMessageSender = (
   options: { frameId: number } | { documentId: string },
 ) => Promise<unknown>;
 
-const PAGE_TRANSLATION_MENU_PROPERTIES: Omit<chrome.contextMenus.CreateProperties, 'id'> = {
-  title: '立即翻译',
+const pageTranslationMenuProperties = (): Omit<chrome.contextMenus.CreateProperties, 'id'> => ({
+  title: t('立即翻译'),
   contexts: ['page'],
   documentUrlPatterns: ['http://*/*', 'https://*/*'],
-};
+});
 
-export const RETRY_FAILED_MENU_PROPERTIES: chrome.contextMenus.CreateProperties = {
+export const retryFailedMenuProperties = (): chrome.contextMenus.CreateProperties => ({
   id: RETRY_FAILED_MENU_ID,
-  ...PAGE_TRANSLATION_MENU_PROPERTIES,
-  title: '重试全部失败',
+  ...pageTranslationMenuProperties(),
+  title: t('重试全部失败'),
   contexts: ['all'],
-};
+});
 
 /** Native page/selection contexts are exclusive, so only the matching translation action appears. */
 export async function ensurePageTranslationMenu(api: ContextMenuApi): Promise<void> {
   await api.removeAll();
-  await api.create({ id: PAGE_TRANSLATION_MENU_ID, ...PAGE_TRANSLATION_MENU_PROPERTIES });
+  await api.create({ id: PAGE_TRANSLATION_MENU_ID, ...pageTranslationMenuProperties() });
   await api.create({
-    ...PAGE_TRANSLATION_MENU_PROPERTIES,
+    ...pageTranslationMenuProperties(),
     id: SELECTION_TRANSLATION_MENU_ID,
-    title: '翻译已选内容',
+    title: t('翻译已选内容'),
     contexts: ['selection'],
   });
 }

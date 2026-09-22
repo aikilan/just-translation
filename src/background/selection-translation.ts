@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import { configuredProviderOptions } from '../shared/providers';
 import { translateBatch } from '../shared/translation-client';
 import type { SelectionTranslationResult } from '../shared/messages';
@@ -37,8 +38,9 @@ export class SelectionTranslationService {
   ): Promise<SelectionTranslationResult> {
     const identity = getIdentity(sender);
     const key = requestKey(identity, requestId);
-    if (typeof text !== 'string' || !text.trim()) throw new Error('请选择需要翻译的文字');
-    if (this.identities.has(key)) throw new Error('划选翻译请求重复');
+    if (typeof text !== 'string' || !text.trim())
+      throw new LocalizedError(message('请选择需要翻译的文字'));
+    if (this.identities.has(key)) throw new LocalizedError(message('划选翻译请求重复'));
     // Register before any storage/document await: close and navigation must cancel preflight too.
     this.identities.set(key, identity);
     try {
@@ -51,16 +53,20 @@ export class SelectionTranslationService {
           Object.keys(validateTranslationProfile(profile)).length ||
           !settings.targetLanguage.trim()
         ) {
-          throw new Error('请先在扩展设置页完成 API 配置，再重试');
+          throw new LocalizedError(message('请先在扩展设置页完成 API 配置，再重试'));
         }
         const assertCurrent = async () => {
           const frame = await this.getFrame({ tabId: identity.tabId, frameId: identity.frameId });
           signal.throwIfAborted();
           if (frame?.documentId !== identity.documentId)
-            throw new Error('当前网页已变化，请重新划选翻译');
+            throw new LocalizedError(message('当前网页已变化，请重新划选翻译'));
         };
         await assertCurrent();
-        const config = { ...profile, ...configuredProviderOptions(profile), targetLanguage: settings.targetLanguage };
+        const config = {
+          ...profile,
+          ...configuredProviderOptions(profile),
+          targetLanguage: settings.targetLanguage,
+        };
         const result = await translateBatch(
           config,
           [{ requestId: 'selection', unitId: 'selection', partIndex: 0, text }],
@@ -86,7 +92,8 @@ export class SelectionTranslationService {
         );
         await assertCurrent();
         const translated = result.translations.selection;
-        if (!translated) throw new Error(result.failures.selection ?? 'AI 未返回译文，请重试');
+        if (!translated)
+          throw new LocalizedError(result.failures.selection ?? message('AI 未返回译文，请重试'));
         return { text: translated, targetLanguage: settings.targetLanguage };
       });
     } finally {
@@ -124,10 +131,11 @@ function getIdentity(sender: chrome.runtime.MessageSender): SelectionIdentity {
     !sender.url ||
     !/^https?:\/\//u.test(sender.url)
   )
-    throw new Error('无法确定划选文字所属网页');
+    throw new LocalizedError(message('无法确定划选文字所属网页'));
   return { tabId: sender.tab.id, frameId: sender.frameId, documentId: sender.documentId };
 }
 function requestKey(identity: SelectionIdentity, requestId: string): string {
-  if (typeof requestId !== 'string' || !requestId.trim()) throw new Error('划选翻译请求 ID 无效');
+  if (typeof requestId !== 'string' || !requestId.trim())
+    throw new LocalizedError(message('划选翻译请求 ID 无效'));
   return `${identity.tabId}:${identity.documentId}:selection:${requestId}`;
 }

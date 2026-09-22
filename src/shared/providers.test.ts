@@ -1,3 +1,4 @@
+import { renderMessage } from './i18n';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROVIDER_OPTIONS,
@@ -152,8 +153,8 @@ describe('provider and protocol contract', () => {
       apiKey: 'secret',
       thinkingEnabled: false,
     });
-    expect(typeof validateTranslationProfile(p).provider).toBe('string');
-    expect(typeof validateTranslationProfile(p).protocol).toBe('string');
+    expect(typeof renderMessage(validateTranslationProfile(p).provider)).toBe('string');
+    expect(typeof renderMessage(validateTranslationProfile(p).protocol)).toBe('string');
   });
 });
 
@@ -208,7 +209,7 @@ it('retains an actionable protocol mismatch validation message', () => {
     name: 'Test',
     apiUrl: 'https://relay.test/v1/messages',
   });
-  expect(errors.apiUrl).toContain('协议');
+  expect(renderMessage(errors.apiUrl)).toContain('协议');
 });
 
 it('uses model output caps instead of grouping an entire brand under one cap', () => {

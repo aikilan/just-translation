@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 type AbortableTask<T> = (signal: AbortSignal) => Promise<T>;
 
 /** Owns request cancellation and guarantees that completed or failed requests are released. */
@@ -20,7 +21,7 @@ export class AbortableRequestRegistry {
     // A zero timeout tracks queued work for cancellation only; HTTP timers start at dispatch.
     const timeoutId =
       timeoutMs > 0
-        ? setTimeout(() => controller.abort(new Error('API 请求超时')), timeoutMs)
+        ? setTimeout(() => controller.abort(new LocalizedError(message('API 请求超时'))), timeoutMs)
         : undefined;
 
     try {
@@ -38,7 +39,7 @@ export class AbortableRequestRegistry {
     const sessionControllers = this.controllers.get(key);
     if (!sessionControllers) return;
     for (const controller of sessionControllers) {
-      controller.abort(new Error('API 请求已取消'));
+      controller.abort(new LocalizedError(message('API 请求已取消')));
     }
     this.controllers.delete(key);
   }

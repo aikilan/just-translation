@@ -166,7 +166,7 @@ describe('settings workspace', () => {
     await click(view.container, 'AI 配置');
     vi.mocked<(request: RuntimeRequest) => Promise<unknown>>(
       chrome.runtime.sendMessage,
-    ).mockResolvedValueOnce({ ok: false, error: '保存失败' });
+    ).mockResolvedValueOnce({ ok: false, error: { text: '保存失败' } });
     await input(view.container, '单页翻译并发数', '1');
     expect(
       view.container.querySelector('section[aria-label="AI 配置"] [role="alert"]')?.textContent,

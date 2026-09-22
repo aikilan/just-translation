@@ -1,3 +1,4 @@
+import { message, LocalizedError } from './i18n';
 /** Provider selection is explicit; model names and gateway hostnames never select credentials. */
 export type ProviderId =
   | 'gemini'
@@ -446,7 +447,7 @@ export function normalizeEndpoint(input: string, protocol: ApiProtocol): string 
     : path.endsWith('/messages')
       ? 'anthropic'
       : undefined;
-  if (full && full !== protocol) throw new Error('API 地址与接入协议不匹配');
+  if (full && full !== protocol) throw new LocalizedError(message('API 地址与接入协议不匹配'));
   if (!full)
     url.pathname =
       protocol === 'openai'
@@ -469,14 +470,16 @@ export function resolveProviderOptions(
   fullDocument = false,
 ): ResolvedProviderOptions {
   if (!isProvider(options.provider) || !isProtocol(options.protocol))
-    throw new Error('请补全供应商与接入协议');
+    throw new LocalizedError(message('请补全供应商与接入协议'));
   if (
     !THINKING_CONTROLS.includes(options.thinkingControl) ||
     !allowedThinkingControls(options.protocol).includes(options.thinkingControl)
   )
-    throw new Error('思考控制方式与接入协议不匹配');
-  if (!REASONING_EFFORTS.includes(options.reasoningEffort)) throw new Error('思考强度无效');
-  if (typeof options.thinkingEnabled !== 'boolean') throw new Error('思考开关无效');
+    throw new LocalizedError(message('思考控制方式与接入协议不匹配'));
+  if (!REASONING_EFFORTS.includes(options.reasoningEffort))
+    throw new LocalizedError(message('思考强度无效'));
+  if (typeof options.thinkingEnabled !== 'boolean')
+    throw new LocalizedError(message('思考开关无效'));
   const model = getModelCapability(options.provider, options.model, options.protocol);
   if (
     options.maxOutputTokens !== null &&
@@ -484,9 +487,9 @@ export function resolveProviderOptions(
       options.maxOutputTokens < 1 ||
       options.maxOutputTokens > 1_000_000)
   )
-    throw new Error('输出上限必须为 1–1000000 的整数');
+    throw new LocalizedError(message('输出上限必须为 1–1000000 的整数'));
   if (model && options.maxOutputTokens !== null && options.maxOutputTokens > model.maxOutputTokens)
-    throw new Error('输出上限超过模型限制');
+    throw new LocalizedError(message('输出上限超过模型限制'));
   const maxOutputTokens =
     options.maxOutputTokens ??
     Math.min(fullDocument ? 65536 : 8192, model?.maxOutputTokens ?? 8192);
@@ -505,7 +508,7 @@ export function resolveProviderOptions(
         ? REASONING_EFFORTS.filter((e) => e !== 'default')
         : [];
   if (capability === 'always' && !options.thinkingEnabled)
-    throw new Error('此模型始终思考，无法关闭');
+    throw new LocalizedError(message('此模型始终思考，无法关闭'));
   if (capability === 'none' || control === 'default')
     return { control, capability, efforts, parameters: {}, maxOutputTokens };
   const parameters: Record<string, unknown> = {};
@@ -516,7 +519,7 @@ export function resolveProviderOptions(
     return { control, capability, efforts, parameters, maxOutputTokens };
   }
   if (options.reasoningEffort !== 'default' && !efforts.includes(options.reasoningEffort))
-    throw new Error('此模型或控制方式不支持所选思考强度');
+    throw new LocalizedError(message('此模型或控制方式不支持所选思考强度'));
   // A manual strategy overrides the catalog, including the vendor's default-on behavior.
   const effort =
     options.reasoningEffort === 'default'
@@ -534,7 +537,7 @@ export function resolveProviderOptions(
       options.thinkingBudgetTokens < 1024 ||
       options.thinkingBudgetTokens >= maxOutputTokens
     )
-      throw new Error('思考预算必须至少 1024 且小于输出上限');
+      throw new LocalizedError(message('思考预算必须至少 1024 且小于输出上限'));
     parameters.thinking = { type: 'enabled', budget_tokens: options.thinkingBudgetTokens };
   } else parameters.thinking = { type: control === 'anthropic-adaptive' ? 'adaptive' : 'enabled' };
   if (effort && control !== 'reasoning_effort') {
@@ -556,7 +559,7 @@ export type ConfiguredProviderOptions = ProviderOptions & {
 /** Narrows the storage/UI draft at the trusted request boundary. */
 export function configuredProviderOptions(options: ProviderOptions): ConfiguredProviderOptions {
   if (!isProvider(options.provider) || !isProtocol(options.protocol))
-    throw new Error('请补全供应商与接入协议');
+    throw new LocalizedError(message('请补全供应商与接入协议'));
   return { ...options, provider: options.provider, protocol: options.protocol };
 }
 /** Session data is a strict snapshot, never defaulted or upgraded while requests are in progress. */

@@ -72,7 +72,7 @@ it('cancels replaced requests and ignores their late results', async () => {
   );
 });
 it('shows failures and retries with a fresh request identity', async () => {
-  send.mockResolvedValueOnce({ ok: false, error: '请先在设置页完成 API 配置' });
+  send.mockResolvedValueOnce({ ok: false, error: { text: '请先在设置页完成 API 配置' } });
   controller.start('text', anchor);
   await vi.waitFor(() => expect(shadow().textContent).toContain('请先在设置页'));
   (shadow().querySelector('[data-action="retry"]') as HTMLButtonElement).click();

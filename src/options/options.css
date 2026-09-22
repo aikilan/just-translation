@@ -34,7 +34,7 @@ body {
   top: 0;
   height: 100vh;
   padding: 28px 16px 20px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   background: var(--surface-canvas);
 }
 .options-brand {
@@ -73,7 +73,7 @@ body {
   border: 0;
   border-radius: var(--radius);
   color: var(--text-muted);
-  text-align: left;
+  text-align: start;
 }
 .options-nav button:hover {
   background: var(--surface-soft);
@@ -222,11 +222,11 @@ h2 {
   position: relative;
 }
 .secret-input input {
-  padding-right: 40px;
+  padding-inline-end: 40px;
 }
 .secret-input .icon-button {
   position: absolute;
-  right: 3px;
+  inset-inline-end: 3px;
   top: 3px;
 }
 .prompt-details {
@@ -241,7 +241,7 @@ h2 {
   color: var(--text-label);
 }
 .prompt-details summary > span {
-  margin-left: 12px;
+  margin-inline-start: 12px;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-muted);
@@ -303,13 +303,13 @@ h2 {
 }
 .connection-result .test-translation {
   padding: 12px 14px;
-  border-left: 2px solid var(--success);
+  border-inline-start: 2px solid var(--success);
   background: var(--surface-soft);
   color: var(--text-strong);
   font-size: 14px;
 }
 .latency {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-variant-numeric: tabular-nums;
 }
 .ai-actions {
@@ -352,7 +352,7 @@ h2 {
 }
 .configuration-footer > small {
   width: 100%;
-  text-align: right;
+  text-align: end;
 }
 .danger-text {
   color: var(--danger);
@@ -659,11 +659,12 @@ dialog p {
     position: static;
     height: auto;
     padding: 16px 20px 0;
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid var(--border);
   }
   .options-brand small,
-  .sidebar-footer {
+  .sidebar-footer > span,
+  .sidebar-footer > small {
     display: none;
   }
   .options-brand {
@@ -739,7 +740,7 @@ dialog p {
     gap: 12px;
   }
   .preferences-list .setting-control {
-    margin-left: auto;
+    margin-inline-start: auto;
   }
   .reading-preview-heading {
     align-items: flex-start;
@@ -753,10 +754,48 @@ dialog p {
     min-width: 100%;
   }
   .configuration-footer > small {
-    text-align: left;
+    text-align: start;
   }
   .prompt-details summary > span {
     display: block;
     margin: 8px 0 0 14px;
+  }
+}
+
+.interface-language {
+  display: grid;
+  gap: 8px;
+  margin-block-end: 16px;
+  min-width: 0;
+}
+.interface-language select {
+  width: 100%;
+  min-width: 0;
+}
+.options-brand span,
+.options-nav button,
+.sidebar-footer,
+.workspace-header {
+  overflow-wrap: anywhere;
+}
+[dir='rtl'] .sidebar-footer {
+  text-align: start;
+}
+
+@media (max-width: 760px) {
+  .sidebar-footer {
+    display: block;
+    padding-block: 0 12px;
+  }
+  .interface-language {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    margin: 0;
+  }
+  .interface-language .save-feedback {
+    grid-column: 1 / -1;
+  }
+  .options-nav button {
+    white-space: normal;
   }
 }

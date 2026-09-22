@@ -1,0 +1,10 @@
+import zh from './locales/zh-CN.ts';
+import en from './locales/en.ts';
+import fr from './locales/fr.ts';
+import de from './locales/de.ts';
+import ar from './locales/ar.ts';
+export const UI_LOCALES = ['zh-CN', 'en', 'fr', 'de', 'ar'] as const;
+export type UiLocale = (typeof UI_LOCALES)[number];
+export type UiLanguage = 'system' | UiLocale;
+export const resources = { 'zh-CN': zh, en, fr, de, ar };
+export type MessageKey = keyof typeof zh;

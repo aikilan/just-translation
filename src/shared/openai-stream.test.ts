@@ -129,7 +129,7 @@ describe('incremental Chat Completions translation', () => {
     timeout.abort(new Error('API 请求超时'));
     const output = await result;
     expect(output.translations).toEqual({ 'a:0': '甲' });
-    expect(output.failures['b:0']).toBe('API 请求超时');
+    expect(output.failures['b:0']).toEqual({ text: 'API 请求超时' });
     expect(stream.cancel).toHaveBeenCalledOnce();
   });
 

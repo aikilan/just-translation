@@ -32,7 +32,7 @@ afterEach(() => {
 function batchResult(request: Batch, fails: (segment: Batch['segments'][number]) => boolean) {
   const data: TranslationBatchResult = { translations: {}, failures: {} };
   for (const segment of request.segments) {
-    if (fails(segment)) data.failures[segment.requestId] = 'Temporary provider failure';
+    if (fails(segment)) data.failures[segment.requestId] = { text: 'Temporary provider failure' };
     else data.translations[segment.requestId] = `译文 ${segment.partIndex}`;
   }
   return { ok: true, data } satisfies Result<TranslationBatchResult>;
@@ -173,7 +173,8 @@ it('does not start retry sessions when stopped during settings lookup', async ()
   let holdSettings = false;
   let release!: (result: Result<unknown>) => void;
   const send = installRuntime((request) => {
-    if (request.type === 'TRANSLATE_BATCH') return Promise.resolve({ ok: false, error: 'Failed' });
+    if (request.type === 'TRANSLATE_BATCH')
+      return Promise.resolve({ ok: false, error: { text: 'Failed' } });
     if (holdSettings && request.type === 'GET_PUBLIC_SETTINGS')
       return new Promise((resolve) => {
         release = resolve;

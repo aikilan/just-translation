@@ -1,3 +1,4 @@
+import { renderMessage } from './i18n';
 import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -150,7 +151,7 @@ describe('translateBatch', () => {
       ),
     ).resolves.toMatchObject({
       translations: { 'first:0': '第一段' },
-      failures: { 'second:0': 'AI 返回中缺少该段译文' },
+      failures: { 'second:0': { key: 'AI 返回中缺少该段译文' } },
     });
     expect(scheduleAttempt).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -399,6 +400,6 @@ describe('translateBatch', () => {
     );
 
     expect(result.translations).toEqual({ 'first:0': '第一段' });
-    expect(typeof result.failures['second:0']).toBe('string');
+    expect(typeof renderMessage(result.failures['second:0'])).toBe('string');
   });
 });

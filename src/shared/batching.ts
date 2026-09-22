@@ -1,3 +1,4 @@
+import { message, LocalizedError } from './i18n';
 import { PROTECTED_MARKER_PATTERN } from './protected-markers';
 
 export interface TranslationUnit {
@@ -33,7 +34,7 @@ export function createTranslationBatches(
 
   for (const unit of units) {
     if (seenIds.has(unit.id)) {
-      throw new Error(`Duplicate translation unit id: ${unit.id}`);
+      throw new LocalizedError(`Duplicate translation unit id: ${unit.id}`);
     }
     seenIds.add(unit.id);
 
@@ -78,7 +79,7 @@ export function mergeTranslatedSegments(
   for (const segment of segments) {
     const translatedText = translations[segment.requestId];
     if (typeof translatedText !== 'string') {
-      throw new Error(`Missing translated segment: ${segment.requestId}`);
+      throw new LocalizedError(`Missing translated segment: ${segment.requestId}`);
     }
     result.set(segment.unitId, `${result.get(segment.unitId) ?? ''}${translatedText}`);
   }
@@ -126,7 +127,7 @@ function getUnicodeSafeCutIndex(value: string, maximumCodeUnits: number): number
   let cutIndex = Math.min(maximumCodeUnits, value.length);
   for (const marker of value.matchAll(PROTECTED_MARKER_PATTERN)) {
     if (marker.index < cutIndex && marker.index + marker[0].length > cutIndex) {
-      if (marker.index === 0) throw new Error('批次长度不足以容纳原样保留标记');
+      if (marker.index === 0) throw new LocalizedError(message('批次长度不足以容纳原样保留标记'));
       cutIndex = marker.index;
       break;
     }
@@ -144,9 +145,9 @@ function getUnicodeSafeCutIndex(value: string, maximumCodeUnits: number): number
 
 function assertLimits(limits: BatchLimits): void {
   if (!Number.isInteger(limits.maxCharacters) || limits.maxCharacters < 1) {
-    throw new Error('maxCharacters must be a positive integer');
+    throw new LocalizedError('maxCharacters must be a positive integer');
   }
   if (!Number.isInteger(limits.maxItems) || limits.maxItems < 1) {
-    throw new Error('maxItems must be a positive integer');
+    throw new LocalizedError('maxItems must be a positive integer');
   }
 }

@@ -1,0 +1,39 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./src/shared/native-locales" without a file extension (vite.config.ts:9:38). Add the file extension
+  - import "./locales" without a file extension (src/shared/native-locales.ts:1:27). Add the file extension
+  - import "./locales/zh-CN" without a file extension (src/shared/locales.ts:1:16). Add the file extension
+  - import "./locales/en" without a file extension (src/shared/locales.ts:2:16). Add the file extension
+  - import "./locales/fr" without a file extension (src/shared/locales.ts:3:16). Add the file extension
+  - import "./locales/de" without a file extension (src/shared/locales.ts:4:16). Add the file extension
+  - import "./locales/ar" without a file extension (src/shared/locales.ts:5:16). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/ui-language.test.ts (3 tests | 1 failed) 35ms
+   × restores automatic text direction when an Arabic UI placeholder becomes an English translation 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/ui-language.test.ts > restores automatic text direction when an Arabic UI placeholder becomes an English translation
+AssertionError: expected 'rtl' to be 'auto' // Object.is equality
+
+Expected: "auto"
+Received: "rtl"
+
+ ❯ src/content/ui-language.test.ts:23:26
+     21|   renderTranslationPending(source, 'one');
+     22|   const translated = renderTranslation(source, 'English translation');
+     23|   expect(translated.dir).toBe('auto');
+       |                          ^
+     24|   expect(translated.hasAttribute('lang')).toBe(false);
+     25| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  20:19:53
+   Duration  399ms (transform 71ms, setup 59ms, import 31ms, tests 35ms, environment 208ms)
+

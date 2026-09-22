@@ -1,0 +1,39 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./src/shared/native-locales" without a file extension (vite.config.ts:9:38). Add the file extension
+  - import "./locales" without a file extension (src/shared/native-locales.ts:1:27). Add the file extension
+  - import "./locales/zh-CN" without a file extension (src/shared/locales.ts:1:16). Add the file extension
+  - import "./locales/en" without a file extension (src/shared/locales.ts:2:16). Add the file extension
+  - import "./locales/fr" without a file extension (src/shared/locales.ts:3:16). Add the file extension
+  - import "./locales/de" without a file extension (src/shared/locales.ts:4:16). Add the file extension
+  - import "./locales/ar" without a file extension (src/shared/locales.ts:5:16). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/i18n.test.ts (13 tests | 1 failed) 26ms
+     × isolates external details embedded in Arabic product messages 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/shared/i18n.test.ts > UI localization > isolates external details embedded in Arabic product messages
+AssertionError: expected 'خطأ في تدفق API: HTTP 429: rate limit' to contain '\u2068HTTP 429: rate limit\u2069'
+
+Expected: "⁨HTTP 429: rate limit⁩"
+Received: "خطأ في تدفق API: HTTP 429: rate limit"
+
+ ❯ src/shared/i18n.test.ts:79:22
+     77|     setUiLanguage('ar');
+     78|     const rendered = renderMessage(message('API 流式返回错误：{{p0}}', { p0: …
+     79|     expect(rendered).toContain('\u2068HTTP 429: rate limit\u2069');
+       |                      ^
+     80|   });
+     81| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  20:25:56
+   Duration  163ms (transform 56ms, setup 60ms, import 13ms, tests 26ms, environment 0ms)
+

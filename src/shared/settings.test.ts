@@ -1,3 +1,4 @@
+import { renderMessage } from './i18n';
 import { TEST_PROFILE } from '../test-utils/provider';
 import { describe, expect, it } from 'vitest';
 
@@ -58,16 +59,18 @@ describe('validateSettings', () => {
     });
 
     expect(result.valid).toBe(false);
-    expect(typeof result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl).toBe(
-      'string',
-    );
-    expect(typeof result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.model).toBe(
-      'string',
-    );
     expect(
-      typeof result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
+      typeof renderMessage(result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl),
     ).toBe('string');
-    expect(typeof result.errors.targetLanguage).toBe('string');
+    expect(
+      typeof renderMessage(result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.model),
+    ).toBe('string');
+    expect(
+      typeof renderMessage(
+        result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
+      ),
+    ).toBe('string');
+    expect(typeof renderMessage(result.errors.targetLanguage)).toBe('string');
   });
 
   it('rejects a translation prompt that would be repeated into oversized micro-batch requests', () => {
@@ -83,23 +86,27 @@ describe('validateSettings', () => {
     });
 
     expect(
-      result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
+      renderMessage(
+        result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
+      ),
     ).toContain(String(MAX_TRANSLATION_PROMPT_CHARACTERS));
   });
 
   it('rejects API keys over remote HTTP while allowing a loopback development API', () => {
     expect(
-      validateSettings({
-        ...DEFAULT_SETTINGS,
-        profiles: [
-          {
-            ...TEST_PROFILE,
-            apiUrl: 'http://gateway.example.com/v1',
-            apiKey: 'secret',
-            model: 'model',
-          },
-        ],
-      }).errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl,
+      renderMessage(
+        validateSettings({
+          ...DEFAULT_SETTINGS,
+          profiles: [
+            {
+              ...TEST_PROFILE,
+              apiUrl: 'http://gateway.example.com/v1',
+              apiKey: 'secret',
+              model: 'model',
+            },
+          ],
+        }).errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl,
+      ),
     ).toMatch(/HTTPS/u);
 
     expect(
@@ -176,7 +183,8 @@ describe('validateSettings', () => {
       ...DEFAULT_SETTINGS,
       profiles: [
         {
-          provider: 'custom', protocol:'openai',
+          provider: 'custom',
+          protocol: 'openai',
           id: 'stored-profile',
           name: '已有配置',
           apiUrl: 'https://gateway.example.com/v1',

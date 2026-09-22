@@ -28,7 +28,7 @@ section {
     'PingFang SC',
     'Microsoft YaHei',
     sans-serif;
-  text-align: left;
+  text-align: start;
   overflow: hidden;
   display: flex;
   flex-direction: column;

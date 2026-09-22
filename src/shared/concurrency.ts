@@ -1,3 +1,4 @@
+import { message, LocalizedError } from './i18n';
 /** Runs work through a fixed-size pool while preserving input order in the result. */
 export async function runWithConcurrency<TItem, TResult>(
   items: readonly TItem[],
@@ -5,7 +6,7 @@ export async function runWithConcurrency<TItem, TResult>(
   worker: (item: TItem, index: number) => Promise<TResult>,
 ): Promise<TResult[]> {
   if (!Number.isInteger(concurrency) || concurrency < 1) {
-    throw new Error('并发数必须是大于等于 1 的整数');
+    throw new LocalizedError(message('并发数必须是大于等于 1 的整数'));
   }
 
   const results = new Array<TResult>(items.length);

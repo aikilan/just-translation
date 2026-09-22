@@ -87,7 +87,10 @@ describe('configurable automatic retry budget', () => {
       if (kind === 'missing')
         expect(result).toMatchObject({
           translations: {},
-          failures: { 'a:0': 'AI 返回中缺少该段译文', 'b:0': 'AI 返回中缺少该段译文' },
+          failures: {
+            'a:0': { key: 'AI 返回中缺少该段译文' },
+            'b:0': { key: 'AI 返回中缺少该段译文' },
+          },
         });
       else expect(result).toBeInstanceOf(Error);
       expect(fetcher).toHaveBeenCalledTimes(2);

@@ -18,6 +18,7 @@ beforeEach(() => {
   document.body.innerHTML = '<main><p>A readable article paragraph.</p></main>';
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   settings = {
+    uiLanguage: 'system',
     configured: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
     activeProfileId: 'p',
@@ -70,7 +71,7 @@ beforeEach(() => {
     if (request.type === 'TRANSLATE_FULL_DOCUMENT') {
       await delay;
       return fail
-        ? { ok: false, error: 'Failed' }
+        ? { ok: false, error: { text: 'Failed' } }
         : {
             ok: true,
             data: Object.fromEntries(request.units.map((unit) => [unit.id, translated(unit.text)])),

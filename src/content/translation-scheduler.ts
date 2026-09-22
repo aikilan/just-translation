@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import { DEFAULT_SETTINGS } from '../shared/settings';
 import { createTranslationBatches, type TranslationSegment } from '../shared/batching';
 import type { TranslationPriority } from '../shared/messages';
@@ -28,6 +29,9 @@ export interface TranslationSchedulerOptions {
   /** Includes visible candidate preflight and DOM commits outside the worker pool. */
   canDispatchBackground?: () => boolean;
 }
+
+/** Internal control flow: the backend returned a batch before its first HTTP submission. */
+export class TranslationBatchDeferredError extends Error {}
 
 interface PendingSegment {
   segment: TranslationSegment;
@@ -61,8 +65,16 @@ export class TranslationScheduler {
     resolve: () => void;
     reject: (error: unknown) => void;
   }>();
-  private activeCount = 0;
-  private activeVisibleCount = 0;
+  private readonly active = new Map<ScheduledTranslationBatch, PendingSegment[]>();
+
+  private get activeCount(): number {
+    return this.active.size;
+  }
+  private get activeVisibleCount(): number {
+    return [...this.active.values()].filter((items) =>
+      items.some((item) => item.priority === 'visible'),
+    ).length;
+  }
   private refreshing = false;
   private refreshAgain = false;
   private stopped = false;
@@ -77,8 +89,12 @@ export class TranslationScheduler {
   ) {
     this.concurrency = options.concurrency ?? DEFAULT_SETTINGS.translationConcurrency;
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) {
-      throw new Error('翻译调度并发数必须是正整数');
+      throw new LocalizedError(message('翻译调度并发数必须是正整数'));
     }
+  }
+
+  get hasQueuedVisibleWork(): boolean {
+    return this.pending.some((item) => item.priority === 'visible');
   }
 
   get hasQueuedWork(): boolean {
@@ -129,12 +145,12 @@ export class TranslationScheduler {
     this.pump();
   }
 
-  /** Replaces only queued priorities and reading order; running requests keep their identity. */
+  /** Updates queued order and active bookkeeping; deferred segments retain the latest rank. */
   updatePriorities(
     units: readonly Pick<ScheduledTranslationUnit, 'id' | 'priority' | 'order'>[],
   ): void {
     const byId = new Map(units.map((unit) => [unit.id, unit]));
-    for (const item of this.pending) {
+    for (const item of [...this.pending, ...[...this.active.values()].flat()]) {
       const unit = byId.get(item.segment.unitId);
       if (!unit) continue;
       item.priority = unit.priority;
@@ -161,8 +177,9 @@ export class TranslationScheduler {
     return new Promise((resolve, reject) => this.idleWaiters.add({ resolve, reject }));
   }
 
-  /** Drops queued work. The controller separately aborts requests already in flight. */
-  stop(): void {
+  /** Drops queued work and reports an optional failure; the controller owns HTTP cancellation. */
+  stop(error?: unknown): void {
+    this.firstError ??= error;
     this.stopped = true;
     this.pending.length = 0;
     clearTimeout(this.flushTimer);
@@ -213,15 +230,18 @@ export class TranslationScheduler {
       }
       const batch = this.takeNextBatch();
       this.dispatched = true;
-      this.activeCount += 1;
-      if (batch.priority === 'visible') this.activeVisibleCount += 1;
       void this.worker(batch)
         .catch((error: unknown) => {
-          this.firstError ??= error;
+          if (error instanceof TranslationBatchDeferredError) {
+            // Reuse the exact segments and their latest priority; deferral is not a translation failure.
+            if (!this.stopped) {
+              this.pending.push(...this.active.get(batch)!);
+              this.sortPending();
+            }
+          } else this.firstError ??= error;
         })
         .finally(() => {
-          this.activeCount -= 1;
-          if (batch.priority === 'visible') this.activeVisibleCount -= 1;
+          this.active.delete(batch);
           this.pump();
           this.flushIdleWaiters();
         });
@@ -248,6 +268,7 @@ export class TranslationScheduler {
     const priority = this.pending[0].priority;
     const profile = TRANSLATION_BATCH_PROFILES[priority];
     const segments: TranslationSegment[] = [];
+    const items: PendingSegment[] = [];
     let characters = 0;
     while (this.pending.length > 0 && segments.length < profile.maxItems) {
       const item = this.pending[0];
@@ -255,10 +276,13 @@ export class TranslationScheduler {
       const nextCharacters = characters + item.segment.text.length;
       if (segments.length > 0 && nextCharacters > profile.maxCharacters) break;
       segments.push(item.segment);
+      items.push(item);
       characters = nextCharacters;
       this.pending.splice(0, 1);
     }
-    return { priority, segments };
+    const batch = { priority, segments };
+    this.active.set(batch, items);
+    return batch;
   }
 
   private sortPending(): void {
@@ -282,5 +306,5 @@ export class TranslationScheduler {
 }
 
 function toError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
+  return value instanceof Error ? value : new LocalizedError(String(value));
 }

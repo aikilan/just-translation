@@ -1,3 +1,4 @@
+import { message, LocalizedError, type UiMessage } from '../shared/i18n';
 import { isDocumentTitle } from './document-title';
 import { getLabelSource } from './label-presentation';
 import { isSourcePresentationMutation, synchronizeSourcePresentation } from './source-presentation';
@@ -18,6 +19,7 @@ import {
   type Result,
   type RuntimeRequest,
   type TranslationBatchResult,
+  type TranslationBatchDispatchResult,
   type TranslationCacheWrite,
   type TranslationCandidate,
   type TranslationPriority,
@@ -46,11 +48,13 @@ import {
 import {
   TRANSLATION_BATCH_PROFILES,
   TranslationScheduler,
+  TranslationBatchDeferredError,
   type ScheduledTranslationBatch,
   type ScheduledTranslationUnit,
 } from './translation-scheduler';
 
 const DYNAMIC_CONTENT_DEBOUNCE_MS = 800;
+const VIEWPORT_DEBOUNCE_MS = 150;
 const MAX_STALE_RETRANSLATION_PASSES = 3;
 const PREFLIGHT_MESSAGE_TIMEOUT_MS = 5_000;
 const CANDIDATE_CHUNK_MAX_ITEMS = 24;
@@ -68,7 +72,7 @@ const DOCUMENT_POSITION_FOLLOWING = 4;
 
 type TranslationRecordPhase = 'queued' | 'pending' | 'translated' | 'error';
 type TranslationRecordOutcome =
-  { kind: 'translated'; translatedText: string } | { kind: 'error'; error: string };
+  { kind: 'translated'; translatedText: string } | { kind: 'error'; error: UiMessage };
 
 interface TranslationRecord {
   id: string;
@@ -76,7 +80,7 @@ interface TranslationRecord {
   sourceText: string;
   phase: TranslationRecordPhase;
   generation: number;
-  error?: string;
+  error?: UiMessage;
   outcome?: TranslationRecordOutcome;
   outcomeAt?: number;
   checkpoint?: TranslationCheckpoint;
@@ -120,7 +124,7 @@ interface ActiveTranslationGroup {
 
 interface TranslationPassResult {
   hasStaleSource: boolean;
-  lastError?: string;
+  lastError?: UiMessage;
 }
 
 interface OrderedRenderSlot {
@@ -149,16 +153,22 @@ interface ActiveTranslationPass {
   expectedSegmentsByGroup: Map<string, TranslationSegment[]>;
   groupsBySourceText: Map<string, CandidateGroup>;
   completedTranslationsBySourceText: Map<string, string>;
-  failedErrorsBySourceText: Map<string, string>;
+  failedErrorsBySourceText: Map<string, UiMessage>;
   skippedSourceTexts: Set<string>;
   pendingDiscoveries: Set<Promise<void>>;
   deferredGroups: Set<CandidateGroup>;
   viewportDirty: boolean;
+  viewportReady: boolean;
+  viewportRevision: number;
+  priorityUpdateRevision: number;
+  viewportSettled?: Promise<void>;
+  viewportRefreshWork?: Promise<void>;
+  settleViewport?: () => void;
   prioritiesDirty: boolean;
   viewportDiscoveryComplete: () => boolean;
   roots: readonly HTMLElement[];
   markStale: () => void;
-  markError: (error: string) => void;
+  markError: (error: UiMessage) => void;
   priorityObserver?: {
     observe: (groups: readonly CandidateGroup[]) => void;
     disconnect: () => void;
@@ -260,13 +270,16 @@ export class TranslationController {
       publish,
     });
     try {
-      return await sendRuntimeMessage<TranslationBatchResult>({
+      const response = await sendRuntimeMessage<TranslationBatchDispatchResult>({
         type: 'TRANSLATE_BATCH',
         batchId,
         sessionId,
         priority,
         segments,
       });
+      if (!response.ok) return response;
+      if ('deferred' in response.data) throw new TranslationBatchDeferredError();
+      return { ok: true, data: response.data };
     } finally {
       this.batchReceivers.delete(batchId);
     }
@@ -352,7 +365,7 @@ export class TranslationController {
         // Preflight exclusions are extension feedback, never failed paragraphs in the host page.
         this.stop();
         this.status.phase = 'error';
-        this.status.error = '当前站点已被排除';
+        this.status.error = message('当前站点已被排除');
         return;
       }
       if (this.hasDifferentContext(settings)) {
@@ -382,7 +395,7 @@ export class TranslationController {
       setDocumentDisplayMode(settings.displayMode);
       if (this.dynamicContentEnabled) this.observeDynamicContent();
       let hasStaleSource = false;
-      let lastError: string | undefined;
+      let lastError: UiMessage | undefined;
       for (let pass = 0; pass < MAX_STALE_RETRANSLATION_PASSES; pass += 1) {
         const result = await this.translateUnprocessedElements(
           settings,
@@ -400,7 +413,7 @@ export class TranslationController {
       if (hasStaleSource) {
         this.syncStatusCounts();
         this.status.phase = 'error';
-        this.status.error = '页面内容持续变化，已暂停以避免反复请求';
+        this.status.error = message('页面内容持续变化，已暂停以避免反复请求');
         return;
       }
       this.settleStatus(lastError);
@@ -440,7 +453,7 @@ export class TranslationController {
     if (this.status.mode === 'full-document') this.status.stage = 'incremental';
     this.status.error = undefined;
     this.syncStatusCounts();
-    let error: string | undefined;
+    let error: UiMessage | undefined;
     try {
       const settings = await this.readValidSettings();
       if (this.bulkRetry !== operation) return;
@@ -499,11 +512,11 @@ export class TranslationController {
       const settings = await this.readValidSettings();
       if (!this.isCurrentRetry(record, sessionId, generation)) return;
       if (isUrlExcluded(location.href, settings.excludedSites)) {
-        throw new Error('当前站点已被排除');
+        throw new LocalizedError(message('当前站点已被排除'));
       }
       if (this.hasDifferentContext(settings)) {
         this.status.needsRestart = true;
-        throw new Error('翻译设置已改变，请在插件中用新设置重新翻译');
+        throw new LocalizedError(message('翻译设置已改变，请在插件中用新设置重新翻译'));
       }
       const context = await this.beginTranslationSession(sessionId, settings.activeProfileId);
       sessionStarted = true;
@@ -515,7 +528,7 @@ export class TranslationController {
         })
       ) {
         this.status.needsRestart = true;
-        throw new Error('翻译设置已改变，请在插件中用新设置重新翻译');
+        throw new LocalizedError(message('翻译设置已改变，请在插件中用新设置重新翻译'));
       }
       this.status.context = context;
       const configurationId = this.sessionConfigurations.get(sessionId)!;
@@ -556,7 +569,7 @@ export class TranslationController {
         return;
       }
       if (!resolution.missIds.includes(record.id)) {
-        throw new Error('候选文本解析结果不完整');
+        throw new LocalizedError(message('候选文本解析结果不完整'));
       }
 
       const prepared = createTranslationBatches([{ id: record.id, text: record.sourceText }], {
@@ -586,7 +599,7 @@ export class TranslationController {
           const request = () => {
             // Check again when a queued batch is admitted, including after stop/restore.
             if (!this.isCurrentRetry(record, sessionId, generation)) {
-              throw new Error('翻译已停止');
+              throw new LocalizedError(message('翻译已停止'));
             }
             return this.sendBatch(sessionId, 'visible', batch, publish);
           };
@@ -600,10 +613,10 @@ export class TranslationController {
       if (!this.isCurrentRetry(record, sessionId, generation)) return;
 
       for (const response of responses) {
-        if (!response.ok) throw new Error(response.error);
+        if (!response.ok) throw new LocalizedError(response.error);
         Object.assign(translations, response.data.translations);
         const firstFailure = Object.values(response.data.failures)[0];
-        if (firstFailure) throw new Error(firstFailure);
+        if (firstFailure) throw new LocalizedError(firstFailure);
       }
       if (getElementSourceText(source) !== record.sourceText) {
         this.discardRecord(record);
@@ -614,7 +627,8 @@ export class TranslationController {
       const translatedText = mergeTranslatedSegments(prepared.segments, translations).get(
         record.id,
       );
-      if (translatedText === undefined) throw new Error('AI 返回中缺少当前段落译文');
+      if (translatedText === undefined)
+        throw new LocalizedError(message('AI 返回中缺少当前段落译文'));
       renderTranslation(source, translatedText);
       record.phase = 'translated';
       this.metrics.markFirstTranslation();
@@ -729,10 +743,10 @@ export class TranslationController {
     const settledGroupIds = new Set<string>();
     const failedGroupIds = new Set<string>();
     const completedTranslationsBySourceText = new Map<string, string>();
-    const failedErrorsBySourceText = new Map<string, string>();
+    const failedErrorsBySourceText = new Map<string, UiMessage>();
     const skippedSourceTexts = new Set<string>();
     let hasStaleSource = false;
-    let lastError: string | undefined;
+    let lastError: UiMessage | undefined;
 
     const scheduler = new TranslationScheduler(
       async (batch: ScheduledTranslationBatch) => {
@@ -792,7 +806,7 @@ export class TranslationController {
         try {
           const response = await this.sendBatch(sessionId, batch.priority, activeBatch, publish);
           if (this.mainSessionId !== sessionId) return;
-          if (!response.ok) throw new Error(response.error);
+          if (!response.ok) throw new LocalizedError(response.error);
           publish(response.data.translations);
           const failedRequestIds = new Set(Object.keys(response.data.failures));
           for (const groupId of new Set(
@@ -807,7 +821,7 @@ export class TranslationController {
             );
             const error = failedSegment
               ? response.data.failures[failedSegment.requestId]
-              : 'AI 返回中缺少该段译文';
+              : message('AI 返回中缺少该段译文');
             lastError = error;
             failedGroupIds.add(groupId);
             settledGroupIds.add(groupId);
@@ -833,6 +847,7 @@ export class TranslationController {
           );
           if (entries.length > 0) this.storeCacheEntries(sessionId, entries);
         } catch (error) {
+          if (error instanceof TranslationBatchDeferredError) throw error;
           if (this.mainSessionId !== sessionId) return;
           if (!activeBatch.some((segment) => activeGroups.has(segment.unitId))) return;
           lastError = getErrorMessage(error);
@@ -858,11 +873,13 @@ export class TranslationController {
         // Snapshot the saved limit for this pass; active requests are never interrupted by edits.
         concurrency: settings.translationConcurrency,
         beforeDispatch: async () => {
-          // Candidate lookup yields to the page too: recheck a scroll before dispatching its result.
-          do {
-            await this.refreshViewport(activePass);
-            await this.resolveDeferredGroups(activePass);
-          } while (this.mainSessionId === sessionId && activePass.viewportDirty);
+          // An asynchronous viewport refresh must not hold old-order dispatch behind a cache lookup.
+          if (activePass.viewportRefreshWork) return;
+          // Scrolls only invalidate a snapshot. During debounce, keep using the committed order.
+          await this.refreshViewport(activePass);
+          await this.resolveDeferredGroups(activePass);
+          this.updateBackgroundBatches(activePass);
+          if (!activePass.viewportDirty) activePass.settleViewport?.();
         },
         canDispatchBackground: () => this.canDispatchBackground(activePass),
       },
@@ -885,6 +902,9 @@ export class TranslationController {
       pendingDiscoveries,
       deferredGroups: new Set(),
       viewportDirty: false,
+      viewportReady: false,
+      viewportRevision: 0,
+      priorityUpdateRevision: 0,
       prioritiesDirty: true,
       viewportDiscoveryComplete: prepared.viewportDiscoveryComplete,
       roots: prepared.roots,
@@ -930,6 +950,8 @@ export class TranslationController {
       if (this.mainSessionId !== sessionId) return { hasStaleSource: false };
       // Discovery can enqueue work while the scheduler is otherwise idle.
       do {
+        // An idle scheduler may still have a debounced viewport refresh pending; avoid a microtask spin.
+        await activePass.viewportSettled;
         await Promise.allSettled([...pendingDiscoveries]);
         await scheduler.waitForIdle();
         await renderQueue.tasks.waitForIdle();
@@ -1103,7 +1125,7 @@ export class TranslationController {
       // Guard synchronous source edits without layout reads between this slice's DOM writes.
       const rawSourceText = getOriginalSourceText(record.element);
       let commit: (() => HTMLElement) | undefined;
-      let renderError: string | undefined;
+      let renderError: UiMessage | undefined;
       if (current && outcome.kind === 'translated') {
         try {
           commit = prepareTranslationRender(record.element, outcome.translatedText);
@@ -1129,7 +1151,7 @@ export class TranslationController {
         } else {
           this.markRecordError(
             record,
-            renderError ?? (outcome.kind === 'error' ? outcome.error : '译文渲染失败'),
+            renderError ?? (outcome.kind === 'error' ? outcome.error : message('译文渲染失败')),
           );
         }
         setSourceDisplayMode(record.element, this.status.displayMode);
@@ -1330,7 +1352,7 @@ export class TranslationController {
   }
 
   /** Promotes unfinished preflight records to the existing per-node retry lifecycle. */
-  private failPendingRecords(error: string): void {
+  private failPendingRecords(error: UiMessage): void {
     for (const record of this.records.values()) {
       if (record.phase !== 'queued' && record.phase !== 'pending') continue;
       record.outcome = undefined;
@@ -1342,8 +1364,8 @@ export class TranslationController {
   /** Converts a pre-request failure into the same per-node retry lifecycle as an API failure. */
   private stageGroupErrors(
     groups: readonly CandidateGroup[],
-    error: string,
-    failedErrorsBySourceText: Map<string, string>,
+    error: UiMessage,
+    failedErrorsBySourceText: Map<string, UiMessage>,
   ): void {
     for (const group of groups) {
       failedErrorsBySourceText.set(group.sourceText, error);
@@ -1403,7 +1425,7 @@ export class TranslationController {
       }
       const cached = resolution.cachedTranslations[group.id];
       if (cached === undefined && !missIds.has(group.id)) {
-        throw new Error('候选文本解析结果不完整');
+        throw new LocalizedError(message('候选文本解析结果不完整'));
       }
 
       const records: TranslationRecord[] = [];
@@ -1508,6 +1530,9 @@ export class TranslationController {
     for (const discovered of collection.groups) {
       const existing = pass.groupsBySourceText.get(discovered.sourceText);
       if (!existing) {
+        // A late discovery has no committed viewport rank. Do not bypass scroll debounce
+        // by letting the ongoing document scan promote whichever region it happens to visit.
+        if (pass.viewportDirty) discovered.priority = 'background';
         pass.groupsBySourceText.set(discovered.sourceText, discovered);
         for (const member of discovered.members) {
           this.ensureOrderedRenderSlot(pass.renderQueue, member);
@@ -1516,10 +1541,14 @@ export class TranslationController {
         continue;
       }
       this.attachMembersToExistingGroup(pass, existing, discovered.members);
-      if (discovered.priority === 'visible' && existing.priority !== 'visible') {
+      if (
+        !pass.viewportDirty &&
+        discovered.priority === 'visible' &&
+        existing.priority !== 'visible'
+      ) {
         existing.priority = 'visible';
         pass.scheduler.promote([existing.id], 'visible');
-        this.promoteBackgroundBatches(new Set([existing.id]));
+        this.updateBackgroundBatches(pass);
       }
     }
     if (newGroups.length === 0) return;
@@ -1584,7 +1613,7 @@ export class TranslationController {
 
   /** Checks controller-owned foreground stages in addition to the scheduler's active requests. */
   private canDispatchBackground(pass: ActiveTranslationPass): boolean {
-    if (!pass.viewportDiscoveryComplete() || pass.viewportDirty) return false;
+    if (!pass.viewportDiscoveryComplete()) return false;
     // A complete SSE paragraph can render before the logical request (including retry) settles.
     if (
       [...this.batchReceivers.values()].some(
@@ -1629,12 +1658,16 @@ export class TranslationController {
     }
   }
 
-  /** Coalesced scroll work runs only when a request slot is available; it never cancels HTTP. */
+  /** Scan once after trailing debounce; a newer scroll invalidates this asynchronous snapshot. */
   private async refreshViewport(pass: ActiveTranslationPass): Promise<void> {
+    if (pass.viewportDirty && !pass.viewportReady) return;
     if (!pass.viewportDirty && !pass.prioritiesDirty) return;
-    pass.prioritiesDirty = false;
-    while (pass.viewportDirty && this.mainSessionId === pass.sessionId) {
-      pass.viewportDirty = false;
+    const revision = pass.viewportRevision;
+    const isCurrent = () =>
+      this.mainSessionId === pass.sessionId && pass.viewportRevision === revision;
+    if (pass.viewportDirty) {
+      pass.viewportReady = false;
+      const discovered: HTMLElement[] = [];
       for (const root of pass.roots) {
         if (!root.isConnected) continue;
         for await (const elements of discoverTranslatableElements(root, {
@@ -1643,12 +1676,17 @@ export class TranslationController {
           viewportOnly: true,
           knownElements: new Set(this.records.keys()),
         })) {
-          if (this.mainSessionId !== pass.sessionId) return;
-          await this.enqueueDiscoveredElements(pass, elements);
+          if (!isCurrent()) return;
+          discovered.push(...elements);
         }
       }
+      if (!isCurrent()) return;
+      if (discovered.length) await this.enqueueDiscoveredElements(pass, discovered);
+      if (!isCurrent()) return;
+      pass.viewportDirty = false;
     }
-    if (this.mainSessionId !== pass.sessionId) return;
+    if (!isCurrent()) return;
+    pass.prioritiesDirty = false;
     const groups = [...pass.groupsBySourceText.values()]
       .filter((group) =>
         group.members.some((element) => {
@@ -1680,19 +1718,64 @@ export class TranslationController {
     for (const slot of slots)
       Object.assign(this.ensureOrderedRenderSlot(pass.renderQueue, slot.element), slot);
     this.flushOrderedRenderQueue(pass.renderQueue);
-    this.promoteBackgroundBatches(
-      new Set(groups.filter((group) => group.priority === 'visible').map((group) => group.id)),
-    );
+    // Commit provider ranks with this viewport snapshot, before any slow candidate lookup.
+    // Reclaim logical slots only after candidate resolution has produced ready work.
+    this.updateBackgroundBatches(pass, false);
+  }
+
+  /** Only one expensive viewport refresh runs at a time; ordinary dispatch remains independent. */
+  private runViewportRefresh(pass: ActiveTranslationPass): void {
+    if (pass.viewportRefreshWork || this.mainSessionId !== pass.sessionId) return;
+    pass.viewportRefreshWork = Promise.resolve()
+      .then(async () => {
+        await this.refreshViewport(pass);
+        if (this.mainSessionId !== pass.sessionId || pass.viewportDirty) return;
+        await this.resolveDeferredGroups(pass);
+        this.updateBackgroundBatches(pass);
+      })
+      .catch((error: unknown) => {
+        if (this.mainSessionId !== pass.sessionId) return;
+        pass.markError(getErrorMessage(error));
+        pass.viewportDirty = false;
+        pass.viewportReady = false;
+        pass.scheduler.stop(error);
+      })
+      .finally(() => {
+        pass.viewportRefreshWork = undefined;
+        if (this.mainSessionId !== pass.sessionId) return;
+        if (!pass.viewportDirty) pass.settleViewport?.();
+        // A later debounce may have elapsed while this scan yielded. Do one fresh pass, never spin.
+        if (pass.viewportReady) this.runViewportRefresh(pass);
+        pass.scheduler.refresh();
+      });
   }
 
   private observeViewport(
     groups: readonly CandidateGroup[],
     pass: ActiveTranslationPass,
   ): NonNullable<ActiveTranslationPass['priorityObserver']> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const changed = () => {
       if (this.mainSessionId !== pass.sessionId) return;
       pass.viewportDirty = true;
-      pass.scheduler.refresh();
+      pass.viewportReady = false;
+      pass.viewportRevision += 1;
+      if (!pass.settleViewport) {
+        pass.viewportSettled = new Promise<void>((resolve) => {
+          pass.settleViewport = () => {
+            pass.settleViewport = undefined;
+            pass.viewportSettled = undefined;
+            resolve();
+          };
+        });
+      }
+      clearTimeout(timer);
+      // No max-wait: continuous scrolling does no viewport recomputation and keeps the old queue moving.
+      timer = setTimeout(() => {
+        timer = undefined;
+        pass.viewportReady = true;
+        this.runViewportRefresh(pass);
+      }, VIEWPORT_DEBOUNCE_MS);
     };
     const observer =
       typeof IntersectionObserver === 'undefined'
@@ -1715,6 +1798,10 @@ export class TranslationController {
     return {
       observe,
       disconnect: () => {
+        clearTimeout(timer);
+        pass.viewportRevision += 1;
+        pass.viewportDirty = false;
+        pass.settleViewport?.();
         observer?.disconnect();
         document.removeEventListener('scroll', changed, true);
         window.removeEventListener('scroll', changed);
@@ -1724,22 +1811,33 @@ export class TranslationController {
     };
   }
 
-  /** A unit may already be waiting inside the provider queue, beyond the page scheduler. */
-  private promoteBackgroundBatches(groupIds: ReadonlySet<string>): void {
-    if (!this.mainSessionId) return;
-    const batchIds: string[] = [];
+  /** Sync ranks immediately; rank-only updates cannot return batches still awaiting HTTP. */
+  private updateBackgroundBatches(
+    pass: ActiveTranslationPass,
+    requeueUnsent: boolean = pass.scheduler.hasQueuedVisibleWork,
+  ): void {
+    if (this.mainSessionId !== pass.sessionId || pass.viewportDirty) return;
+    const priorities = new Map(
+      [...pass.groupsBySourceText.values()].map((group) => [group.id, group.priority]),
+    );
+    const batches: { batchId: string; priority: TranslationPriority }[] = [];
     for (const [batchId, receiver] of this.batchReceivers) {
-      if (receiver.sessionId !== this.mainSessionId || receiver.priority === 'visible') continue;
-      if (![...receiver.groupIds].some((id) => groupIds.has(id))) continue;
-      receiver.priority = 'visible';
-      batchIds.push(batchId);
+      if (receiver.sessionId !== pass.sessionId) continue;
+      const priority =
+        [...receiver.groupIds]
+          .map((id) => priorities.get(id) ?? 'background')
+          .sort((a, b) => getPriorityRank(a) - getPriorityRank(b))[0] ?? 'background';
+      if (priority === receiver.priority && !(requeueUnsent && priority !== 'visible')) continue;
+      receiver.priority = priority;
+      batches.push({ batchId, priority });
     }
-    if (batchIds.length)
+    if (batches.length)
       void sendRuntimeMessage<void>({
-        type: 'PROMOTE_TRANSLATION_BATCHES',
-        sessionId: this.mainSessionId,
-        batchIds,
-        priority: 'visible',
+        type: 'UPDATE_TRANSLATION_PRIORITIES',
+        sessionId: pass.sessionId,
+        revision: ++pass.priorityUpdateRevision,
+        batches,
+        requeueUnsent,
       });
   }
 
@@ -1751,9 +1849,9 @@ export class TranslationController {
     try {
       const response = await sendPreflightMessage<CandidateResolution>(
         { type: 'RESOLVE_TRANSLATION_CANDIDATES', sessionId, candidates: [...candidates] },
-        '解析翻译候选',
+        message('解析翻译候选'),
       );
-      if (!response.ok) throw new Error(response.error);
+      if (!response.ok) throw new LocalizedError(response.error);
       return response.data;
     } finally {
       finish();
@@ -1770,10 +1868,10 @@ export class TranslationController {
     const pending = writes;
     const write = sendPreflightMessage<void>(
       { type: 'STORE_TRANSLATION_CACHE', sessionId, entries },
-      '写入翻译缓存',
+      message('写入翻译缓存'),
     )
       .then((result) => {
-        if (!result.ok) throw new Error(result.error);
+        if (!result.ok) throw new LocalizedError(result.error);
       })
       .catch(() => {
         /* Persistence is best effort; the background reports database failures. */
@@ -1803,10 +1901,10 @@ export class TranslationController {
         sessionId,
         profileId,
       },
-      '创建翻译会话',
+      message('创建翻译会话'),
     );
-    if (!response.ok) throw new Error(response.error);
-    if (!response.data?.configurationId) throw new Error('翻译会话缺少配置指纹');
+    if (!response.ok) throw new LocalizedError(response.error);
+    if (!response.data?.configurationId) throw new LocalizedError(message('翻译会话缺少配置指纹'));
     if (
       (this.mainSessionId === sessionId || this.retrySessionIds.has(sessionId)) &&
       this.fullConfigurationId &&
@@ -1815,7 +1913,7 @@ export class TranslationController {
       this.status.needsRestart = true;
       this.disconnectObserver();
       await this.endTranslationSession(sessionId);
-      throw new Error('翻译设置已改变，请用新设置重新全文翻译');
+      throw new LocalizedError(message('翻译设置已改变，请用新设置重新全文翻译'));
     }
     this.sessionConfigurations.set(sessionId, response.data.configurationId);
     return response.data.context;
@@ -1825,7 +1923,7 @@ export class TranslationController {
     try {
       await sendPreflightMessage<void>(
         { type: 'END_TRANSLATION_SESSION', sessionId },
-        '清理翻译会话',
+        message('清理翻译会话'),
       );
     } catch {
       // Session storage is ephemeral; failed cleanup must not overwrite a completed translation.
@@ -2083,11 +2181,11 @@ export class TranslationController {
   private async readValidSettings(): Promise<PublicTranslatorSettings> {
     const settingsResult = await sendPreflightMessage<PublicTranslatorSettings>(
       { type: 'GET_PUBLIC_SETTINGS' },
-      '读取翻译配置',
+      message('读取翻译配置'),
     );
-    if (!settingsResult.ok) throw new Error(settingsResult.error);
+    if (!settingsResult.ok) throw new LocalizedError(settingsResult.error);
     if (!settingsResult.data.configured) {
-      throw new Error('请先在插件设置中补全当前翻译配置（包括翻译 Prompt）');
+      throw new LocalizedError(message('请先在插件设置中补全当前翻译配置（包括翻译 Prompt）'));
     }
     return settingsResult.data;
   }
@@ -2104,7 +2202,7 @@ export class TranslationController {
     return record;
   }
 
-  private markRecordError(record: TranslationRecord, error: string): void {
+  private markRecordError(record: TranslationRecord, error: UiMessage): void {
     if (this.records.get(record.element) !== record) return;
     record.phase = 'error';
     record.error = error;
@@ -2151,7 +2249,7 @@ export class TranslationController {
     );
   }
 
-  private settleStatus(fallbackError?: string): void {
+  private settleStatus(fallbackError?: UiMessage): void {
     this.syncStatusCounts();
     if (this.hasActiveOperation()) {
       this.status.phase = 'translating';
@@ -2202,10 +2300,13 @@ function getMutationTargetElement(target: Node): Element | null {
 }
 
 /** Bounds control-plane calls so a lost service-worker response cannot leave page spinners forever. */
-function sendPreflightMessage<T>(request: RuntimeRequest, operation: string): Promise<Result<T>> {
+function sendPreflightMessage<T>(
+  request: RuntimeRequest,
+  operation: UiMessage,
+): Promise<Result<T>> {
   return new Promise((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
-      reject(new Error(`${operation}超时，请确认插件后台运行正常`));
+      reject(new LocalizedError(message('{{p0}}超时，请确认插件后台运行正常', { p0: operation })));
     }, PREFLIGHT_MESSAGE_TIMEOUT_MS);
     void sendRuntimeMessage<T>(request).then(
       (result) => {
@@ -2214,7 +2315,7 @@ function sendPreflightMessage<T>(request: RuntimeRequest, operation: string): Pr
       },
       (error: unknown) => {
         window.clearTimeout(timeoutId);
-        reject(error instanceof Error ? error : new Error(getErrorMessage(error)));
+        reject(error instanceof Error ? error : new LocalizedError(getErrorMessage(error)));
       },
     );
   });

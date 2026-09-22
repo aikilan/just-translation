@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import { parseConfiguredProviderOptions } from '../shared/providers';
 import type { TranslationRequestConfig } from '../shared/translation-client';
 import type { TranslationMode } from '../shared/messages';
@@ -40,12 +41,12 @@ export class TranslationSessionStore {
     const key = getStorageKey(identity.tabId, identity.sessionId);
     const stored = (await this.storage.get(key))[key];
     const context = parseStoredContext(stored);
-    if (!context) throw new Error('翻译会话不存在或已失效');
+    if (!context) throw new LocalizedError(message('翻译会话不存在或已失效'));
     if (context.tabId !== identity.tabId || context.sessionId !== identity.sessionId) {
-      throw new Error('翻译会话不存在或已失效');
+      throw new LocalizedError(message('翻译会话不存在或已失效'));
     }
     if (context.origin !== identity.origin || context.documentId !== identity.documentId) {
-      throw new Error('当前网页已变化，翻译会话失效');
+      throw new LocalizedError(message('当前网页已变化，翻译会话失效'));
     }
     return context;
   }
@@ -84,10 +85,11 @@ function getTabStoragePrefix(tabId: number): string {
 }
 
 function assertIdentity(identity: TranslationSessionIdentity): void {
-  if (!Number.isInteger(identity.tabId) || identity.tabId < 0) throw new Error('翻译标签页无效');
-  if (!identity.sessionId.trim()) throw new Error('翻译会话 ID 无效');
-  if (!identity.documentId.trim()) throw new Error('翻译网页文档无效');
-  if (!identity.origin.trim()) throw new Error('翻译网页来源无效');
+  if (!Number.isInteger(identity.tabId) || identity.tabId < 0)
+    throw new LocalizedError(message('翻译标签页无效'));
+  if (!identity.sessionId.trim()) throw new LocalizedError(message('翻译会话 ID 无效'));
+  if (!identity.documentId.trim()) throw new LocalizedError(message('翻译网页文档无效'));
+  if (!identity.origin.trim()) throw new LocalizedError(message('翻译网页来源无效'));
 }
 
 function parseStoredContext(value: unknown): TranslationSessionContext | undefined {

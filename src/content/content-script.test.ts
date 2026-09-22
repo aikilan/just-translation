@@ -30,12 +30,15 @@ vi.mock('./controller', () => ({
     getStatus = actions.getStatus;
   },
 }));
+// Language bootstrap has separate race/broadcast tests; these tests isolate page commands.
+vi.mock('./ui-language', () => ({ initializeContentLanguage: vi.fn() }));
 vi.mock('./retry-interaction', () => ({ registerRetryInteractions: vi.fn() }));
 
 let release: (value: Result<PublicTranslatorSettings>) => void;
 let message: Parameters<typeof chrome.runtime.onMessage.addListener>[0];
 let listeners: MockInstance<typeof window.addEventListener>;
 const settings: PublicTranslatorSettings = {
+  uiLanguage: 'system',
   configured: true,
   activeProfileId: 'p',
   profiles: [{ id: 'p', name: 'AI', configured: true }],
@@ -70,7 +73,7 @@ beforeEach(async () => {
   await import('./content-script');
 });
 afterEach(async () => {
-  release({ ok: false, error: 'test finished' });
+  release({ ok: false, error: { text: 'test finished' } });
   await Promise.resolve();
   for (const [type, listener, options] of listeners.mock.calls)
     window.removeEventListener(type, listener, options);
@@ -141,7 +144,9 @@ it('dispatches bulk retry and immediately returns page status', () => {
 });
 
 it('notifies the background when retry availability changes', async () => {
-  const sendMessage = vi.fn<() => Promise<Result<void>>>().mockResolvedValue({ ok: true, data: undefined });
+  const sendMessage = vi
+    .fn<() => Promise<Result<void>>>()
+    .mockResolvedValue({ ok: true, data: undefined });
   vi.stubGlobal('chrome', { ...chrome, runtime: { ...chrome.runtime, sendMessage } });
   observer.notify?.();
   await Promise.resolve();

@@ -1,3 +1,4 @@
+import { renderMessage } from '../shared/i18n';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublicTranslatorSettings, RuntimeRequest, Result } from '../shared/messages';
@@ -7,6 +8,7 @@ let settings: PublicTranslatorSettings;
 let send: ReturnType<typeof vi.fn<(request: RuntimeRequest) => Promise<Result<unknown>>>>;
 beforeEach(() => {
   settings = {
+    uiLanguage: 'system',
     configured: true,
     profiles: [{ id: 'one', name: 'One', configured: true }],
     activeProfileId: 'one',
@@ -70,7 +72,7 @@ describe('page translation context', () => {
     expect(send.mock.calls.some(([request]) => request.type === 'BEGIN_TRANSLATION_SESSION')).toBe(
       false,
     );
-    expect(controller.getStatus().error).toContain('排除');
+    expect(renderMessage(controller.getStatus().error)).toContain('排除');
   });
   it('reports the actual configuration and requires explicit restart for a new language', async () => {
     await controller.start();

@@ -1,4 +1,13 @@
 import {
+  message,
+  LocalizedError,
+  toUiMessage,
+  type UiMessage,
+  t,
+  isUiLanguage,
+  type UiLanguage,
+} from './i18n';
+import {
   DEFAULT_PROVIDER_OPTIONS,
   isProvider,
   isProtocol,
@@ -25,6 +34,8 @@ export interface TranslationProfile extends ProviderOptions {
 }
 
 export interface TranslatorSettings {
+  /** Interface preference, independent of translation target and session identity. */
+  uiLanguage: UiLanguage;
   profiles: TranslationProfile[];
   activeProfileId: string;
   targetLanguage: string;
@@ -48,14 +59,14 @@ export type TranslationProfileValidationErrors = Partial<
     | 'provider'
     | 'protocol'
     | 'thinkingControl',
-    string
+    UiMessage
   >
 >;
 
 export interface SettingsValidationErrors {
-  profiles?: string;
-  activeProfileId?: string;
-  targetLanguage?: string;
+  profiles?: UiMessage;
+  activeProfileId?: UiMessage;
+  targetLanguage?: UiMessage;
   profileErrors: Record<string, TranslationProfileValidationErrors>;
 }
 
@@ -76,6 +87,7 @@ export const DEFAULT_TRANSLATION_PROMPT = [
 ].join(' ');
 
 export const DEFAULT_SETTINGS: TranslatorSettings = {
+  uiLanguage: 'system',
   profiles: [
     {
       ...DEFAULT_PROVIDER_OPTIONS,
@@ -115,35 +127,39 @@ export function validateTranslationProfile(
   profile: TranslationProfile,
 ): TranslationProfileValidationErrors {
   const errors: TranslationProfileValidationErrors = {};
-  if (!isProvider(profile.provider)) errors.provider = '请补全供应商';
-  if (!isProtocol(profile.protocol)) errors.protocol = '请补全接入协议';
-  if (!profile.name.trim()) errors.name = '请填写配置名称';
+  if (!isProvider(profile.provider)) errors.provider = message('请补全供应商');
+  if (!isProtocol(profile.protocol)) errors.protocol = message('请补全接入协议');
+  if (!profile.name.trim()) errors.name = message('请填写配置名称');
   try {
     const url = new URL(normalizeApiUrl(profile.apiUrl, profile.protocol ?? 'openai'));
-    if (!['https:', 'http:'].includes(url.protocol)) errors.apiUrl = '只支持 HTTP 或 HTTPS 地址';
+    if (!['https:', 'http:'].includes(url.protocol))
+      errors.apiUrl = message('只支持 HTTP 或 HTTPS 地址');
     else if (url.protocol === 'http:' && profile.apiKey.trim() && !isLoopbackHost(url.hostname)) {
-      errors.apiUrl = '携带 API Key 时必须使用 HTTPS（localhost 除外）';
+      errors.apiUrl = message('携带 API Key 时必须使用 HTTPS（localhost 除外）');
     }
   } catch (error) {
     errors.apiUrl =
       error instanceof TypeError
-        ? '请输入有效的 API 地址'
+        ? message('请输入有效的 API 地址')
         : error instanceof Error
-          ? error.message
-          : '请输入有效的 API 地址';
+          ? toUiMessage(error)
+          : message('请输入有效的 API 地址');
   }
-  if (!profile.model.trim()) errors.model = '请填写模型名称';
+  if (!profile.model.trim()) errors.model = message('请填写模型名称');
   if (typeof profile.thinkingEnabled !== 'boolean')
-    errors.thinkingEnabled = '思考开关必须为开启或关闭';
-  if (!profile.translationPrompt.trim()) errors.translationPrompt = '请填写翻译 Prompt';
+    errors.thinkingEnabled = message('思考开关必须为开启或关闭');
+  if (!profile.translationPrompt.trim()) errors.translationPrompt = message('请填写翻译 Prompt');
   else if (profile.translationPrompt.length > MAX_TRANSLATION_PROMPT_CHARACTERS) {
-    errors.translationPrompt = `翻译 Prompt 不能超过 ${MAX_TRANSLATION_PROMPT_CHARACTERS} 个字符`;
+    errors.translationPrompt = message('翻译 Prompt 不能超过 {{p0}} 个字符', {
+      p0: MAX_TRANSLATION_PROMPT_CHARACTERS,
+    });
   }
   if (isProvider(profile.provider) && isProtocol(profile.protocol)) {
     try {
       resolveProviderOptions(profile);
     } catch (error) {
-      errors.thinkingControl = error instanceof Error ? error.message : '思考设置无效';
+      errors.thinkingControl =
+        error instanceof Error ? toUiMessage(error) : message('思考设置无效');
     }
   }
   return errors;
@@ -151,20 +167,22 @@ export function validateTranslationProfile(
 
 export function validateSettings(settings: TranslatorSettings): SettingsValidationResult {
   const errors: SettingsValidationErrors = { profileErrors: {} };
-  if (settings.profiles.length === 0) errors.profiles = '至少保留一个翻译配置';
+  if (settings.profiles.length === 0) errors.profiles = message('至少保留一个翻译配置');
   const ids = new Set<string>();
   const names = new Set<string>();
   for (const profile of settings.profiles) {
     const profileErrors = validateTranslationProfile(profile);
-    if (!profile.id.trim() || ids.has(profile.id)) errors.profiles = '翻译配置 ID 必须唯一';
+    if (!profile.id.trim() || ids.has(profile.id))
+      errors.profiles = message('翻译配置 ID 必须唯一');
     ids.add(profile.id);
     const normalizedName = profile.name.trim().toLowerCase();
-    if (normalizedName && names.has(normalizedName)) errors.profiles = '翻译配置名称不能重复';
+    if (normalizedName && names.has(normalizedName))
+      errors.profiles = message('翻译配置名称不能重复');
     names.add(normalizedName);
     if (Object.keys(profileErrors).length > 0) errors.profileErrors[profile.id] = profileErrors;
   }
-  if (!getActiveProfile(settings)) errors.activeProfileId = '当前翻译配置不存在';
-  if (!settings.targetLanguage.trim()) errors.targetLanguage = '请填写目标语言';
+  if (!getActiveProfile(settings)) errors.activeProfileId = message('当前翻译配置不存在');
+  if (!settings.targetLanguage.trim()) errors.targetLanguage = message('请填写目标语言');
   return {
     valid:
       Object.keys(errors.profileErrors).length === 0 &&
@@ -176,7 +194,9 @@ export function validateSettings(settings: TranslatorSettings): SettingsValidati
 }
 
 /** Picks the first actionable validation message for UI and runtime responses. */
-export function getSettingsValidationMessage(result: SettingsValidationResult): string | undefined {
+export function getSettingsValidationMessage(
+  result: SettingsValidationResult,
+): UiMessage | undefined {
   if (result.errors.profiles) return result.errors.profiles;
   if (result.errors.activeProfileId) return result.errors.activeProfileId;
   if (result.errors.targetLanguage) return result.errors.targetLanguage;
@@ -246,6 +266,7 @@ export function mergeSettings(value: unknown): TranslatorSettings {
   const resolvedProfiles = profiles.length > 0 ? profiles : cloneDefaultSettings().profiles;
   return {
     profiles: resolvedProfiles,
+    uiLanguage: isUiLanguage(value.uiLanguage) ? value.uiLanguage : 'system',
     activeProfileId: readString(
       value.activeProfileId,
       resolvedProfiles[0]?.id ?? DEFAULT_PROFILE_ID,
@@ -293,9 +314,10 @@ export function isUrlAutoTranslated(url: string, sites: string[]): boolean {
 
 export function normalizeHostname(input: string): string {
   const value = input.trim().toLowerCase().replace(/\.$/u, '');
-  if (!value || value.includes('/') || value.includes(':')) throw new Error('站点域名无效');
+  if (!value || value.includes('/') || value.includes(':'))
+    throw new LocalizedError(message('站点域名无效'));
   const hostname = new URL(`https://${value}`).hostname.toLowerCase();
-  if (hostname !== value) throw new Error('站点域名无效');
+  if (hostname !== value) throw new LocalizedError(message('站点域名无效'));
   return hostname;
 }
 
@@ -315,7 +337,7 @@ export function normalizeTranslationProfile(profile: TranslationProfile): Transl
 export function normalizeSiteRule(input: string, allowWildcard: boolean): string {
   const value = input.trim().toLowerCase().replace(/\.$/u, '');
   const wildcard = value.startsWith('*.');
-  if (wildcard && !allowWildcard) throw new Error('自动翻译仅支持精确域名');
+  if (wildcard && !allowWildcard) throw new LocalizedError(message('自动翻译仅支持精确域名'));
   const host = wildcard ? value.slice(2) : value;
   if (
     !/^[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/u.test(host) ||
@@ -325,7 +347,7 @@ export function normalizeSiteRule(input: string, allowWildcard: boolean): string
       .some((label) => label.startsWith('-') || label.endsWith('-') || label.length > 63) ||
     host.length > 253
   ) {
-    throw new Error('请输入有效域名，不包含协议、路径或端口');
+    throw new LocalizedError(message('请输入有效域名，不包含协议、路径或端口'));
   }
   return `${wildcard ? '*.' : ''}${normalizeHostname(host)}`;
 }
@@ -333,7 +355,7 @@ export function normalizeSiteRule(input: string, allowWildcard: boolean): string
 function cloneDefaultSettings(): TranslatorSettings {
   return {
     ...DEFAULT_SETTINGS,
-    profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile })),
+    profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile, name: t('默认配置') })),
   };
 }
 

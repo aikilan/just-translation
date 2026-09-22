@@ -1,0 +1,133 @@
+{
+  "locales": [
+    {
+      "locale": "zh-CN",
+      "title": "只是翻译 · 设置",
+      "direction": "ltr",
+      "toolbarTitle": "只是翻译"
+    },
+    {
+      "locale": "en",
+      "title": "Just Translate · Settings",
+      "direction": "ltr",
+      "toolbarTitle": "Just Translate"
+    },
+    {
+      "locale": "fr",
+      "title": "Just Translate · Paramètres",
+      "direction": "ltr",
+      "toolbarTitle": "Just Translate"
+    },
+    {
+      "locale": "de",
+      "title": "Just Translate · Einstellungen",
+      "direction": "ltr",
+      "toolbarTitle": "Just Translate"
+    },
+    {
+      "locale": "ar",
+      "title": "Just Translate · الإعدادات",
+      "direction": "rtl",
+      "toolbarTitle": "Just Translate"
+    }
+  ],
+  "errors": [],
+  "checks": [
+    "five locales, stored preference, unchanged draft/target/model, popup live sync, LTR API URL",
+    "switch during in-flight translation preserves request and completed text; host language/direction unchanged",
+    "existing selection error and buttons retranslate without replacing source or retrying",
+    "existing iframe selection UI receives language broadcast without changing iframe document language",
+    "new extension page reads durable language preference; native metadata and command descriptions resolve",
+    "real Chrome context menu update calls succeed; no runtime page errors"
+  ],
+  "menuUpdates": [
+    {
+      "id": "just-translate-page",
+      "title": "Translate now"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Translate selection"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "立即翻译"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "翻译已选内容"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "Translate now"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Translate selection"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "Traduire maintenant"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Traduire la sélection"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "Jetzt übersetzen"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Auswahl übersetzen"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "ترجم الآن"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "ترجم النص المحدد"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "Traduire maintenant"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Traduire la sélection"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "ترجم الآن"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "ترجم النص المحدد"
+    },
+    {
+      "id": "just-translate-page",
+      "title": "Jetzt übersetzen"
+    },
+    {
+      "id": "just-translate-selection",
+      "title": "Auswahl übersetzen"
+    }
+  ],
+  "nativeMetadata": {
+    "name": "只是翻译",
+    "description": "使用你自己的 OpenAI 协议 API，在网页原文下方展示译文。",
+    "commands": [
+      {
+        "description": "",
+        "name": "_execute_action",
+        "shortcut": ""
+      },
+      {
+        "description": "翻译或恢复当前网页",
+        "name": "translate-page",
+        "shortcut": "⌥T"
+      }
+    ]
+  }
+}

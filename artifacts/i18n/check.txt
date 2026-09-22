@@ -1,0 +1,54 @@
+
+> just-translate@0.3.33 check /Users/jintao.xu/Documents/只是翻译
+> eslint . && vitest run && tsc --noEmit && vite build && node scripts/verify-build.mjs
+
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+
+ Test Files  59 passed (59)
+      Tests  715 passed (715)
+   Start at  20:31:05
+   Duration  17.77s (transform 1.62s, setup 1.69s, import 2.19s, tests 56.76s, environment 4.29s)
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 1918 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/service-worker-loader.js                                 0.04 kB
+dist/_locales/zh_CN/messages.json                             0.25 kB │ gzip:  0.21 kB
+dist/_locales/zh_TW/messages.json                             0.25 kB │ gzip:  0.21 kB
+dist/_locales/en/messages.json                                0.27 kB │ gzip:  0.18 kB
+dist/_locales/fr/messages.json                                0.28 kB │ gzip:  0.19 kB
+dist/_locales/de/messages.json                                0.29 kB │ gzip:  0.20 kB
+dist/assets/content-script.ts-loader-DDbinEo0.js              0.35 kB
+dist/assets/selection-content-script.ts-loader-Bw7VFoqG.js    0.36 kB
+dist/_locales/ar/messages.json                                0.37 kB │ gzip:  0.24 kB
+dist/src/popup/index.html                                     0.87 kB │ gzip:  0.37 kB
+dist/src/options/index.html                                   1.05 kB │ gzip:  0.41 kB
+dist/icons/icon-16.png                                        1.41 kB
+dist/manifest.json                                            2.46 kB │ gzip:  0.77 kB
+dist/icons/icon-32.png                                        2.67 kB
+dist/icons/icon-48.png                                        4.35 kB
+dist/icons/icon-128.png                                      16.85 kB
+dist/assets/content-script-DpBVsISy.css                       2.20 kB │ gzip:  0.63 kB
+dist/assets/index-MRoHpTXO.css                                3.05 kB │ gzip:  0.98 kB
+dist/assets/base-aF0RT5UV.css                                 5.89 kB │ gzip:  1.92 kB
+dist/assets/index-BnovhtsF.css                               12.28 kB │ gzip:  2.96 kB
+dist/assets/protected-markers-CHDO0iQ5.js                     0.23 kB │ gzip:  0.21 kB │ map:   0.94 kB
+dist/assets/chrome-api-Ausb8eKO.js                            0.52 kB │ gzip:  0.44 kB │ map:   1.60 kB
+dist/assets/settings-store-0TAmfUi1.js                        0.57 kB │ gzip:  0.43 kB │ map:   2.09 kB
+dist/assets/ui-language-DYw2c5eB.js                           0.98 kB │ gzip:  0.62 kB │ map:   2.99 kB
+dist/assets/selection-content-script.ts-Bj2FXI8U.js           9.38 kB │ gzip:  3.53 kB │ map:  24.12 kB
+dist/assets/index.html-S6dgXy_D.js                           11.90 kB │ gzip:  4.77 kB │ map:  38.33 kB
+dist/assets/settings-u1kqBymn.js                             26.99 kB │ gzip:  8.98 kB │ map: 111.06 kB
+dist/assets/index.html-DtVVtHMW.js                           33.77 kB │ gzip: 11.27 kB │ map: 103.64 kB
+dist/assets/translation-client-DOC_iSts.js                   41.93 kB │ gzip: 13.19 kB │ map: 188.84 kB
+dist/assets/content-script.ts-C0umM1Aw.js                    72.23 kB │ gzip: 21.26 kB │ map: 271.10 kB
+dist/assets/service-worker.ts-C5gwUHvO.js                    96.49 kB │ gzip: 45.55 kB │ map: 252.11 kB
+dist/assets/messages-LIRofNdE.js                            197.09 kB │ gzip: 48.95 kB │ map: 335.95 kB
+dist/assets/base-BREOC-dM.js                                202.55 kB │ gzip: 65.08 kB │ map: 891.75 kB
+
+✓ built in 237ms
+构建校验通过：service-worker-loader.js 已连接后台 bundle

@@ -7,7 +7,12 @@ import {
   SETTINGS_STORAGE_KEY,
   type TranslatorSettings,
 } from '../shared/settings';
-import type { PageTranslationStatus, RuntimeRequest } from '../shared/messages';
+import type {
+  PageTranslationStatus,
+  PublicTranslatorSettings,
+  Result,
+  RuntimeRequest,
+} from '../shared/messages';
 
 export const READY_SETTINGS: TranslatorSettings = {
   ...DEFAULT_SETTINGS,
@@ -30,7 +35,7 @@ export function mockExtension(
   url = 'https://news.example.com/article',
 ) {
   let stored = structuredClone(settings);
-  const publicState = () => ({
+  const publicState = (): PublicTranslatorSettings => ({
     ...stored,
     profiles: stored.profiles.map(({ id, name, model }) => ({
       id,
@@ -39,42 +44,60 @@ export function mockExtension(
     })),
     configured: Boolean(stored.profiles.find((p) => p.id === stored.activeProfileId)?.model),
   });
-  const send = vi.fn(async (request: RuntimeRequest) => {
-    await Promise.resolve();
-    switch (request.type) {
-      case 'SAVE_TRANSLATION_PROFILE':
-        stored.profiles = stored.profiles.some((p) => p.id === request.profile.id)
-          ? stored.profiles.map((p) => (p.id === request.profile.id ? request.profile : p))
-          : [...stored.profiles, request.profile];
-        break;
-      case 'DELETE_TRANSLATION_PROFILE':
-        stored.profiles = stored.profiles.filter((p) => p.id !== request.profileId);
-        break;
-      case 'SET_ACTIVE_PROFILE':
-        stored.activeProfileId = request.profileId;
-        break;
-      case 'UPDATE_READING_PREFERENCES':
-        stored = { ...stored, ...request.patch };
-        break;
-      case 'SET_SITE_AUTO_TRANSLATE':
-        stored.autoTranslateSites = request.enabled
-          ? [...stored.autoTranslateSites, request.hostname]
-          : stored.autoTranslateSites.filter((h) => h !== request.hostname);
-        break;
-      case 'UPDATE_SITE_RULE':
-        stored[request.rule.list] = request.rule.enabled
-          ? [...stored[request.rule.list], request.rule.hostname]
-          : stored[request.rule.list].filter((h) => h !== request.rule.hostname);
-        break;
-    }
-    return { ok: true as const, data: publicState() };
-  });
+  const send = vi.fn<(request: RuntimeRequest) => Promise<Result<PublicTranslatorSettings>>>(
+    async (request) => {
+      await Promise.resolve();
+      switch (request.type) {
+        case 'SAVE_TRANSLATION_PROFILE':
+          stored.profiles = stored.profiles.some((p) => p.id === request.profile.id)
+            ? stored.profiles.map((p) => (p.id === request.profile.id ? request.profile : p))
+            : [...stored.profiles, request.profile];
+          break;
+        case 'DELETE_TRANSLATION_PROFILE':
+          stored.profiles = stored.profiles.filter((p) => p.id !== request.profileId);
+          break;
+        case 'SET_ACTIVE_PROFILE':
+          stored.activeProfileId = request.profileId;
+          break;
+        case 'UPDATE_UI_LANGUAGE':
+          stored = { ...stored, uiLanguage: request.uiLanguage };
+          break;
+        case 'UPDATE_READING_PREFERENCES':
+          stored = { ...stored, ...request.patch };
+          break;
+        case 'SET_SITE_AUTO_TRANSLATE':
+          stored.autoTranslateSites = request.enabled
+            ? [...stored.autoTranslateSites, request.hostname]
+            : stored.autoTranslateSites.filter((h) => h !== request.hostname);
+          break;
+        case 'UPDATE_SITE_RULE':
+          stored[request.rule.list] = request.rule.enabled
+            ? [...stored[request.rule.list], request.rule.hostname]
+            : stored[request.rule.list].filter((h) => h !== request.rule.hostname);
+          break;
+      }
+      return { ok: true as const, data: publicState() };
+    },
+  );
   const tabSend = vi
-    .fn<(tabId: number, command: unknown) => Promise<PageTranslationStatus>>()
+    .fn<
+      (
+        tabId: number,
+        command: unknown,
+        options?: chrome.tabs.MessageSendOptions,
+      ) => Promise<unknown>
+    >()
     .mockResolvedValue(status);
   const openOptionsPage = vi.fn(async () => {});
   const storageSet = vi.fn(async () => {});
+  type StorageChangedListener = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    areaName: string,
+  ) => void;
+  const storageAddListener = vi.fn<(listener: StorageChangedListener) => void>();
+  const storageRemoveListener = vi.fn<(listener: StorageChangedListener) => void>();
   vi.stubGlobal('chrome', {
+    i18n: { getUILanguage: () => 'zh-CN' },
     runtime: {
       sendMessage: send,
       openOptionsPage,
@@ -85,7 +108,7 @@ export function mockExtension(
         get: vi.fn(() => Promise.resolve({ [SETTINGS_STORAGE_KEY]: structuredClone(stored) })),
         set: storageSet,
       },
-      onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+      onChanged: { addListener: storageAddListener, removeListener: storageRemoveListener },
     },
     tabs: {
       query: vi.fn(() => Promise.resolve([{ id: 7, url }])),
@@ -93,7 +116,7 @@ export function mockExtension(
       create: vi.fn(async () => {}),
     },
   });
-  return { send, tabSend, openOptionsPage, storageSet };
+  return { send, tabSend, openOptionsPage, storageSet, storageAddListener };
 }
 export async function mount(node: ReactNode) {
   Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);

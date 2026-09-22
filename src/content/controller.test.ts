@@ -1,3 +1,4 @@
+import { renderMessage } from '../shared/i18n';
 import { TEST_PROFILE } from '../test-utils/provider';
 // @vitest-environment jsdom
 
@@ -9,6 +10,7 @@ import { translateBatch } from '../shared/translation-client';
 import { completionResponse, contentEvent } from '../test-utils/sse';
 
 const PUBLIC_SETTINGS = {
+  uiLanguage: 'system',
   configured: true,
   activeProfileId: 'profile-one',
   profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
@@ -332,7 +334,7 @@ describe('TranslationController', () => {
     const pendingBeforeSessionFailure = document.querySelectorAll(
       '[data-justranslate-state="pending"]',
     ).length;
-    resolveSession!({ ok: false, error: '翻译会话创建失败' });
+    resolveSession!({ ok: false, error: { text: '翻译会话创建失败' } });
     await translation;
 
     expect(pendingBeforeSessionFailure).toBe(0);
@@ -343,7 +345,7 @@ describe('TranslationController', () => {
       phase: 'error',
       failed: 1,
       total: 1,
-      error: '翻译会话创建失败',
+      error: { text: '翻译会话创建失败' },
     });
     controller.restore();
   });
@@ -371,7 +373,7 @@ describe('TranslationController', () => {
       phase: 'error',
       failed: 1,
       total: 1,
-      error: '请先在插件设置中补全当前翻译配置（包括翻译 Prompt）',
+      error: { key: '请先在插件设置中补全当前翻译配置（包括翻译 Prompt）' },
     });
     controller.restore();
   });
@@ -400,7 +402,7 @@ describe('TranslationController', () => {
       phase: 'error',
       failed: 1,
       total: 1,
-      error: '读取翻译配置超时，请确认插件后台运行正常',
+      error: { key: '{{p0}}超时，请确认插件后台运行正常', params: { p0: { key: '读取翻译配置' } } },
     });
     controller.restore();
   });
@@ -504,7 +506,7 @@ describe('TranslationController', () => {
             return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
           }
           if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES') {
-            return Promise.resolve({ ok: false, error: '候选解析失败' });
+            return Promise.resolve({ ok: false, error: { text: '候选解析失败' } });
           }
           return Promise.resolve(controlResponse(request));
         },
@@ -953,7 +955,7 @@ describe('TranslationController', () => {
     const translation = controller.start();
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(3));
     resolveBatch(pendingBatches[2], '第三段完成');
-    pendingBatches[1].resolve({ ok: false, error: '第二段失败' });
+    pendingBatches[1].resolve({ ok: false, error: { text: '第二段失败' } });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1022,36 +1024,47 @@ describe('TranslationController', () => {
         await vi.waitFor(() => expect(pendingBatch).toBeDefined());
         // Keep the network promise unresolved: a cache hit must paint independently.
         await vi.waitFor(() =>
-          expect(document.querySelector('#cache [data-justranslate-translation]')?.textContent)
-            .toBe('缓存译文'),
+          expect(
+            document.querySelector('#cache [data-justranslate-translation]')?.textContent,
+          ).toBe('缓存译文'),
         );
         const lookupCount = lookup.mock.calls.length;
         if (dynamic) {
-          document.querySelector('main')!.insertAdjacentHTML(
-            'beforeend', '<p id="duplicate">Later cached source.</p>',
-          );
+          document
+            .querySelector('main')!
+            .insertAdjacentHTML('beforeend', '<p id="duplicate">Later cached source.</p>');
         }
         await vi.waitFor(() =>
-          expect(document.querySelector('#duplicate [data-justranslate-translation]')?.textContent)
-            .toBe('缓存译文'),
+          expect(
+            document.querySelector('#duplicate [data-justranslate-translation]')?.textContent,
+          ).toBe('缓存译文'),
         );
         expect(lookup).toHaveBeenCalledTimes(lookupCount);
         expect(controller.getStatus()).toMatchObject({
-          phase: 'translating', translated: 2, total: 3,
+          phase: 'translating',
+          translated: 2,
+          total: 3,
         });
         expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(1);
-        expect(pendingBatch!.request.segments.map((segment) => segment.text))
-          .toEqual(['Earlier network source.']);
-        expect(sendMessage.mock.calls.filter(([request]) => request.type === 'TRANSLATE_BATCH'))
-          .toHaveLength(1);
+        expect(pendingBatch!.request.segments.map((segment) => segment.text)).toEqual([
+          'Earlier network source.',
+        ]);
+        expect(
+          sendMessage.mock.calls.filter(([request]) => request.type === 'TRANSLATE_BATCH'),
+        ).toHaveLength(1);
 
         resolveBatch(pendingBatch!, '网络译文');
         await translation;
-        expect(controller.getStatus()).toMatchObject({ phase: 'complete', translated: 3, total: 3 });
+        expect(controller.getStatus()).toMatchObject({
+          phase: 'complete',
+          translated: 3,
+          total: 3,
+        });
         // Advancing the ordered lane past already rendered cache slots must not render twice.
         expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(3);
-        expect(document.querySelector('#network [data-justranslate-translation]')?.textContent)
-          .toBe('网络译文');
+        expect(
+          document.querySelector('#network [data-justranslate-translation]')?.textContent,
+        ).toBe('网络译文');
       } finally {
         controller.restore();
         if (pendingBatch) resolveBatch(pendingBatch, '网络译文');
@@ -1182,7 +1195,8 @@ describe('TranslationController', () => {
       }
       if (request.type === 'TRANSLATE_BATCH') {
         batchCount += 1;
-        if (batchCount === 1) return Promise.resolve({ ok: false, error: 'provider unavailable' });
+        if (batchCount === 1)
+          return Promise.resolve({ ok: false, error: { text: 'provider unavailable' } });
         return Promise.resolve({
           ok: true,
           data: Object.fromEntries(
@@ -1206,7 +1220,7 @@ describe('TranslationController', () => {
       translated: 1,
       failed: 1,
       total: 2,
-      error: 'provider unavailable',
+      error: { text: 'provider unavailable' },
     });
     expect(batchCount).toBe(2);
     controller.restore();
@@ -1229,7 +1243,7 @@ describe('TranslationController', () => {
           ok: true,
           data: {
             translations: { [success.requestId]: '保留的成功译文' },
-            failures: { [failed.requestId]: '补偿请求后仍缺少译文' },
+            failures: { [failed.requestId]: { text: '补偿请求后仍缺少译文' } },
           } satisfies TranslationBatchResult,
         });
       }
@@ -1259,7 +1273,8 @@ describe('TranslationController', () => {
       }
       if (request.type === 'TRANSLATE_BATCH') {
         batchCount += 1;
-        if (batchCount === 1) return Promise.resolve({ ok: false, error: 'temporary failure' });
+        if (batchCount === 1)
+          return Promise.resolve({ ok: false, error: { text: 'temporary failure' } });
         retrySegments = request.segments;
         return new Promise((resolve) => {
           resolveRetry = resolve;
@@ -1305,7 +1320,7 @@ describe('TranslationController', () => {
       }
       if (request.type === 'TRANSLATE_BATCH') {
         batchCount += 1;
-        return Promise.resolve({ ok: false, error: `failure ${batchCount}` });
+        return Promise.resolve({ ok: false, error: { text: `failure ${batchCount}` } });
       }
       return Promise.resolve(controlResponse(request));
     });
@@ -1325,7 +1340,7 @@ describe('TranslationController', () => {
       translated: 0,
       failed: 1,
       total: 1,
-      error: 'failure 2',
+      error: { text: 'failure 2' },
     });
     controller.restore();
   });
@@ -1344,7 +1359,7 @@ describe('TranslationController', () => {
         if (request.sessionId === initialSessionId) {
           initialBatchCount += 1;
           if (request.segments.some((segment) => segment.partIndex === 1)) {
-            return Promise.resolve({ ok: false, error: 'split failure' });
+            return Promise.resolve({ ok: false, error: { text: 'split failure' } });
           }
           return Promise.resolve({
             ok: true,
@@ -1743,7 +1758,7 @@ describe('TranslationController', () => {
     expect(batchCount).toBe(3);
     const status = controller.getStatus();
     expect(status.phase).toBe('error');
-    expect(status.error).toMatch(/持续变化/u);
+    expect(renderMessage(status.error)).toMatch(/持续变化/u);
     expect(document.querySelector('[data-justranslate-translation]')).toBeNull();
     controller.restore();
   });

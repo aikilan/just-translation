@@ -129,7 +129,10 @@ body {
   width: 190px;
 }
 .popup-preferences .segmented-control button {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+  padding-inline: 6px;
 }
 .popup-preferences .save-feedback {
   justify-content: flex-end;
@@ -176,9 +179,9 @@ kbd {
   margin-top: 16px;
 }
 .popup-error {
-  border-left: 2px solid var(--danger);
+  border-inline-start: 2px solid var(--danger);
   margin-top: 14px;
-  padding-left: 10px;
+  padding-inline-start: 10px;
   font-size: 12px;
 }
 .popup-error summary {

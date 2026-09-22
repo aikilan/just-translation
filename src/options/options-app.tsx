@@ -1,3 +1,5 @@
+import { InterfaceLanguage, useInterfaceLanguage } from '../ui/interface-language';
+import { t, renderMessage, type UiMessage } from '../shared/i18n';
 import {
   BookOpen,
   Globe2,
@@ -17,31 +19,34 @@ import { TranslationRetrySetting } from './translation-retry-setting';
 import { ReadingPreferencesPanel, SiteRulesPanel } from './preference-panels';
 
 type Section = 'api' | 'reading' | 'sites';
-const sections = [
-  {
-    id: 'api',
-    title: 'AI 配置',
-    description: '连接你的 AI，管理用于翻译的服务。',
-    icon: Settings2,
-  },
-  {
-    id: 'reading',
-    title: '阅读偏好',
-    description: '让译文以你习惯的方式出现。修改后自动保存。',
-    icon: BookOpen,
-  },
-  {
-    id: 'sites',
-    title: '站点规则',
-    description: '决定哪些网站自动翻译，哪些网站保持原样。',
-    icon: Globe2,
-  },
-] as const;
+const getSections = () =>
+  [
+    {
+      id: 'api',
+      title: t('AI 配置'),
+      description: t('连接你的 AI，管理用于翻译的服务。'),
+      icon: Settings2,
+    },
+    {
+      id: 'reading',
+      title: t('阅读偏好'),
+      description: t('让译文以你习惯的方式出现。修改后自动保存。'),
+      icon: BookOpen,
+    },
+    {
+      id: 'sites',
+      title: t('站点规则'),
+      description: t('决定哪些网站自动翻译，哪些网站保持原样。'),
+      icon: Globe2,
+    },
+  ] as const;
 
 /** Owns confirmed settings only. Each editor keeps unsaved values within its own concern. */
 export function OptionsApp() {
+  const sections = getSections();
   const [settings, setSettings] = useState<TranslatorSettings>();
-  const [error, setError] = useState('');
+  useInterfaceLanguage(settings, true);
+  const [error, setError] = useState<UiMessage | ''>('');
   const [section, setSection] = useState<Section>(() =>
     location.hash === '#sites' ? 'sites' : location.hash === '#reading' ? 'reading' : 'api',
   );
@@ -75,6 +80,7 @@ export function OptionsApp() {
       (current) =>
         current && {
           ...current,
+          uiLanguage: value.uiLanguage,
           activeProfileId: value.activeProfileId,
           targetLanguage: value.targetLanguage,
           displayMode: value.displayMode,
@@ -91,6 +97,7 @@ export function OptionsApp() {
       (current) =>
         current && {
           ...current,
+          uiLanguage: value.uiLanguage,
           activeProfileId: value.activeProfileId,
           profiles: current.profiles.some((item) => item.id === profile.id)
             ? current.profiles.map((item) => (item.id === profile.id ? profile : item))
@@ -103,6 +110,7 @@ export function OptionsApp() {
       (current) =>
         current && {
           ...current,
+          uiLanguage: value.uiLanguage,
           activeProfileId: value.activeProfileId,
           profiles: current.profiles.filter((item) => item.id !== id),
         },
@@ -126,10 +134,11 @@ export function OptionsApp() {
         >
           <img src="/icons/icon.svg" alt="" />
           <span>
-            只是翻译<small>设置</small>
+            {t('只是翻译')}
+            <small>{t('设置')}</small>
           </span>
         </a>
-        <nav className="options-nav" aria-label="设置导航">
+        <nav className="options-nav" aria-label={t('设置导航')}>
           {sections.map((item) => (
             <button
               key={item.id}
@@ -143,33 +152,37 @@ export function OptionsApp() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <span>你的 API，你的阅读方式。</span>
-          <small>版本 {packageJson.version}</small>
+          {settings && <InterfaceLanguage value={settings.uiLanguage} onSaved={acceptPublic} />}
+          <span>{t('你的 API，你的阅读方式。')}</span>
+          <small>
+            {t('版本')}
+            {packageJson.version}
+          </small>
         </div>
       </aside>
       <div className="options-workspace">
         <header className="workspace-header">
-          <span className="eyebrow">偏好设置</span>
+          <span className="eyebrow">{t('偏好设置')}</span>
           <h1>{active.title}</h1>
           <p>{active.description}</p>
         </header>
         {error ? (
           <div role="alert" className="load-error">
-            <h2>无法读取本地设置</h2>
-            <p>{error}</p>
+            <h2>{t('无法读取本地设置')}</h2>
+            <p>{renderMessage(error)}</p>
             <button className="button" onClick={() => location.reload()}>
-              重新加载
+              {t('重新加载')}
             </button>
           </div>
         ) : !settings ? (
           <p role="status" className="loading-state">
             <LoaderCircle className="spin" aria-hidden="true" />
-            正在读取本地设置…
+            {t('正在读取本地设置…')}
           </p>
         ) : (
           <>
-            <section className="ai-workspace" hidden={section !== 'api'} aria-label="AI 配置">
-              <div className="configuration-editor" role="region" aria-label="配置编辑器">
+            <section className="ai-workspace" hidden={section !== 'api'} aria-label={t('AI 配置')}>
+              <div className="configuration-editor" role="region" aria-label={t('配置编辑器')}>
                 <AIConfiguration
                   settings={settings}
                   onSaved={savedProfile}
@@ -177,23 +190,23 @@ export function OptionsApp() {
                   onActivated={acceptPublic}
                 />
               </div>
-              <aside className="translation-preferences" aria-label="翻译偏好">
+              <aside className="translation-preferences" aria-label={t('翻译偏好')}>
                 <div className="inspector-heading">
                   <SlidersHorizontal aria-hidden="true" />
-                  <h2>翻译偏好</h2>
+                  <h2>{t('翻译偏好')}</h2>
                 </div>
                 <p className="inspector-description">
-                  所有 AI 配置共用，修改后自动保存。
+                  {t('所有 AI 配置共用，修改后自动保存。')}
                   <br />
-                  下次翻译生效。
+                  {t('下次翻译生效。')}
                 </p>
                 <TranslationConcurrencySetting settings={settings} onSaved={acceptPublic} />
                 <TranslationRetrySetting settings={settings} onSaved={acceptPublic} />
                 <div className="privacy-note">
                   <ShieldCheck aria-hidden="true" />
                   <div>
-                    <strong>只在你的浏览器中保存</strong>
-                    <p>密钥保存在本地，翻译请求直接发送到你配置的 API。</p>
+                    <strong>{t('只在你的浏览器中保存')}</strong>
+                    <p>{t('密钥保存在本地，翻译请求直接发送到你配置的 API。')}</p>
                   </div>
                 </div>
               </aside>
@@ -201,14 +214,14 @@ export function OptionsApp() {
             <section
               className="preference-workspace"
               hidden={section !== 'reading'}
-              aria-label="阅读偏好"
+              aria-label={t('阅读偏好')}
             >
               <ReadingPreferencesPanel settings={settings} onSaved={acceptPublic} />
             </section>
             <section
               className="preference-workspace"
               hidden={section !== 'sites'}
-              aria-label="站点规则"
+              aria-label={t('站点规则')}
             >
               <SiteRulesPanel settings={settings} onSaved={acceptPublic} />
             </section>

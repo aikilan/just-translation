@@ -1,3 +1,4 @@
+import { message, LocalizedError } from './i18n';
 import type { TranslationSegment } from './batching';
 
 const CONNECTION_TEST_UNIT_ID = 'connection';
@@ -16,10 +17,10 @@ export function createConnectionTestSegment(targetLanguage: string): Translation
 /** Rejects empty and echo responses; arbitrary target-language correctness remains user-visible. */
 export function assertConnectionTestTranslation(sourceText: string, translatedText: string): void {
   if (!translatedText.trim()) {
-    throw new Error('API 已连接，但模型未返回译文');
+    throw new LocalizedError(message('API 已连接，但模型未返回译文'));
   }
   if (canonicalize(sourceText) === canonicalize(translatedText)) {
-    throw new Error('API 已连接，但模型原样返回了测试文本，无法确认翻译能力');
+    throw new LocalizedError(message('API 已连接，但模型原样返回了测试文本，无法确认翻译能力'));
   }
 }
 

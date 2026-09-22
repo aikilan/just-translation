@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Result, RuntimeRequest, TranslationBatchResult } from '../shared/messages';
 import { TranslationController } from './controller';
 import { TranslationScheduler } from './translation-scheduler';
+import { ProviderRequestQueue } from '../background/provider-request-queue';
 
 type Batch = Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
 const SETTINGS = {
+  uiLanguage: 'system',
   configured: true,
   activeProfileId: 'one',
   profiles: [{ id: 'one', name: 'Test', configured: true }],
@@ -141,7 +143,7 @@ describe('translation pipeline regressions', () => {
           data: { ...SETTINGS, translationConcurrency: retrying ? 1 : 6 },
         });
       if (request.type !== 'TRANSLATE_BATCH') return;
-      if (!retrying) return Promise.resolve({ ok: false, error: 'Failed request' });
+      if (!retrying) return Promise.resolve({ ok: false, error: { text: 'Failed request' } });
       if (!drain)
         return new Promise((resolve) => releases.push(() => resolve(successful(request))));
     });
@@ -277,7 +279,7 @@ describe('translation pipeline regressions', () => {
             release = () =>
               resolve(
                 result === 'failure'
-                  ? { ok: false, error: 'Provider failure' }
+                  ? { ok: false, error: { text: 'Provider failure' } }
                   : successful(request),
               );
           });
@@ -373,7 +375,7 @@ describe('translation pipeline regressions', () => {
         ) {
           const id = request.candidates[0].id;
           if (outcome === 'failure')
-            return Promise.resolve({ ok: false, error: 'Visible lookup failed' });
+            return Promise.resolve({ ok: false, error: { text: 'Visible lookup failed' } });
           return Promise.resolve({
             ok: true,
             data: {
@@ -438,6 +440,373 @@ describe('translation pipeline regressions', () => {
     expect(instance.getStatus()).toMatchObject({ translated: 2, failed: 0 });
   });
 
+  it('keeps dispatching the old order during continuous scrolling and refreshes once after 150ms', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 80 }, (_, i) => `<p id="p${i}">Debounced paragraph ${i}.</p>`).join('')}</main>`;
+    let visibleId = '';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === visibleId ? 10 : 3000, 300, 20);
+    });
+    const batches: Batch[] = [];
+    const releases: Array<() => void> = [];
+    const updates = vi.spyOn(TranslationScheduler.prototype, 'updatePriorities');
+    installRuntime((request) => {
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      batches.push(request);
+      return new Promise((resolve) => releases.push(() => resolve(successful(request))));
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batches).toHaveLength(6));
+      vi.useFakeTimers();
+      updates.mockClear();
+      for (let i = 0; i < 5; i++) {
+        visibleId = i % 2 ? 'p60' : 'p70';
+        document.dispatchEvent(new Event('scroll'));
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      expect(updates).not.toHaveBeenCalled();
+      releases.shift()!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(batches).toHaveLength(7);
+      expect(
+        batches[6].segments.some((segment) => segment.text === 'Debounced paragraph 70.'),
+      ).toBe(false);
+      expect(updates).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(49);
+      expect(updates).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(updates).toHaveBeenCalledOnce();
+      expect(updates.mock.calls[0][0]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ priority: 'visible' })]),
+      );
+    } finally {
+      instance.stop();
+      releases.forEach((release) => release());
+      await vi.advanceTimersByTimeAsync(200);
+      vi.useRealTimers();
+      await work;
+    }
+  });
+
+  it.each([false, true])(
+    'updates backend priorities before a slow visible lookup (old viewport promoted: %s)',
+    async (promoteOldViewport) => {
+      document.body.innerHTML = `<main>${Array.from({ length: 8 }, (_, i) => `<p id="p${i}">Queued paragraph ${i}.</p>`).join('')}</main>`;
+      let visibleIds = new Set<string>();
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return new DOMRect(0, visibleIds.has(this.id) ? 10 : 3000, 300, 20);
+      });
+      vi.useFakeTimers();
+      const provider = new ProviderRequestQueue();
+      const cancellation = new AbortController();
+      const apiUrl = 'https://viewport.example.com';
+      provider.defer(apiUrl, 1000);
+      const batches: Batch[] = [];
+      const admitted: string[] = [];
+      const releases: Array<() => void> = [];
+      const updates: Extract<RuntimeRequest, { type: 'UPDATE_TRANSLATION_PRIORITIES' }>[] = [];
+      let releaseLookup: (() => void) | undefined;
+      installRuntime((request) => {
+        if (request.type === 'UPDATE_TRANSLATION_PRIORITIES') {
+          updates.push(request);
+          for (const batch of request.batches) {
+            provider.updatePriority(apiUrl, batch.batchId, batch.priority);
+          }
+        }
+        if (
+          request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+          request.candidates.some((candidate) => candidate.text === 'Late visible paragraph.')
+        ) {
+          return new Promise((resolve) => {
+            releaseLookup = () =>
+              resolve({
+                ok: true,
+                data: {
+                  skippedIds: [],
+                  cachedTranslations: {},
+                  missIds: request.candidates.map((candidate) => candidate.id),
+                },
+              });
+          });
+        }
+        if (request.type !== 'TRANSLATE_BATCH') return;
+        batches.push(request);
+        // Exercise actual provider admission and cooldown, without making external HTTP requests.
+        return provider
+          .run(
+            apiUrl,
+            request.priority,
+            cancellation.signal,
+            30_000,
+            () => {
+              admitted.push(request.batchId);
+              return new Promise<void>((resolve) => releases.push(resolve));
+            },
+            request.batchId,
+          )
+          .then(() => successful(request));
+      });
+      const instance = controller();
+      const work = instance.start();
+      try {
+        await vi.advanceTimersByTimeAsync(50);
+        expect(batches).toHaveLength(2);
+        if (promoteOldViewport) {
+          visibleIds = new Set(['p0']);
+          document.dispatchEvent(new Event('scroll'));
+          await vi.advanceTimersByTimeAsync(200);
+          expect(updates[0].batches).toEqual([
+            { batchId: batches[0].batchId, priority: 'visible' },
+          ]);
+          updates.length = 0;
+        }
+        document
+          .querySelector('main')!
+          .insertAdjacentHTML('beforeend', '<p id="late">Late visible paragraph.</p>');
+        visibleIds = new Set(['p4', 'late']);
+        document.dispatchEvent(new Event('scroll'));
+        await vi.advanceTimersByTimeAsync(200);
+        expect(releaseLookup).toBeDefined();
+        expect(admitted).toHaveLength(0);
+        // The lookup stays unresolved until cleanup; the next send must still use the new viewport.
+        await vi.advanceTimersByTimeAsync(promoteOldViewport ? 550 : 750);
+        expect(admitted).toEqual([batches[1].batchId, batches[0].batchId]);
+        expect(updates[0].requeueUnsent).toBe(false);
+        expect(updates[0].batches).toEqual([
+          ...(promoteOldViewport ? [{ batchId: batches[0].batchId, priority: 'background' }] : []),
+          { batchId: batches[1].batchId, priority: 'visible' },
+        ]);
+      } finally {
+        instance.stop();
+        cancellation.abort();
+        releaseLookup?.();
+        releases.forEach((release) => release());
+        await vi.advanceTimersByTimeAsync(100);
+        vi.useRealTimers();
+        await work;
+      }
+    },
+  );
+
+  it('continues old-order dispatch if another scroll invalidates a slow viewport lookup', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 80 }, (_, i) => `<p id="p${i}">Slow viewport paragraph ${i}.</p>`).join('')}</main>`;
+    let visibleId = '';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === visibleId ? 10 : 3000, 300, 20);
+    });
+    const batches: Batch[] = [];
+    const releases: Array<() => void> = [];
+    let releaseLookup: (() => void) | undefined;
+    const updates: RuntimeRequest[] = [];
+    installRuntime((request) => {
+      if (request.type === 'UPDATE_TRANSLATION_PRIORITIES') updates.push(request);
+      if (
+        request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+        request.candidates.some((candidate) => candidate.text === 'Late viewport paragraph.')
+      ) {
+        return new Promise((resolve) => {
+          releaseLookup = () =>
+            resolve({
+              ok: true,
+              data: {
+                skippedIds: [],
+                cachedTranslations: {},
+                missIds: request.candidates.map((candidate) => candidate.id),
+              },
+            });
+        });
+      }
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      batches.push(request);
+      return new Promise((resolve) => releases.push(() => resolve(successful(request))));
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batches).toHaveLength(6));
+      vi.useFakeTimers();
+      const late = document.createElement('p');
+      late.id = 'late';
+      late.textContent = 'Late viewport paragraph.';
+      document.querySelector('main')!.append(late);
+      visibleId = 'late';
+      document.dispatchEvent(new Event('scroll'));
+      await vi.advanceTimersByTimeAsync(151);
+      expect(releaseLookup).toBeDefined();
+      visibleId = 'p70';
+      document.dispatchEvent(new Event('scroll'));
+      releases.shift()!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(batches).toHaveLength(7);
+      expect(batches[6].segments.map((segment) => segment.text)).not.toContain(
+        'Late viewport paragraph.',
+      );
+      releaseLookup!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updates).toHaveLength(0);
+    } finally {
+      instance.stop();
+      releaseLookup?.();
+      releases.forEach((release) => release());
+      await vi.advanceTimersByTimeAsync(200);
+      vi.useRealTimers();
+      await work;
+    }
+  });
+
+  it('keeps the session alive when its last HTTP finishes during a viewport lookup', async () => {
+    document.body.innerHTML = '<main><p id="first">Initial background paragraph.</p></main>';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === 'late' ? 10 : 3000, 300, 20);
+    });
+    let releaseFirst!: () => void;
+    let releaseLookup: (() => void) | undefined;
+    installRuntime((request) => {
+      if (
+        request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+        request.candidates.some((candidate) => candidate.text === 'Late visible paragraph.')
+      ) {
+        return new Promise((resolve) => {
+          releaseLookup = () =>
+            resolve({
+              ok: true,
+              data: {
+                skippedIds: [],
+                cachedTranslations: {},
+                missIds: request.candidates.map((candidate) => candidate.id),
+              },
+            });
+        });
+      }
+      if (
+        request.type === 'TRANSLATE_BATCH' &&
+        request.segments.some((segment) => segment.text === 'Initial background paragraph.')
+      ) {
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve(successful(request));
+        });
+      }
+    });
+    const idle = vi.spyOn(TranslationScheduler.prototype, 'waitForIdle');
+    const instance = controller();
+    const work = instance.start();
+    await vi.waitFor(() => expect(releaseFirst).toBeDefined());
+    await vi.waitFor(() => expect(idle).toHaveBeenCalled());
+    vi.useFakeTimers();
+    try {
+      const late = document.createElement('p');
+      late.id = 'late';
+      late.textContent = 'Late visible paragraph.';
+      document.querySelector('main')!.append(late);
+      document.dispatchEvent(new Event('scroll'));
+      await vi.advanceTimersByTimeAsync(151);
+      expect(releaseLookup).toBeDefined();
+      releaseFirst();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(instance.getStatus().phase).toBe('translating');
+      releaseLookup!();
+      await vi.advanceTimersByTimeAsync(100);
+      await work;
+      expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 2, failed: 0 });
+    } finally {
+      instance.stop();
+      releaseLookup?.();
+      releaseFirst();
+      await vi.advanceTimersByTimeAsync(200);
+      vi.useRealTimers();
+      await work;
+    }
+  });
+
+  it('clears a pending viewport debounce when translation stops', async () => {
+    document.body.innerHTML = '<main><p>Paragraph waiting for translation.</p></main>';
+    let release!: () => void;
+    installRuntime((request) => {
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      return new Promise((resolve) => {
+        release = () => resolve(successful(request));
+      });
+    });
+    const updates = vi.spyOn(TranslationScheduler.prototype, 'updatePriorities');
+    const instance = controller();
+    const work = instance.start();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    vi.useFakeTimers();
+    try {
+      updates.mockClear();
+      document.dispatchEvent(new Event('scroll'));
+      instance.stop();
+      release();
+      await vi.advanceTimersByTimeAsync(500);
+      await work;
+      expect(updates).not.toHaveBeenCalled();
+      expect(instance.getStatus().phase).toBe('stopped');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reclaims unsent offscreen batches at full capacity for the latest visible DOM', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 80 }, (_, i) => `<p id="p${i}">Requeued paragraph ${i}.</p>`).join('')}</main>`;
+    let visibleId = '';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === visibleId ? 10 : 3000, 300, 20);
+    });
+    const batches: Batch[] = [];
+    let drain = false;
+    const waiting = new Map<string, (result: Result<unknown>) => void>();
+    installRuntime((request) => {
+      if (request.type === 'UPDATE_TRANSLATION_PRIORITIES' && request.requeueUnsent) {
+        for (const batch of request.batches) {
+          if (batch.priority !== 'visible') {
+            waiting.get(batch.batchId)?.({ ok: true, data: { deferred: true } });
+            waiting.delete(batch.batchId);
+          }
+        }
+      }
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      batches.push(request);
+      if (drain) return Promise.resolve(successful(request));
+      return new Promise((resolve) => waiting.set(request.batchId, resolve));
+    });
+    const instance = controller();
+    const work = instance.start();
+    try {
+      await vi.waitFor(() => expect(batches).toHaveLength(6));
+      visibleId = 'p70';
+      document.dispatchEvent(new Event('scroll'));
+      await vi.waitFor(() => expect(batches).toHaveLength(7));
+      expect(batches[6].segments.map((segment) => segment.text)).toEqual([
+        'Requeued paragraph 70.',
+      ]);
+      expect(instance.getStatus().failed).toBe(0);
+      drain = true;
+      waiting.get(batches[6].batchId)!(successful(batches[6]));
+      await work;
+      expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 80, failed: 0 });
+      const submittedIds = batches
+        .slice(6)
+        .flatMap((batch) => batch.segments.map((segment) => segment.requestId));
+      expect(submittedIds).toHaveLength(80);
+      expect(new Set(submittedIds).size).toBe(80);
+    } finally {
+      instance.stop();
+      for (const resolve of waiting.values()) resolve({ ok: false, error: { text: 'stopped' } });
+      await work;
+    }
+  });
+
   it('refills a released slot with the latest viewport after nested scrolling without cancellation', async () => {
     document.body.innerHTML = `<main>${Array.from({ length: 80 }, (_, i) => `<p id="p${i}">Scrollable paragraph number ${i}.</p>`).join('')}</main>`;
     let visibleId = '';
@@ -468,7 +837,7 @@ describe('translation pipeline regressions', () => {
       document.querySelector('main')!.dispatchEvent(new Event('scroll'));
       visibleId = 'p70';
       document.querySelector('main')!.dispatchEvent(new Event('scroll'));
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 175));
       expect(batches).toHaveLength(6);
       releases.shift()!();
       await vi.waitFor(() => expect(batches).toHaveLength(7));
@@ -482,7 +851,7 @@ describe('translation pipeline regressions', () => {
     }
   });
 
-  it('rechecks scrolling that occurred while a foreground candidate lookup was pending', async () => {
+  it('keeps old-order dispatch running when scrolling occurs during candidate lookup', async () => {
     document.body.innerHTML = `<main>${Array.from({ length: 40 }, (_, i) => `<p id="p${i}">Lookup paragraph ${i}.</p>`).join('')}</main>`;
     let visibleId = '';
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -525,7 +894,12 @@ describe('translation pipeline regressions', () => {
       document.dispatchEvent(new Event('scroll'));
       releaseVisible!();
       await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
-      expect(sent[0].segments.map((segment) => segment.text)).toEqual(['Lookup paragraph 30.']);
+      expect(sent[0].segments.map((segment) => segment.text)).toEqual([
+        'Lookup paragraph 0.',
+        'Lookup paragraph 1.',
+        'Lookup paragraph 2.',
+        'Lookup paragraph 3.',
+      ]);
     } finally {
       instance.stop();
       releaseInitial?.();
@@ -595,10 +969,11 @@ describe('translation pipeline regressions', () => {
       await vi.waitFor(
         () =>
           expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            type: 'PROMOTE_TRANSLATION_BATCHES',
+            type: 'UPDATE_TRANSLATION_PRIORITIES',
             sessionId: batch.sessionId,
-            batchIds: [batch.batchId],
-            priority: 'visible',
+            batches: [{ batchId: batch.batchId, priority: 'visible' }],
+            revision: 1,
+            requeueUnsent: false,
           }),
         { timeout: 1800 },
       );
@@ -655,7 +1030,7 @@ describe('translation pipeline regressions', () => {
       if (request.type === 'TRANSLATE_BATCH') {
         batch = request;
         return new Promise((resolve) => {
-          finish = () => resolve({ ok: false, error: 'API 请求已取消' });
+          finish = () => resolve({ ok: false, error: { text: 'API 请求已取消' } });
         });
       }
       if (request.type === 'CANCEL_TRANSLATION_BATCH') finish();
@@ -713,7 +1088,7 @@ describe('translation pipeline regressions', () => {
     const releases: Array<() => void> = [];
     const promotions: RuntimeRequest[] = [];
     installRuntime((request) => {
-      if (request.type === 'PROMOTE_TRANSLATION_BATCHES') promotions.push(request);
+      if (request.type === 'UPDATE_TRANSLATION_PRIORITIES') promotions.push(request);
       if (request.type !== 'TRANSLATE_BATCH') return;
       batches.push(request);
       return new Promise((resolve) => releases.push(() => resolve(successful(request))));
@@ -730,10 +1105,11 @@ describe('translation pipeline regressions', () => {
       );
       await vi.waitFor(() =>
         expect(promotions).toContainEqual({
-          type: 'PROMOTE_TRANSLATION_BATCHES',
+          type: 'UPDATE_TRANSLATION_PRIORITIES',
           sessionId: batches[1].sessionId,
-          batchIds: [batches[1].batchId],
-          priority: 'visible',
+          batches: [{ batchId: batches[1].batchId, priority: 'visible' }],
+          revision: 1,
+          requeueUnsent: false,
         }),
       );
       releases[1]();
@@ -752,7 +1128,7 @@ describe('translation pipeline regressions', () => {
     let failing = true;
     installRuntime((request) =>
       request.type === 'TRANSLATE_BATCH' && failing
-        ? Promise.resolve({ ok: false, error: 'Test failure' })
+        ? Promise.resolve({ ok: false, error: { text: 'Test failure' } })
         : undefined,
     );
     const instance = controller();
@@ -957,7 +1333,7 @@ describe('translation pipeline regressions', () => {
     let release!: () => void;
     installRuntime((request) => {
       if (request.type !== 'TRANSLATE_BATCH') return;
-      if (!retrying) return Promise.resolve({ ok: false, error: 'Test failure' });
+      if (!retrying) return Promise.resolve({ ok: false, error: { text: 'Test failure' } });
       if (request.segments.some((s) => s.text.startsWith('Original')))
         return new Promise((resolve) => {
           release = () => resolve(successful(request));
@@ -991,7 +1367,7 @@ describe('translation pipeline regressions', () => {
       if (retrying) retried.push(...request.segments.map((s) => s.partIndex));
       else if (request.segments.some((s) => s.partIndex === 1))
         return new Promise((resolve) => {
-          release = () => resolve({ ok: false, error: 'Failed second part' });
+          release = () => resolve({ ok: false, error: { text: 'Failed second part' } });
         });
     });
     const instance = controller();

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendRuntimeMessage } from './chrome-api';
+import { sendRuntimeMessage, sendTabMessage } from './chrome-api';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,11 +18,22 @@ describe('runtime response boundary', () => {
 
   it.each([
     { ok: true, data: undefined },
-    { ok: false, error: '写入失败' },
+    { ok: false, error: { text: '写入失败' } },
   ])('preserves a valid result without retrying or changing its meaning: %j', async (response) => {
     const sendMessage = vi.fn().mockResolvedValue(response);
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
     await expect(sendRuntimeMessage({ type: 'GET_PUBLIC_SETTINGS' })).resolves.toBe(response);
     expect(sendMessage).toHaveBeenCalledOnce();
   });
+});
+
+it('forwards frame routing when sending a page command', async () => {
+  const response = { phase: 'idle' };
+  const sendMessage = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('chrome', { tabs: { sendMessage } });
+
+  await expect(
+    sendTabMessage(7, { type: 'GET_PAGE_STATUS' }, { frameId: 0 }),
+  ).resolves.toBe(response);
+  expect(sendMessage).toHaveBeenCalledWith(7, { type: 'GET_PAGE_STATUS' }, { frameId: 0 });
 });

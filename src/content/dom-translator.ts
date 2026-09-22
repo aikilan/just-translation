@@ -1,3 +1,4 @@
+import { t, message, LocalizedError, getUiLocale } from '../shared/i18n';
 import {
   applyDocumentTitleTranslations,
   applyTitleTranslation,
@@ -827,7 +828,7 @@ export function prepareTranslationRender(
   const { protectedText } = readSourceFragments(source);
   let text = translatedText;
   for (const [marker, original] of protectedText) {
-    if (!text.includes(marker)) throw new Error('AI 返回中缺少原样保留标记');
+    if (!text.includes(marker)) throw new LocalizedError(message('AI 返回中缺少原样保留标记'));
     text = text.replaceAll(marker, original);
   }
   return () => {
@@ -849,7 +850,9 @@ export function renderTranslationPending(source: HTMLElement, unitId: string): H
   setTranslationState(translation, 'pending');
   translation.setAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE, unitId);
   if (getTranslationUnitKind(source) === 'label') return translation;
-  translation.setAttribute('aria-label', '正在翻译');
+  translation.lang = getUiLocale();
+  translation.dir = getUiLocale() === 'ar' ? 'rtl' : 'ltr';
+  translation.setAttribute('aria-label', t('正在翻译'));
   translation.removeAttribute('role');
   translation.removeAttribute('tabindex');
   // The visual state is a CSS spinner; keep the DOM empty so no loading copy affects layout.
@@ -871,11 +874,13 @@ export function renderTranslationError(source: HTMLElement, unitId: string): HTM
     translation.removeAttribute('aria-label');
     return translation;
   }
-  translation.setAttribute('aria-label', '翻译失败 · 重试');
+  translation.lang = getUiLocale();
+  translation.dir = getUiLocale() === 'ar' ? 'rtl' : 'ltr';
+  translation.setAttribute('aria-label', t('翻译失败 · 重试'));
   translation.setAttribute('role', 'button');
   translation.tabIndex = 0;
   translation.removeAttribute('title');
-  translation.textContent = '翻译失败 · 重试';
+  translation.textContent = t('翻译失败 · 重试');
   return translation;
 }
 
@@ -916,6 +921,12 @@ function setTranslationState(
   state: 'pending' | 'translated' | 'error',
 ): void {
   translation.setAttribute(TRANSLATION_STATE_ATTRIBUTE, state);
+  translation.removeAttribute('data-justranslate-full-status');
+  if (state === 'translated') {
+    // UI direction belongs to status controls; completed text determines its own direction.
+    translation.dir = 'auto';
+    translation.removeAttribute('lang');
+  }
   const sourceColor = translation.style.getPropertyValue(SOURCE_COLOR_PROPERTY);
   if (sourceColor) {
     translation.style.setProperty('color', sourceColor, 'important');

@@ -21,7 +21,7 @@ describe('configuration service', () => {
     typeof vi.fn<(values: Record<string, TranslatorSettings>) => Promise<void>>
   >;
   beforeEach(() => {
-    stored = structuredClone({...DEFAULT_SETTINGS, profiles:[TEST_PROFILE]});
+    stored = structuredClone({ ...DEFAULT_SETTINGS, profiles: [TEST_PROFILE] });
     storageSet = vi.fn((values: Record<string, TranslatorSettings>) => {
       stored = structuredClone(values[SETTINGS_STORAGE_KEY]);
       return Promise.resolve();
@@ -117,6 +117,7 @@ describe('configuration service', () => {
       updateSiteRule({ list: 'excludedSites', hostname: 'bank.example.com', enabled: true }),
     ]);
     expect(stored).toMatchObject({
+      uiLanguage: 'system',
       targetLanguage: 'Japanese',
       displayMode: 'translation',
       autoTranslateSites: ['news.example.com'],
@@ -166,7 +167,7 @@ describe('configuration service', () => {
     }
     await expect(setSiteAutoTranslation('*.example.com', true)).rejects.toThrow();
     await expect(updateReadingPreferences({ targetLanguage: '' })).rejects.toThrow();
-    expect(stored).toEqual({...DEFAULT_SETTINGS, profiles:[TEST_PROFILE]});
+    expect(stored).toEqual({ ...DEFAULT_SETTINGS, profiles: [TEST_PROFILE] });
   });
   it('deduplicates rules and retains exclusion conflicts', async () => {
     await setSiteAutoTranslation('News.Example.com', true);

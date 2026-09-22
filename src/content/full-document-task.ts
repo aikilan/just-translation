@@ -1,3 +1,4 @@
+import { message, LocalizedError, t } from '../shared/i18n';
 import { getTitleSourceText, isDocumentTitle } from './document-title';
 import { getLabelText } from './label-presentation';
 import type { TranslationUnit } from '../shared/batching';
@@ -31,7 +32,7 @@ interface SourceUnit extends TranslationUnit {
   original: string;
 }
 const COMMIT_ATTRIBUTE = 'data-justranslate-full-pending';
-const SOURCE_CHANGED = '正文已变化，请重新全文翻译';
+const SOURCE_CHANGED = message('正文已变化，请重新全文翻译');
 
 /** Completed snapshot handed to the ordinary scheduler without exposing provider configuration. */
 export interface FullDocumentResult {
@@ -74,7 +75,8 @@ export class FullDocumentTranslationTask {
       const finishPreflight = this.metrics.start('preflight');
       const settings = await this.readSettings();
       this.abort.signal.throwIfAborted();
-      if (isUrlExcluded(location.href, settings.excludedSites)) throw new Error('当前站点已被排除');
+      if (isUrlExcluded(location.href, settings.excludedSites))
+        throw new LocalizedError(message('当前站点已被排除'));
       this.status.displayMode = settings.displayMode;
       const session = await sendRuntimeMessage<TranslationSessionInfo>({
         type: 'BEGIN_TRANSLATION_SESSION',
@@ -82,10 +84,10 @@ export class FullDocumentTranslationTask {
         sessionId: this.sessionId,
         profileId: settings.activeProfileId,
       });
-      if (!session.ok) throw new Error(session.error);
+      if (!session.ok) throw new LocalizedError(session.error);
       sessionStarted = true;
       this.abort.signal.throwIfAborted();
-      if (!session.data?.configurationId) throw new Error('翻译会话缺少配置指纹');
+      if (!session.data?.configurationId) throw new LocalizedError(message('翻译会话缺少配置指纹'));
       this.status.context = session.data.context;
       this.onCollect(settings);
       finishPreflight();
@@ -107,7 +109,8 @@ export class FullDocumentTranslationTask {
         const firstBodySource = this.sources.find((source) => !isDocumentTitle(source.element));
         if (firstBodySource) {
           const pending = renderTranslationPending(firstBodySource.element, firstBodySource.id);
-          pending.setAttribute('aria-label', '正在翻译全文');
+          pending.dataset.justranslateFullStatus = 'true';
+          pending.setAttribute('aria-label', t('正在翻译全文'));
         }
         this.status.stage = 'requesting';
         // Only IDs and protected source text cross the extension message boundary.
@@ -124,7 +127,7 @@ export class FullDocumentTranslationTask {
       });
       if (!response) return { session: session.data, sources: [] };
       this.abort.signal.throwIfAborted();
-      if (!response.ok) throw new Error(response.error);
+      if (!response.ok) throw new LocalizedError(response.error);
       assertCompleteResult(this.sources, response.data);
       const finishRender = this.metrics.start('render');
       await this.withCurrentSnapshot(() => {
@@ -135,7 +138,7 @@ export class FullDocumentTranslationTask {
           this.render.enqueue(() => {
             this.abort.signal.throwIfAborted();
             if (!source.element.isConnected || originalText(source.element) !== source.original)
-              throw new Error(SOURCE_CHANGED);
+              throw new LocalizedError(SOURCE_CHANGED);
             return prepareTranslationRender(source.element, response.data[source.id]);
           });
         }
@@ -175,7 +178,8 @@ export class FullDocumentTranslationTask {
       if (first) {
         const control = renderTranslationError(first, 'full-retry');
         if (control.getAttribute('role') !== 'button') return;
-        control.textContent = '全文翻译失败 · 重试全文';
+        control.dataset.justranslateFullStatus = 'true';
+        control.textContent = t('全文翻译失败 · 重试全文');
         control.setAttribute('aria-label', control.textContent);
         // The first reading unit can be a heading; feedback stays compact at that location.
         control.style.setProperty('font-size', '14px', 'important');
@@ -308,7 +312,7 @@ export class FullDocumentTranslationTask {
           originalText(source.element) !== source.original,
       )
     )
-      throw new Error(SOURCE_CHANGED);
+      throw new LocalizedError(SOURCE_CHANGED);
   }
 }
 
@@ -340,5 +344,5 @@ function assertCompleteResult(units: TranslationUnit[], result: Record<string, s
         !preservesProtectedMarkers(unit.text, result[unit.id]),
     )
   )
-    throw new Error('全文结果不完整或保护标记损坏，请重新全文翻译');
+    throw new LocalizedError(message('全文结果不完整或保护标记损坏，请重新全文翻译'));
 }

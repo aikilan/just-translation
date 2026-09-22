@@ -4,12 +4,55 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TranslationSegment } from '../shared/batching';
 import {
   TRANSLATION_BATCH_PROFILES,
+  TranslationBatchDeferredError,
   TranslationScheduler,
   type ScheduledTranslationBatch,
   type ScheduledTranslationUnit,
 } from './translation-scheduler';
 
 describe('TranslationScheduler', () => {
+  it('rejects idle waiters when an external viewport refresh fails', async () => {
+    const scheduler = new TranslationScheduler(async () => {}, {
+      canDispatchBackground: () => false,
+    });
+    scheduler.enqueue(createUnits('background', 4, 100, 0));
+    const work = scheduler.waitForIdle();
+    scheduler.stop(new Error('viewport discovery failed'));
+    await expect(work).rejects.toThrow('viewport discovery failed');
+  });
+
+  it('returns an unsent batch to its latest priority without losing or duplicating segments', async () => {
+    let defer!: (error: Error) => void;
+    const batches: ScheduledTranslationBatch[] = [];
+    const scheduler = new TranslationScheduler(
+      (batch) => {
+        batches.push(batch);
+        return batches.length === 1
+          ? new Promise<void>((_resolve, reject) => {
+              defer = reject;
+            })
+          : Promise.resolve();
+      },
+      { concurrency: 1 },
+    );
+    const old = createUnits('visible', 4, 100, 0);
+    const next = createUnits('background', 4, 100, 10);
+    scheduler.enqueue(old);
+    scheduler.enqueue(next);
+    scheduler.updatePriorities([
+      ...old.map((unit) => ({ ...unit, priority: 'background' as const })),
+      ...next.map((unit) => ({ ...unit, priority: 'visible' as const })),
+    ]);
+    defer(new TranslationBatchDeferredError());
+    await scheduler.waitForIdle();
+    expect(batches.map((batch) => batch.segments.map((segment) => segment.unitId))).toEqual([
+      old.map((unit) => unit.id),
+      next.map((unit) => unit.id),
+      old.map((unit) => unit.id),
+    ]);
+    expect(batches[2].priority).toBe('background');
+  });
+
   it('uses all four default slots for background work and waits for a free slot for foreground', async () => {
     const releases: Array<() => void> = [];
     const priorities: string[] = [];

@@ -114,7 +114,7 @@ it('validates a budget against output cap, retains the draft on save failure and
   expect(view.container.textContent).toContain('思考预算必须至少 1024 且小于输出上限');
   expect(send.mock.calls.some(([r]) => r.type === 'SAVE_TRANSLATION_PROFILE')).toBe(false);
   await input(view.container, '输出上限', '8192');
-  send.mockResolvedValueOnce({ ok: false, error: '保存失败' } as never);
+  send.mockResolvedValueOnce({ ok: false, error: { text: '保存失败' } } as never);
   await click(view.container, '保存配置');
   expect(view.container.querySelector<HTMLInputElement>('[aria-label="思考预算"]')?.value).toBe(
     '2048',

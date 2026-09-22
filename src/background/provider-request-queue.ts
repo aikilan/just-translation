@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import PQueue from 'p-queue';
 
 import type { TranslationPriority } from '../shared/messages';
@@ -40,7 +41,10 @@ export class ProviderRequestQueue {
           this.waiting.delete(jobId);
           signal.throwIfAborted();
           const timeout = new AbortController();
-          const timer = setTimeout(() => timeout.abort(new Error('API 请求超时')), timeoutMs);
+          const timer = setTimeout(
+            () => timeout.abort(new LocalizedError(message('API 请求超时'))),
+            timeoutMs,
+          );
           const attemptSignal = AbortSignal.any([signal, timeout.signal]);
           try {
             return await task(attemptSignal);
@@ -56,10 +60,10 @@ export class ProviderRequestQueue {
   }
 
   /** Reprioritize only queued attempts; running or completed IDs are deliberately ignored. */
-  promote(apiUrl: string, jobId: string, priority: TranslationPriority): void {
+  updatePriority(apiUrl: string, jobId: string, priority: TranslationPriority): void {
     const entry = this.waiting.get(jobId);
     if (!entry || entry.provider !== this.providers.get(new URL(apiUrl).origin)) return;
-    if (PRIORITY[priority] <= PRIORITY[entry.priority]) return;
+    if (priority === entry.priority) return;
     entry.provider.queue.setPriority(jobId, PRIORITY[priority]);
     entry.priority = priority;
   }

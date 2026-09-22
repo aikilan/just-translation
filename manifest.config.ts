@@ -4,8 +4,9 @@ import packageJson from './package.json' with { type: 'json' };
 
 export default defineManifest({
   manifest_version: 3,
-  name: '只是翻译',
-  description: '使用你自己的 OpenAI 协议 API，在网页原文下方展示译文。',
+  name: '__MSG_extensionName__',
+  default_locale: 'en',
+  description: '__MSG_extensionDescription__',
   version: packageJson.version,
   minimum_chrome_version: '120',
   permissions: ['storage', 'activeTab', 'contextMenus', 'alarms', 'webNavigation'],
@@ -15,7 +16,7 @@ export default defineManifest({
     type: 'module',
   },
   action: {
-    default_title: '只是翻译',
+    default_title: '__MSG_extensionName__',
     default_popup: 'src/popup/index.html',
     default_icon: {
       16: 'icons/icon-16.png',
@@ -50,7 +51,7 @@ export default defineManifest({
         default: 'Alt+T',
         mac: 'Alt+T',
       },
-      description: '翻译或恢复当前网页',
+      description: '__MSG_translateCommand__',
     },
   },
 });

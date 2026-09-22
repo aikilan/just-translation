@@ -1,3 +1,5 @@
+import { initializeBackgroundLanguage } from './ui-language';
+import { message, LocalizedError } from '../shared/i18n';
 import { configuredProviderOptions } from '../shared/providers';
 import { translateBatch, translateFullDocument } from '../shared/translation-client';
 import { AbortableRequestRegistry } from './request-registry';
@@ -8,13 +10,14 @@ import {
   handlePageTranslationMenuClick,
   RetryMenuRegistration,
   RETRY_FAILED_MENU_ID,
-  RETRY_FAILED_MENU_PROPERTIES,
+  retryFailedMenuProperties,
 } from './context-menu';
 import {
   readPublicSettings,
   saveTranslationProfile,
   deleteTranslationProfile,
   updateReadingPreferences,
+  updateUiLanguage,
   updateSiteRule,
   selectActiveProfile,
   setSiteAutoTranslation,
@@ -52,7 +55,16 @@ const selectionTranslations = new SelectionTranslationService(
 const translationCache = new TranslationCache();
 const candidateResolver = new CandidateResolver(translationCache);
 const translationSessions = new TranslationSessionStore(chrome.storage.session);
-const batchPriorities = new Map<string, { priority: TranslationPriority; cancelled: boolean }>();
+const translationBatches = new Map<
+  string,
+  {
+    priority: TranslationPriority;
+    priorityRevision: number;
+    cancelled: boolean;
+    started: boolean;
+    deferred: boolean;
+  }
+>();
 
 const TRANSLATION_REQUEST_POLICIES: Readonly<Record<TranslationPriority, { timeoutMs: number }>> = {
   visible: { timeoutMs: 20_000 },
@@ -66,6 +78,7 @@ void initializeSettings();
 void ensureCacheCleanupAlarm(chrome.alarms);
 // One registration per worker evaluation also covers install/startup, without concurrent resets.
 const menuReady = ensureContextMenu();
+initializeBackgroundLanguage(menuReady);
 const retryMenu = new RetryMenuRegistration(
   async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -74,7 +87,7 @@ const retryMenu = new RetryMenuRegistration(
   },
   async (registered) => {
     await menuReady;
-    if (registered) await createContextMenu(RETRY_FAILED_MENU_PROPERTIES);
+    if (registered) await createContextMenu(retryFailedMenuProperties());
     else await chrome.contextMenus.remove(RETRY_FAILED_MENU_ID);
   },
 );
@@ -157,12 +170,13 @@ async function handleRuntimeRequest(
         'SAVE_TRANSLATION_PROFILE',
         'DELETE_TRANSLATION_PROFILE',
         'UPDATE_READING_PREFERENCES',
+        'UPDATE_UI_LANGUAGE',
         'UPDATE_SITE_RULE',
         'SET_ACTIVE_PROFILE',
         'SET_SITE_AUTO_TRANSLATE',
       ].includes(request.type)
     ) {
-      throw new Error('设置只能由扩展页面修改');
+      throw new LocalizedError(message('设置只能由扩展页面修改'));
     }
     switch (request.type) {
       case 'PAGE_RETRY_STATE_CHANGED':
@@ -181,7 +195,7 @@ async function handleRuntimeRequest(
       }
       case 'BEGIN_TRANSLATION_SESSION': {
         if (request.mode !== 'segmented' && request.mode !== 'full-document')
-          throw new Error('翻译模式无效');
+          throw new LocalizedError(message('翻译模式无效'));
         const identity = getSenderPageIdentity(sender, request.sessionId);
         const settings = await getConfiguredSettings(request.profileId);
         await assertCurrentDocument(identity);
@@ -270,12 +284,19 @@ async function handleRuntimeRequest(
       case 'TRANSLATE_BATCH': {
         const identity = getSenderPageIdentity(sender, request.sessionId);
         const requestKey = `${getRequestPrefix(identity)}${request.batchId}`;
-        const batchState = { priority: request.priority, cancelled: false };
-        batchPriorities.set(requestKey, batchState);
+        const batchState = {
+          priority: request.priority,
+          priorityRevision: 0,
+          cancelled: false,
+          started: false,
+          deferred: false,
+        };
+        translationBatches.set(requestKey, batchState);
         try {
           const session = await getTranslationSession(sender, request.sessionId);
           assertSessionMode(session, 'segmented');
-          if (batchState.cancelled) throw new Error('API 请求已取消');
+          if (batchState.cancelled) throw new LocalizedError(message('API 请求已取消'));
+          if (batchState.deferred) return { ok: true, data: { deferred: true } };
           const documentId = session.documentId;
           const publish = (data: Pick<TranslationBatchProgress, 'translations' | 'timing'>) => {
             const event: TranslationBatchProgress = {
@@ -309,6 +330,9 @@ async function handleRuntimeRequest(
                       // A suspended worker can wake for an old message: validate again at HTTP admission.
                       await assertCurrentDocument(session);
                       attemptSignal.throwIfAborted();
+                      // No await between this boundary and the HTTP attempt: viewport updates
+                      // may only return batches that have never submitted a request.
+                      batchState.started = true;
                       return attempt(attemptSignal);
                     },
                     requestKey,
@@ -318,27 +342,42 @@ async function handleRuntimeRequest(
             0,
           );
           return { ok: true, data: translations };
+        } catch (error) {
+          if (batchState.deferred && !batchState.cancelled)
+            return { ok: true, data: { deferred: true } };
+          throw error;
         } finally {
-          batchPriorities.delete(requestKey);
+          translationBatches.delete(requestKey);
         }
       }
       case 'CANCEL_TRANSLATION_BATCH': {
         const identity = getSenderPageIdentity(sender, request.sessionId);
         const key = `${getRequestPrefix(identity)}${request.batchId}`;
-        const state = batchPriorities.get(key);
+        const state = translationBatches.get(key);
         if (state) state.cancelled = true;
         activeRequests.cancel(key);
         return { ok: true, data: undefined };
       }
-      case 'PROMOTE_TRANSLATION_BATCHES': {
+      case 'UPDATE_TRANSLATION_PRIORITIES': {
         const session = await getTranslationSession(sender, request.sessionId);
-        const ranks = { background: 0, readAhead: 1, visible: 2 };
-        for (const batchId of request.batchIds) {
+        for (const { batchId, priority } of request.batches) {
           const key = `${getRequestPrefix(session)}${batchId}`;
-          const state = batchPriorities.get(key);
-          if (!state || ranks[state.priority] >= ranks[request.priority]) continue;
-          state.priority = request.priority;
-          providerRequests.promote(session.settings.apiUrl, key, request.priority);
+          const state = translationBatches.get(key);
+          // Storage/document checks may resolve out of order; older snapshots never win.
+          if (!state || request.revision <= state.priorityRevision) continue;
+          state.priorityRevision = request.revision;
+          state.priority = priority;
+          if (
+            request.requeueUnsent &&
+            priority !== 'visible' &&
+            !state.started &&
+            !state.cancelled
+          ) {
+            state.deferred = true;
+            activeRequests.cancel(key);
+          } else {
+            providerRequests.updatePriority(session.settings.apiUrl, key, priority);
+          }
         }
         return { ok: true, data: undefined };
       }
@@ -359,6 +398,8 @@ async function handleRuntimeRequest(
       case 'DELETE_TRANSLATION_PROFILE': {
         return { ok: true, data: await deleteTranslationProfile(request.profileId) };
       }
+      case 'UPDATE_UI_LANGUAGE':
+        return { ok: true, data: await updateUiLanguage(request.uiLanguage) };
       case 'UPDATE_READING_PREFERENCES': {
         return { ok: true, data: await updateReadingPreferences(request.patch) };
       }
@@ -376,7 +417,7 @@ async function handleRuntimeRequest(
       }
     }
     // An extension page may still send a different build's command; never return an empty reply.
-    return { ok: false, error: '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面' };
+    return { ok: false, error: message('扩展页面与后台消息不一致，请重新加载扩展并重新打开页面') };
   } catch (error) {
     return { ok: false, error: getErrorMessage(error) };
   }
@@ -385,12 +426,12 @@ async function handleRuntimeRequest(
 async function getConfiguredSettings(profileId: string) {
   const settings = await getSettings();
   const profile = getActiveProfile(settings, profileId);
-  if (!profile) throw new Error('翻译配置不存在');
+  if (!profile) throw new LocalizedError(message('翻译配置不存在'));
   if (
     Object.keys(validateTranslationProfile(profile)).length > 0 ||
     !settings.targetLanguage.trim()
   ) {
-    throw new Error('请先在设置页完成 API 配置');
+    throw new LocalizedError(message('请先在设置页完成 API 配置'));
   }
   return {
     ...profile,
@@ -404,7 +445,7 @@ function assertSessionMode(
   session: TranslationSessionContext,
   mode: TranslationSessionContext['mode'],
 ): void {
-  if (session.mode !== mode) throw new Error('翻译命令与当前会话模式不一致');
+  if (session.mode !== mode) throw new LocalizedError(message('翻译命令与当前会话模式不一致'));
 }
 
 function getCacheContext(session: TranslationSessionContext): TranslationCacheContext {
@@ -423,7 +464,8 @@ async function getTranslationSession(
 
 async function assertCurrentDocument(identity: TranslationSessionIdentity): Promise<void> {
   const current = await chrome.webNavigation.getFrame({ tabId: identity.tabId, frameId: 0 });
-  if (current?.documentId !== identity.documentId) throw new Error('当前网页已变化，翻译会话失效');
+  if (current?.documentId !== identity.documentId)
+    throw new LocalizedError(message('当前网页已变化，翻译会话失效'));
 }
 
 /** Uses browser-owned sender metadata so a webpage cannot choose another cache origin. */
@@ -433,11 +475,12 @@ function getSenderPageIdentity(
 ): TranslationSessionIdentity {
   const tabId = sender.tab?.id;
   const tabUrl = sender.tab?.url;
-  if (tabId === undefined || !tabUrl) throw new Error('无法确定当前网页站点');
-  if (!sender.documentId || sender.frameId !== 0) throw new Error('无法确定请求所属网页文档');
+  if (tabId === undefined || !tabUrl) throw new LocalizedError(message('无法确定当前网页站点'));
+  if (!sender.documentId || sender.frameId !== 0)
+    throw new LocalizedError(message('无法确定请求所属网页文档'));
   const url = new URL(tabUrl);
   if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error('当前页面不支持翻译缓存');
+    throw new LocalizedError(message('当前页面不支持翻译缓存'));
   }
   return {
     tabId,
@@ -470,7 +513,7 @@ function createContextMenu(properties: chrome.contextMenus.CreateProperties): Pr
   return new Promise<void>((resolve, reject) => {
     chrome.contextMenus.create(properties, () => {
       const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
+      if (error) reject(new LocalizedError(error.message ?? message('发生未知错误')));
       else resolve();
     });
   });

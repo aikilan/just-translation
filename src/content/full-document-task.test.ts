@@ -1,3 +1,4 @@
+import { renderMessage } from '../shared/i18n';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TranslationController } from './controller';
@@ -12,6 +13,7 @@ let failure: string | undefined;
 const resultNodes = () => document.querySelectorAll('[data-justranslate-state="translated"]');
 beforeEach(() => {
   settings = {
+    uiLanguage: 'system',
     configured: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
     activeProfileId: 'p',
@@ -62,7 +64,7 @@ beforeEach(() => {
         finish = () =>
           resolve(
             failure
-              ? { ok: false, error: failure }
+              ? { ok: false, error: { text: failure } }
               : {
                   ok: true,
                   data: Object.fromEntries(request.units.map((u) => [u.id, `译文 ${u.text}`])),
@@ -140,7 +142,7 @@ describe('full document lifecycle', () => {
       finish();
       await work;
       expect(resultNodes()).toHaveLength(0);
-      expect(controller.getStatus().error).toContain('正文已变化');
+      expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
       expect(document.querySelector('[data-justranslate-source-content][hidden]')).toBeNull();
     },
   );
@@ -282,7 +284,7 @@ describe('full document lifecycle', () => {
     await work;
     observer.disconnect();
     expect(resultNodes()).toHaveLength(0);
-    expect(controller.getStatus().error).toContain('正文已变化');
+    expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
   });
 
   it('cancels during staged rendering without exposing any translated result', async () => {
@@ -319,7 +321,7 @@ describe('full document lifecycle', () => {
     await work;
     expect(changed).toBe(true);
     expect(resultNodes()).toHaveLength(0);
-    expect(controller.getStatus().error).toContain('正文已变化');
+    expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
   });
 
   it('places the full retry on the first reading unit even when restoring unwraps raw prose', async () => {
@@ -398,7 +400,7 @@ describe('full document lifecycle', () => {
       finish();
       await work;
       if (change === 'visibility') {
-        expect(controller.getStatus().error).toContain('正文已变化');
+        expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
         expect(resultNodes()).toHaveLength(0);
       } else {
         expect(controller.getStatus().error).toBeUndefined();
@@ -421,7 +423,7 @@ describe('full document lifecycle', () => {
     document.querySelector('p')!.dataset.state = 'hidden';
     finish();
     await work;
-    expect(controller.getStatus().error).toContain('正文已变化');
+    expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
     expect(resultNodes()).toHaveLength(0);
   });
 });
@@ -511,7 +513,7 @@ it('preserves successful full translations when incremental requests fail and re
   let failBatch = true;
   send.mockImplementation((request) =>
     request.type === 'TRANSLATE_BATCH' && failBatch
-      ? Promise.resolve({ ok: false, error: 'Incremental failure' })
+      ? Promise.resolve({ ok: false, error: { text: 'Incremental failure' } })
       : normal(request),
   );
   document.querySelector('main')!.insertAdjacentHTML('beforeend', '<button>添加学员</button>');
@@ -598,7 +600,7 @@ it('rejects captured text changed between the atomic reveal and controller hando
   await work;
   observer.disconnect();
   expect(controller.getStatus().phase).toBe('error');
-  expect(controller.getStatus().error).toContain('正文已变化');
+  expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
   expect(resultNodes()).toHaveLength(0);
 });
 

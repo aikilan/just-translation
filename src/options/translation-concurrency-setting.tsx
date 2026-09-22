@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { PublicTranslatorSettings } from '../shared/messages';
 import { MAX_TRANSLATION_CONCURRENCY, type TranslatorSettings } from '../shared/settings';
@@ -35,12 +36,12 @@ export function TranslationConcurrencySetting({ settings, onSaved }: Props) {
   return (
     <div className="preferences-list">
       <SettingRow
-        label="单页翻译并发数"
-        description="同时处理的翻译请求数，默认 4。优先翻译可视区，再继续处理屏外内容。"
+        label={t('单页翻译并发数')}
+        description={t('同时处理的翻译请求数，默认 4。优先翻译可视区，再继续处理屏外内容。')}
         feedback={feedback.translationConcurrency}
       >
         <select
-          aria-label="单页翻译并发数"
+          aria-label={t('单页翻译并发数')}
           value={draft}
           disabled={feedback.translationConcurrency?.status === 'saving'}
           onChange={(event) => change(Number(event.target.value))}

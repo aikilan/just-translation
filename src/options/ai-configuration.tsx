@@ -1,3 +1,4 @@
+import { t, renderMessage, type UiMessage } from '../shared/i18n';
 import { DEFAULT_PROVIDER_OPTIONS, getModelCapability } from '../shared/providers';
 import { ProviderFields, ThinkingFields, ModelSuggestions } from './provider-fields';
 import { Check, Eye, EyeOff, LoaderCircle, Plus, Trash2 } from 'lucide-react';
@@ -20,7 +21,7 @@ type TestState =
   | { status: 'untested' }
   | { status: 'testing' }
   | { status: 'passed'; text: string; latency: number }
-  | { status: 'failed'; message: string };
+  | { status: 'failed'; message: UiMessage };
 interface Props {
   settings: TranslatorSettings;
   onSaved: (profile: TranslationProfile, result: PublicTranslatorSettings) => void;
@@ -136,13 +137,13 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
   function add() {
     const id = crypto.randomUUID();
     let number = drafts.length + 1;
-    while (drafts.some((item) => item.name === `配置 ${number}`)) number += 1;
+    while (drafts.some((item) => item.name === t('配置 {{p0}}', { p0: number }))) number += 1;
     setDrafts((existing) => [
       ...existing,
       {
         ...DEFAULT_PROVIDER_OPTIONS,
         id,
-        name: `配置 ${number}`,
+        name: t('配置 {{p0}}', { p0: number }),
         apiUrl: '',
         apiKey: '',
         model: '',
@@ -221,7 +222,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
   function fieldError(field: keyof TranslationProfileValidationErrors) {
     return errors[field] ? (
       <small className="field-error" role="alert" id={`${idPrefix}-${field}-error`}>
-        {errors[field]}
+        {renderMessage(errors[field])}
       </small>
     ) : null;
   }
@@ -232,23 +233,26 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
     }));
   }
 
-  if (!profile) return <p>此配置已删除，请重新打开设置。</p>;
+  if (!profile) return <p>{t('此配置已删除，请重新打开设置。')}</p>;
   return (
     <>
       {firstRun ? (
         <div className="onboarding">
-          <span className="eyebrow">开始使用</span>
-          <h2>连接你的第一个 AI</h2>
-          <p>填写接口和模型，测试连接后保存。也可以直接保存，稍后测试。</p>
+          <span className="eyebrow">{t('开始使用')}</span>
+          <h2>{t('连接你的第一个 AI')}</h2>
+          <p>{t('填写接口和模型，测试连接后保存。也可以直接保存，稍后测试。')}</p>
           <ol>
             <li>
-              <span>1</span>填写配置
+              <span>1</span>
+              {t('填写配置')}
             </li>
             <li>
-              <span>2</span>测试连接
+              <span>2</span>
+              {t('测试连接')}
             </li>
             <li>
-              <span>3</span>保存并开始阅读
+              <span>3</span>
+              {t('保存并开始阅读')}
             </li>
           </ol>
         </div>
@@ -256,24 +260,24 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
       <div className="profile-header">
         <div className="profile-toolbar">
           <label className="profile-picker">
-            <span>正在编辑的配置</span>
+            <span>{t('正在编辑的配置')}</span>
             <select
-              aria-label="正在编辑的配置"
+              aria-label={t('正在编辑的配置')}
               value={selectedId}
               disabled={busy}
               onChange={(event) => select(event.target.value)}
             >
               {drafts.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name || '未命名配置'}
-                  {item.id === settings.activeProfileId ? ' · 当前使用' : ''}
+                  {item.name || t('未命名配置')}
+                  {item.id === settings.activeProfileId ? t(' · 当前使用') : ''}
                 </option>
               ))}
             </select>
           </label>
           <button className="button" type="button" disabled={busy} onClick={add}>
             <Plus aria-hidden="true" />
-            新增配置
+            {t('新增配置')}
           </button>
         </div>
         <div className="profile-state">
@@ -281,13 +285,13 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
             {current ? (
               <>
                 <Check aria-hidden="true" />
-                当前使用
+                {t('当前使用')}
               </>
             ) : (
-              '未启用'
+              t('未启用')
             )}
             <span className="separator">·</span>
-            {dirty ? '未保存' : '已保存'}
+            {dirty ? t('未保存') : t('已保存')}
           </span>
           {!current ? (
             <button
@@ -298,15 +302,15 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                 void save('ai', { type: 'SET_ACTIVE_PROFILE', profileId: selectedId }, onActivated);
               }}
             >
-              设为当前使用
+              {t('设为当前使用')}
             </button>
           ) : null}
         </div>
       </div>
       <form onSubmit={submit} noValidate>
-        <fieldset className="editor-section" aria-label="连接信息">
-          <legend>连接信息</legend>
-          <p className="editor-section-description">选择服务商，填写接口与模型。</p>
+        <fieldset className="editor-section" aria-label={t('连接信息')}>
+          <legend>{t('连接信息')}</legend>
+          <p className="editor-section-description">{t('选择服务商，填写接口与模型。')}</p>
           <div className="form-section">
             <ProviderFields
               profile={profile}
@@ -317,9 +321,10 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
             {fieldError('provider')}
             {fieldError('protocol')}
             <label className="field">
-              <span>配置名称</span>
+              <span>{t('配置名称')}</span>
               <input
-                aria-label="配置名称"
+                aria-label={t('配置名称')}
+                dir="auto"
                 {...errorProps('name')}
                 value={profile.name}
                 disabled={busy}
@@ -329,12 +334,13 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
               {fieldError('name')}
             </label>
             <label className="field">
-              <span>API 地址</span>
+              <span>{t('API 地址')}</span>
               <input
-                aria-label="API 地址"
+                aria-label={t('API 地址')}
                 {...errorProps('apiUrl')}
                 type="url"
                 spellCheck={false}
+                dir="ltr"
                 placeholder="https://api.example.com/v1"
                 value={profile.apiUrl}
                 disabled={busy}
@@ -344,7 +350,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                   edit({ apiUrl: event.target.value });
                 }}
               />
-              <small>支持所选协议的基础地址或完整请求地址，保留自定义路径。</small>
+              <small>{t('支持所选协议的基础地址或完整请求地址，保留自定义路径。')}</small>
               {fieldError('apiUrl')}
             </label>
             <div className="credential-grid">
@@ -356,15 +362,16 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                     type={showKey ? 'text' : 'password'}
                     autoComplete="off"
                     spellCheck={false}
+                    dir="ltr"
                     value={profile.apiKey}
-                    placeholder="本地服务可留空"
+                    placeholder={t('本地服务可留空')}
                     disabled={busy}
                     onChange={(event) => edit({ apiKey: event.target.value })}
                   />
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                    aria-label={showKey ? t('隐藏 API Key') : t('显示 API Key')}
                     onClick={() => setShowKey((value) => !value)}
                   >
                     {showKey ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
@@ -372,14 +379,15 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                 </span>
               </label>
               <label className="field">
-                <span>模型</span>
+                <span>{t('模型')}</span>
                 <input
-                  aria-label="模型"
+                  aria-label={t('模型')}
                   list={`${idPrefix}-models`}
                   {...errorProps('model')}
                   value={profile.model}
                   spellCheck={false}
-                  placeholder="服务商提供的模型名称"
+                  dir="ltr"
+                  placeholder={t('服务商提供的模型名称')}
                   disabled={busy}
                   onBlur={() => blur('model')}
                   onChange={(event) => {
@@ -403,38 +411,40 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
             </div>
           </div>
         </fieldset>
-        <fieldset className="editor-section behavior-section" aria-label="模型行为">
-          <legend>模型行为</legend>
+        <fieldset className="editor-section behavior-section" aria-label={t('模型行为')}>
+          <legend>{t('模型行为')}</legend>
           <ThinkingFields profile={profile} disabled={busy} onChange={edit} />
           {fieldError('thinkingControl')}
           <details className="prompt-details">
             <summary>
-              高级设置<span>自定义翻译 Prompt</span>
+              {t('高级设置')}
+              <span>{t('自定义翻译 Prompt')}</span>
             </summary>
             <div className="prompt-editor">
               <div className="prompt-heading">
-                <label htmlFor={`${idPrefix}-translationPrompt`}>翻译 Prompt</label>
+                <label htmlFor={`${idPrefix}-translationPrompt`}>{t('翻译 Prompt')}</label>
                 <button
                   type="button"
                   className="text-button"
                   disabled={busy}
                   onClick={() => edit({ translationPrompt: DEFAULT_TRANSLATION_PROMPT })}
                 >
-                  恢复默认 Prompt
+                  {t('恢复默认 Prompt')}
                 </button>
               </div>
               <textarea
-                aria-label="自定义翻译 Prompt"
+                aria-label={t('自定义翻译 Prompt')}
                 {...errorProps('translationPrompt')}
                 rows={6}
                 maxLength={MAX_TRANSLATION_PROMPT_CHARACTERS}
+                dir="auto"
                 value={profile.translationPrompt}
                 disabled={busy}
                 onBlur={() => blur('translationPrompt')}
                 onChange={(event) => edit({ translationPrompt: event.target.value })}
               />
               <div className="prompt-hint">
-                <small>用 {'{{targetLanguage}}'} 表示目标语言。</small>
+                <small>{t('用 {{p0}} 表示目标语言。', { p0: '{{targetLanguage}}' })}</small>
                 <small>
                   {profile.translationPrompt.length} / {MAX_TRANSLATION_PROMPT_CHARACTERS}
                 </small>
@@ -451,12 +461,12 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
             <div className="connection-heading">
               <span className="status-dot" />
               {state.status === 'testing'
-                ? '测试中'
+                ? t('测试中')
                 : state.status === 'passed'
-                  ? '测试通过'
+                  ? t('测试通过')
                   : state.status === 'failed'
-                    ? '测试失败'
-                    : '未测试'}
+                    ? t('测试失败')
+                    : t('未测试')}
               {state.status === 'passed' ? (
                 <span className="latency">{state.latency} ms</span>
               ) : null}
@@ -464,27 +474,28 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
             {state.status === 'passed' ? (
               <>
                 <p className="test-translation">{state.text}</p>
-                <small>接口响应有效，请根据测试译文确认翻译质量。</small>
+                <small>{t('接口响应有效，请根据测试译文确认翻译质量。')}</small>
               </>
             ) : state.status === 'failed' ? (
-              <p>{state.message}</p>
+              <p>{renderMessage(state.message)}</p>
             ) : (
               <p>
                 {state.status === 'testing'
-                  ? '正在请求你的 API…'
-                  : '测试会直接请求你的 API，不会保存或启用配置。'}
+                  ? t('正在请求你的 API…')
+                  : t('测试会直接请求你的 API，不会保存或启用配置。')}
               </p>
             )}
           </div>
         </div>
         <div className="ai-actions">
           <div className="action-state" role="status">
-            {dirty ? '有未保存的修改' : feedback.ai ? null : '配置已保存'}
+            {dirty ? t('有未保存的修改') : feedback.ai ? null : t('配置已保存')}
             <SaveFeedback state={feedback.ai} />
           </div>
           <div className="action-buttons">
             <button className="button button-primary" type="submit" disabled={busy}>
-              {busy ? <LoaderCircle className="spin" aria-hidden="true" /> : null}保存配置
+              {busy ? <LoaderCircle className="spin" aria-hidden="true" /> : null}
+              {t('保存配置')}
             </button>
             <button
               className="button"
@@ -492,18 +503,18 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
               disabled={busy || state.status === 'testing'}
               onClick={() => void testConnection()}
             >
-              {state.status === 'testing' ? '测试中…' : '测试连接'}
+              {state.status === 'testing' ? t('测试中…') : t('测试连接')}
             </button>
             {dirty ? (
               <button className="text-button" type="button" disabled={busy} onClick={discard}>
-                放弃修改
+                {t('放弃修改')}
               </button>
             ) : null}
           </div>
         </div>
       </form>
       <div className="configuration-footer">
-        <p>{current ? '当前正在使用此配置' : '此配置尚未启用'}</p>
+        <p>{current ? t('当前正在使用此配置') : t('此配置尚未启用')}</p>
         <button
           ref={deleteTrigger}
           className="text-button danger-text"
@@ -512,9 +523,9 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
           onClick={() => setConfirmDelete(true)}
         >
           <Trash2 aria-hidden="true" />
-          删除配置
+          {t('删除配置')}
         </button>
-        {current ? <small>删除前请先启用其他配置。</small> : null}
+        {current ? <small>{t('删除前请先启用其他配置。')}</small> : null}
       </div>
       {confirmDelete ? (
         <dialog
@@ -523,11 +534,11 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
           aria-labelledby={`${idPrefix}-delete-title`}
           onCancel={() => setConfirmDelete(false)}
         >
-          <h2 id={`${idPrefix}-delete-title`}>删除“{profile.name}”？</h2>
-          <p>配置和未保存的修改会一并移除。</p>
+          <h2 id={`${idPrefix}-delete-title`}>{t('删除“{{p0}}”？', { p0: profile.name })}</h2>
+          <p>{t('配置和未保存的修改会一并移除。')}</p>
           <div className="dialog-actions">
             <button className="button" disabled={busy} onClick={() => setConfirmDelete(false)}>
-              取消
+              {t('取消')}
             </button>
             <button
               className="button button-danger"
@@ -549,7 +560,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                 );
               }}
             >
-              确认删除
+              {t('确认删除')}
             </button>
           </div>
           <SaveFeedback state={feedback.ai} />

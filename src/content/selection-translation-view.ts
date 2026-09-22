@@ -1,4 +1,13 @@
+import {
+  t,
+  renderMessage,
+  type UiMessage,
+  message,
+  getUiLocale,
+  subscribeUiLanguage,
+} from '../shared/i18n';
 import type { SelectionTranslationResult } from '../shared/messages';
+import { translationLanguageLabel } from '../shared/translation-languages';
 import styles from './selection-translation.css?inline';
 
 export interface SelectionRect {
@@ -46,6 +55,9 @@ export class SelectionTranslationView {
   private anchor?: SelectionAnchor;
   private previousFocus?: Element | null;
   private translated = '';
+  private targetLanguage = '';
+  private statusMessage: UiMessage = message('翻译中…');
+  private readonly unsubscribe: () => void;
 
   constructor(private readonly actions: ViewActions) {
     this.host.setAttribute('data-justranslate-selection', '');
@@ -56,13 +68,14 @@ export class SelectionTranslationView {
     style.textContent = styles;
     this.popup.setAttribute('popover', 'manual');
     this.popup.setAttribute('role', 'dialog');
-    this.popup.setAttribute('aria-label', '划选翻译');
+    this.popup.setAttribute('aria-label', t('划选翻译'));
     const header = document.createElement('header');
     const title = document.createElement('strong');
-    title.textContent = '只是翻译';
+    title.textContent = t('只是翻译');
     this.language.className = 'language';
-    const close = this.button('close', '关闭', actions.close);
-    close.setAttribute('aria-label', '关闭划选翻译');
+    this.language.dir = 'auto';
+    const close = this.button('close', t('关闭'), actions.close);
+    close.setAttribute('aria-label', t('关闭划选翻译'));
     header.append(title, this.language, close);
     this.status.className = 'status';
     this.status.setAttribute('role', 'status');
@@ -72,22 +85,24 @@ export class SelectionTranslationView {
     this.result.tabIndex = 0;
     const details = document.createElement('details');
     const summary = document.createElement('summary');
-    summary.textContent = '查看原文';
+    summary.textContent = t('查看原文');
     this.source.className = 'source';
     this.source.setAttribute('dir', 'auto');
     details.append(summary, this.source);
     details.addEventListener('toggle', () => this.position(), { signal: this.events.signal });
     const footer = document.createElement('footer');
-    this.copy = this.button('copy', '复制译文', () => {
+    this.copy = this.button('copy', t('复制译文'), () => {
       void this.copyTranslation();
     });
-    this.retry = this.button('retry', '重试', actions.retry);
+    this.retry = this.button('retry', t('重试'), actions.retry);
     footer.append(this.copy, this.retry);
     const content = document.createElement('div');
     content.className = 'content';
     content.append(this.status, this.result, details);
     this.popup.append(header, content, footer);
     shadow.append(style, this.popup);
+    this.unsubscribe = subscribeUiLanguage(() => this.relabel());
+    this.relabel();
   }
 
   show(text: string, anchor: SelectionAnchor): void {
@@ -130,9 +145,10 @@ export class SelectionTranslationView {
 
   pending(): void {
     this.translated = '';
+    this.targetLanguage = '';
     this.result.textContent = '';
     this.language.textContent = '';
-    this.status.textContent = '翻译中…';
+    this.setStatus(message('翻译中…'));
     this.popup.setAttribute('aria-busy', 'true');
     this.copy.hidden = true;
     this.retry.hidden = true;
@@ -141,17 +157,18 @@ export class SelectionTranslationView {
 
   success(result: SelectionTranslationResult): void {
     this.translated = result.text;
+    this.targetLanguage = result.targetLanguage;
     this.result.textContent = result.text;
-    this.language.textContent = result.targetLanguage;
-    this.status.textContent = '翻译完成';
+    this.language.textContent = translationLanguageLabel(this.targetLanguage);
+    this.setStatus(message('翻译完成'));
     this.popup.setAttribute('aria-busy', 'false');
     this.copy.hidden = false;
     this.retry.hidden = true;
     this.position();
   }
 
-  error(message: string): void {
-    this.status.textContent = message;
+  error(value: UiMessage): void {
+    this.setStatus(value);
     this.popup.setAttribute('aria-busy', 'false');
     this.retry.hidden = false;
     this.copy.hidden = true;
@@ -160,12 +177,36 @@ export class SelectionTranslationView {
 
   destroy(): void {
     const restoreFocus = document.activeElement === this.host;
+    this.unsubscribe();
     this.events.abort();
     this.observer.disconnect();
     if (this.host.isConnected) this.popup.hidePopover();
     this.host.remove();
     if (restoreFocus && this.previousFocus instanceof HTMLElement && this.previousFocus.isConnected)
       this.previousFocus.focus({ preventScroll: true });
+  }
+
+  private setStatus(value: UiMessage): void {
+    this.statusMessage = value;
+    this.status.textContent = renderMessage(value);
+  }
+
+  /** Update existing controls in place, retaining focus, result data and request ownership. */
+  private relabel(): void {
+    const locale = getUiLocale();
+    this.popup.lang = locale;
+    this.popup.dir = locale === 'ar' ? 'rtl' : 'ltr';
+    this.popup.setAttribute('aria-label', t('划选翻译'));
+    this.popup.querySelector('strong')!.textContent = t('只是翻译');
+    this.popup.querySelector('summary')!.textContent = t('查看原文');
+    const close = this.popup.querySelector<HTMLButtonElement>('[data-action="close"]')!;
+    close.textContent = t('关闭');
+    close.setAttribute('aria-label', t('关闭划选翻译'));
+    this.copy.textContent = t('复制译文');
+    this.retry.textContent = t('重试');
+    this.status.textContent = renderMessage(this.statusMessage);
+    this.language.textContent = translationLanguageLabel(this.targetLanguage);
+    this.position();
   }
 
   private position(): void {
@@ -211,9 +252,9 @@ export class SelectionTranslationView {
   private async copyTranslation(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.translated);
-      if (this.host.isConnected) this.status.textContent = '已复制译文';
+      if (this.host.isConnected) this.setStatus(message('已复制译文'));
     } catch {
-      if (this.host.isConnected) this.status.textContent = '复制失败，请手动选择复制译文';
+      if (this.host.isConnected) this.setStatus(message('复制失败，请手动选择复制译文'));
     }
   }
 }

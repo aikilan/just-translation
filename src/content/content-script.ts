@@ -1,3 +1,4 @@
+import { initializeContentLanguage } from './ui-language';
 import { sendRuntimeMessage } from '../shared/chrome-api';
 import type { PageCommand } from '../shared/messages';
 import { TranslationController } from './controller';
@@ -17,7 +18,8 @@ registerRetryInteractions((source) => {
 });
 
 chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendResponse) => {
-  if (command.type === 'START_SELECTION_TRANSLATION') return;
+  if (command.type === 'START_SELECTION_TRANSLATION' || command.type === 'UI_LANGUAGE_CHANGED')
+    return;
   switch (command.type) {
     case 'TRANSLATION_BATCH_PROGRESS':
       controller.receiveBatchProgress(command);
@@ -79,3 +81,5 @@ window.addEventListener('pageshow', (event) => {
   if (event.persisted && resumeAfterPageShow) void controller.start();
   resumeAfterPageShow = false;
 });
+
+initializeContentLanguage();

@@ -1,3 +1,4 @@
+import { message, LocalizedError } from '../shared/i18n';
 import { configuredProviderOptions } from '../shared/providers';
 import {
   assertConnectionTestTranslation,
@@ -17,12 +18,12 @@ export async function testTranslatorConfiguration(
 ): Promise<string> {
   const profileErrors = validateTranslationProfile(profile);
   const validationError = Object.values(profileErrors)[0];
-  if (validationError) throw new Error(validationError);
-  if (!targetLanguage.trim()) throw new Error('请填写目标语言');
+  if (validationError) throw new LocalizedError(validationError);
+  if (!targetLanguage.trim()) throw new LocalizedError(message('请填写目标语言'));
 
   const controller = new AbortController();
   const timeoutId = setTimeout(
-    () => controller.abort(new Error('API 请求超时')),
+    () => controller.abort(new LocalizedError(message('API 请求超时'))),
     timeoutMs,
   );
   const segment = createConnectionTestSegment(targetLanguage);
@@ -35,7 +36,7 @@ export async function testTranslatorConfiguration(
       controller.signal,
     );
     const failure = result.failures[segment.requestId];
-    if (failure) throw new Error(failure);
+    if (failure) throw new LocalizedError(failure);
     const translatedText = result.translations[segment.requestId];
     assertConnectionTestTranslation(segment.text, translatedText);
     return translatedText;

@@ -1,3 +1,4 @@
+import { t, message, LocalizedError, renderMessage, type UiMessage } from '../shared/i18n';
 import { Check, LoaderCircle, RotateCcw } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -8,23 +9,11 @@ import {
   type RuntimeRequest,
 } from '../shared/messages';
 import type { DisplayMode } from '../shared/settings';
-
-export const LANGUAGES = [
-  ['Simplified Chinese', '简体中文'],
-  ['Traditional Chinese', '繁體中文'],
-  ['English', '英语'],
-  ['Japanese', '日语'],
-  ['Korean', '韩语'],
-  ['French', '法语'],
-  ['German', '德语'],
-  ['Spanish', '西班牙语'],
-] as const;
-export const languageLabel = (value: string): string =>
-  LANGUAGES.find(([id]) => id === value)?.[1] ?? value;
+import { TRANSLATION_LANGUAGES } from '../shared/translation-languages';
 export type SaveState =
   | { status: 'saving' }
   | { status: 'saved' }
-  | { status: 'error'; message: string; retry: () => void };
+  | { status: 'error'; message: UiMessage; retry: () => void };
 
 /** Tracks independent writes and guards same-control reentry before React has rendered. */
 export function useSettingsMutation() {
@@ -47,7 +36,7 @@ export function useSettingsMutation() {
     setFeedback((current) => ({ ...current, [key]: { status: 'saving' } }));
     try {
       const response = await sendRuntimeMessage<PublicTranslatorSettings>(request);
-      if (!response.ok) throw new Error(response.error);
+      if (!response.ok) throw new LocalizedError(response.error);
       if (mounted.current) {
         onSuccess(response.data);
         setFeedback((current) => ({ ...current, [key]: { status: 'saved' } }));
@@ -84,19 +73,19 @@ export function SaveFeedback({ state }: { state?: SaveState }) {
       {state.status === 'saving' ? (
         <>
           <LoaderCircle className="spin" aria-hidden="true" />
-          保存中…
+          {t('保存中…')}
         </>
       ) : state.status === 'saved' ? (
         <>
           <Check aria-hidden="true" />
-          已保存
+          {t('已保存')}
         </>
       ) : (
         <>
-          <span>{state.message}</span>
+          <span>{renderMessage(state.message)}</span>
           <button type="button" className="text-button" onClick={state.retry}>
             <RotateCcw aria-hidden="true" />
-            重试保存
+            {t('重试保存')}
           </button>
         </>
       )}
@@ -115,17 +104,17 @@ export function LanguagePicker({
   disabled?: boolean;
   label: string;
 }) {
-  const [custom, setCustom] = useState(!LANGUAGES.some(([id]) => id === value));
+  const [custom, setCustom] = useState(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
   const [draft, setDraft] = useState(value);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<UiMessage | ''>('');
   const id = useId();
   useEffect(() => {
     setDraft(value);
-    if (!LANGUAGES.some(([id]) => id === value)) setCustom(true);
+    if (!TRANSLATION_LANGUAGES.some(([id]) => id === value)) setCustom(true);
   }, [value]);
   function commit() {
     if (!draft.trim()) {
-      setError('请填写目标语言');
+      setError(message('请填写目标语言'));
       return;
     }
     setError('');
@@ -144,21 +133,21 @@ export function LanguagePicker({
           if (next !== '__custom__') onChange(next);
         }}
       >
-        {LANGUAGES.map(([id, name]) => (
+        {TRANSLATION_LANGUAGES.map(([id, name]) => (
           <option key={id} value={id}>
-            {name}
+            {t(name)}
           </option>
         ))}
-        <option value="__custom__">自定义语言…</option>
+        <option value="__custom__">{t('自定义语言…')}</option>
       </select>
       {custom ? (
         <input
-          aria-label="自定义目标语言"
+          aria-label={t('自定义目标语言')}
           aria-invalid={Boolean(error)}
           aria-describedby={error ? id : undefined}
           disabled={disabled}
           value={draft}
-          placeholder="输入目标语言"
+          placeholder={t('输入目标语言')}
           onChange={(event) => {
             setDraft(event.target.value);
             setError('');
@@ -174,7 +163,7 @@ export function LanguagePicker({
       ) : null}
       {error ? (
         <small id={id} className="field-error" role="alert">
-          {error}
+          {renderMessage(error)}
         </small>
       ) : null}
     </div>
@@ -191,7 +180,7 @@ export function DisplayModeControl({
   disabled?: boolean;
 }) {
   return (
-    <div className="segmented-control" role="group" aria-label="显示方式">
+    <div className="segmented-control" role="group" aria-label={t('显示方式')}>
       {(['bilingual', 'translation'] as const).map((mode) => (
         <button
           key={mode}
@@ -200,7 +189,7 @@ export function DisplayModeControl({
           aria-pressed={value === mode}
           onClick={() => onChange(mode)}
         >
-          {mode === 'bilingual' ? '双语' : '仅译文'}
+          {mode === 'bilingual' ? t('双语') : t('仅译文')}
         </button>
       ))}
     </div>

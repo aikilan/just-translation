@@ -4,6 +4,7 @@ import type { PublicTranslatorSettings } from '../shared/messages';
 import { tryStartAutomaticTranslation } from './auto-start';
 
 const SETTINGS: PublicTranslatorSettings = {
+  uiLanguage: 'system',
   configured: true,
   activeProfileId: 'profile-one',
   profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
@@ -56,7 +57,7 @@ describe('tryStartAutomaticTranslation', () => {
       { start },
       'https://news.ycombinator.com/news',
       new AbortController().signal,
-      vi.fn().mockResolvedValue({ ok: false, error: 'worker unavailable' }),
+      vi.fn().mockResolvedValue({ ok: false, error: { text: 'worker unavailable' } }),
     );
 
     expect(start).not.toHaveBeenCalled();

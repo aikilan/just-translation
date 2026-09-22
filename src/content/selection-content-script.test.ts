@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageCommand } from '../shared/messages';
 
 const actions = vi.hoisted(() => ({ start: vi.fn(), anchor: { getRect: vi.fn() } }));
+vi.mock('./ui-language', () => ({ initializeContentLanguage: vi.fn() }));
 vi.mock('./selection-translation', () => ({
   SelectionTranslationController: class {
     start = actions.start;

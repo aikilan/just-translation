@@ -11,6 +11,7 @@ let finish: () => void;
 let failure: string | undefined;
 beforeEach(() => {
   settings = {
+    uiLanguage: 'system',
     configured: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
     activeProfileId: 'p',
@@ -61,7 +62,7 @@ beforeEach(() => {
         finish = () =>
           resolve(
             failure
-              ? { ok: false, error: failure }
+              ? { ok: false, error: { text: failure } }
               : {
                   ok: true,
                   data: Object.fromEntries(request.units.map((u) => [u.id, `译文 ${u.text}`])),
@@ -166,7 +167,7 @@ it.each(['single', 'all'] as const)(
     const normal = send.getMockImplementation()!;
     send.mockImplementation((request) =>
       request.type === 'TRANSLATE_BATCH'
-        ? Promise.resolve({ ok: false, error: 'fail addition' })
+        ? Promise.resolve({ ok: false, error: { text: 'fail addition' } })
         : normal(request),
     );
     document
