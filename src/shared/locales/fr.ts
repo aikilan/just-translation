@@ -1,11 +1,60 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  '全文最长等待（分钟）': 'Délai maximal de traduction (minutes)',
+  '全文最长等待必须是 2–60 的整数': 'Le délai doit être un entier de 2 à 60',
+  '仅用于 AI 全文翻译。默认 10 分钟；首次输出 120 秒、输出停滞 60 秒保护仍然有效。下次翻译生效。':
+    'Traduction intégrale par IA uniquement. Par défaut : 10 minutes. Les limites de première sortie (120 s) et de sortie interrompue (60 s) restent actives. Applicable à la prochaine traduction.',
+  全文首次有效输出超时: 'Délai dépassé avant la première sortie de traduction',
+  全文译文输出停滞超时: 'La sortie de traduction intégrale est interrompue',
+  全文翻译已达到总时限: 'La traduction intégrale a atteint sa durée maximale',
+  应用全文译文: 'Application de la traduction intégrale',
+  '全文请求失败，未应用译文；共 {{count}} 个阅读单元。':
+    'Échec de la requête intégrale ; aucune traduction appliquée. {{count}} unités de lecture.',
   '全文完成后统一显示译文。': 'Les traductions s’affichent lorsque toute la page est prête.',
   '配置 ID 不能为空': 'L’identifiant de configuration est requis',
   翻译配置名称不能重复: 'Les noms des configurations doivent être uniques',
   翻译配置不存在: 'Configuration de traduction introuvable',
   '至少保留一个 AI 配置': 'Conservez au moins une configuration IA',
   '请先启用其他配置，再删除当前配置': 'Activez une autre configuration avant de supprimer celle-ci',
+  翻译引擎无效: 'Moteur de traduction invalide',
+  '翻译设置已改变，请重新开始翻译': 'Les paramètres ont changé. Relancez la traduction',
+  免费翻译通道不支持当前目标语言: 'Le canal gratuit ne prend pas en charge cette langue cible',
+  免费翻译通道每次只能处理一个文本分片:
+    'Le canal gratuit accepte un seul segment de texte par requête',
+  '免费翻译通道单次最多支持 {{p0}} 个字符':
+    'Le canal gratuit accepte jusqu’à {{p0}} caractères par requête',
+  免费翻译通道未返回译文: 'Le canal gratuit n’a renvoyé aucune traduction',
+  免费翻译通道损坏了保护标记: 'Le canal gratuit a altéré un marqueur protégé',
+  免费翻译通道返回格式无效:
+    'L’interface gratuite a peut-être changé. Réessayez manuellement plus tard ou changez de moteur',
+  '免费翻译通道请求失败（{{p0}}）':
+    'Échec de la requête gratuite ({{p0}}). Réessayez manuellement plus tard ou changez de moteur',
+  '免费翻译通道已限流，请稍后手动重试或切换引擎':
+    'Le canal gratuit est limité. Réessayez manuellement plus tard ou changez de moteur',
+  '免费翻译通道暂时不可用，请稍后手动重试或切换引擎':
+    'Le canal gratuit est temporairement indisponible. Réessayez manuellement plus tard ou changez de moteur',
+  免费翻译通道响应过大: 'La réponse de traduction gratuite est trop volumineuse',
+  'Microsoft 免费通道鉴权格式已变更':
+    'L’interface gratuite Microsoft a peut-être changé. Réessayez manuellement plus tard ou changez de moteur',
+  'Microsoft 免费通道重定向安全校验失败': 'Échec du contrôle de sécurité de redirection Microsoft',
+  '全文上下文翻译仅支持 AI 配置':
+    'La traduction en contexte intégral nécessite une configuration IA',
+  '翻译通道未返回译文，请重试': 'Le canal n’a renvoyé aucune traduction. Réessayez',
+  当前翻译引擎不可用: 'Le moteur de traduction actuel est indisponible',
+  翻译引擎: 'Moteur de traduction',
+  'Google 翻译（非官方免费通道）': 'Google Traduction (canal gratuit non officiel)',
+  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (canal gratuit non officiel)',
+  '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
+    'Le texte de la page est envoyé à {{p0}} via un canal gratuit non officiel dont la disponibilité n’est pas garantie.',
+  '网页文本会发送到你配置的 AI 服务。':
+    'Le texte de la page est envoyé au service IA que vous avez configuré.',
+  '仅支持 AI 配置': 'Disponible uniquement avec une configuration IA',
+  '自定义目标语言仅支持 AI 配置':
+    'Les langues cibles personnalisées sont disponibles uniquement avec une configuration IA',
+  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Traduisez des pages via les canaux gratuits Google ou Microsoft, ou connectez votre propre IA.',
+  '请选择受支持的预设目标语言，或切换到有效的 AI 配置。':
+    'Choisissez une langue cible prédéfinie prise en charge ci-dessous, ou une configuration IA valide.',
   请填写目标语言: 'Saisissez une langue cible',
   展示方式无效: 'Mode d’affichage invalide',
   动态翻译设置无效: 'Paramètre de traduction dynamique invalide',

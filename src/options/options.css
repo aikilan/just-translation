@@ -513,12 +513,27 @@ dialog p {
   box-shadow: 0 4px 20px rgb(0 0 0 / 3%);
   animation: reveal 180ms ease-out;
 }
-.profile-header {
-  padding: 20px 24px 8px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface-raised));
+.translation-engine-setting {
+  padding: 8px 24px 14px;
   border-top: 3px solid var(--accent);
   border-bottom: 1px solid var(--border);
   border-radius: 12px 12px 0 0;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-raised));
+}
+.translation-engine-setting .setting-control,
+.translation-engine-setting select {
+  width: min(100%, 360px);
+}
+.engine-disclosure {
+  margin: -6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.profile-header {
+  padding: 20px 24px 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-raised));
+  border-bottom: 1px solid var(--border);
 }
 .editor-section {
   min-width: 0;

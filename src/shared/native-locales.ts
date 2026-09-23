@@ -15,7 +15,8 @@ export function nativeLocaleMessages(): Record<string, Record<string, { message:
       {
         extensionName: { message: catalog['只是翻译'] },
         extensionDescription: {
-          message: catalog['使用你自己的 OpenAI 协议 API，在网页原文下方展示译文。'],
+          message:
+            catalog['无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。'],
         },
         translateCommand: { message: catalog['翻译或恢复当前网页'] },
       },

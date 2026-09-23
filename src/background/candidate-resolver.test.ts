@@ -3,12 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CandidateResolver } from './candidate-resolver';
 import type { LanguageScore } from './content-language';
-import type {
-  TranslationCacheContext,
-  TranslationCacheLookupCandidate,
-} from './translation-cache';
+import type { TranslationCacheContext, TranslationCacheLookupCandidate } from './translation-cache';
 
 const CONTEXT: TranslationCacheContext = {
+  kind: 'ai',
   ...TEST_PROFILE,
   thinkingEnabled: true,
   origin: 'https://news.example.com',
@@ -21,14 +19,12 @@ const CONTEXT: TranslationCacheContext = {
 describe('CandidateResolver', () => {
   it('separates target-language skips, persistent-cache hits, and network misses', async () => {
     const lookup = vi.fn(
-      (
-        _context: TranslationCacheContext,
-        candidates: TranslationCacheLookupCandidate[],
-      ) => Promise.resolve(
-        Object.fromEntries(
-          candidates.filter(({ id }) => id === 'cached').map(({ id }) => [id, '缓存译文']),
+      (_context: TranslationCacheContext, candidates: TranslationCacheLookupCandidate[]) =>
+        Promise.resolve(
+          Object.fromEntries(
+            candidates.filter(({ id }) => id === 'cached').map(({ id }) => [id, '缓存译文']),
+          ),
         ),
-      ),
     );
     const resolver = new CandidateResolver(
       { lookup },

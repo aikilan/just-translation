@@ -12,6 +12,7 @@ import {
   FULL_DOCUMENT_STREAM_LIMITS,
 } from './translation-stream';
 import type { TranslationRequestStage } from './translation-metrics';
+import { withFullDocumentBudget } from './full-document-budget';
 
 export interface TranslationRequestConfig extends Omit<ModelOptions, 'provider' | 'protocol'> {
   provider: ProviderId;
@@ -51,6 +52,13 @@ class ProviderHttpError extends LocalizedError {
 }
 
 const DEFAULT_RETRY_DELAY_MS = 400;
+export type FullDocumentRequestOptions = Pick<
+  TranslationRequestOptions,
+  'scheduleAttempt' | 'onRateLimit'
+> & {
+  /** Total admitted HTTP duration; first-output and idle deadlines remain independent. */
+  timeoutMs?: number;
+};
 
 /** One whole-document attempt: no cache, subdivision, partial publish or automatic repair. */
 export async function translateFullDocument(
@@ -58,7 +66,7 @@ export async function translateFullDocument(
   units: TranslationUnit[],
   fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
-  options: Pick<TranslationRequestOptions, 'scheduleAttempt' | 'onRateLimit'> = {},
+  options: FullDocumentRequestOptions = {},
 ): Promise<Record<string, string>> {
   const ids = new Set<string>();
   for (const unit of units) {
@@ -68,21 +76,26 @@ export async function translateFullDocument(
   }
   if (units.length === 0) return {};
   const segments = units.map(({ id, text }) => ({ requestId: id, unitId: id, partIndex: 0, text }));
-  const execute = async (attemptSignal = signal) => {
-    const result = await translateBatchOnce(
-      settings,
-      segments,
-      fetcher,
+  const execute = (attemptSignal = signal) =>
+    withFullDocumentBudget(
+      options.timeoutMs ?? 600_000,
       attemptSignal,
-      options.onRateLimit,
-      undefined,
-      undefined,
-      true,
+      async (budgetSignal, onContent) => {
+        const result = await translateBatchOnce(
+          settings,
+          segments,
+          fetcher,
+          budgetSignal,
+          options.onRateLimit,
+          undefined,
+          onContent,
+          true,
+        );
+        if (Object.keys(result).length !== units.length)
+          throw new LocalizedError(message('全文译文不完整，请重新全文翻译'));
+        return result;
+      },
     );
-    if (Object.keys(result).length !== units.length)
-      throw new LocalizedError(message('全文译文不完整，请重新全文翻译'));
-    return result;
-  };
   try {
     return await (options.scheduleAttempt ? options.scheduleAttempt(execute) : execute());
   } catch (error) {

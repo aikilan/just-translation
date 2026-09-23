@@ -1,11 +1,60 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  '全文最长等待（分钟）': 'Full-page timeout (minutes)',
+  '全文最长等待必须是 2–60 的整数': 'Full-page timeout must be an integer from 2 to 60',
+  '仅用于 AI 全文翻译。默认 10 分钟；首次输出 120 秒、输出停滞 60 秒保护仍然有效。下次翻译生效。':
+    'AI full-page translation only. Default: 10 minutes. First-output (120s) and stalled-output (60s) limits still apply. Takes effect next time.',
+  全文首次有效输出超时: 'Timed out waiting for the first full-page translation output',
+  全文译文输出停滞超时: 'Full-page translation output stalled',
+  全文翻译已达到总时限: 'Full-page translation reached its total time limit',
+  应用全文译文: 'Applying full-page translation',
+  '全文请求失败，未应用译文；共 {{count}} 个阅读单元。':
+    'Full-page request failed; no translation applied. {{count}} reading units.',
   '全文完成后统一显示译文。': 'Translations appear when the full page is ready.',
   '配置 ID 不能为空': 'Configuration ID is required',
   翻译配置名称不能重复: 'Configuration names must be unique',
   翻译配置不存在: 'Translation configuration not found',
   '至少保留一个 AI 配置': 'Keep at least one AI configuration',
   '请先启用其他配置，再删除当前配置': 'Activate another configuration before deleting this one',
+  翻译引擎无效: 'Invalid translation engine',
+  '翻译设置已改变，请重新开始翻译': 'Translation settings changed. Start the translation again',
+  免费翻译通道不支持当前目标语言:
+    'The free translation channel does not support this target language',
+  免费翻译通道每次只能处理一个文本分片:
+    'The free translation channel accepts one text segment per request',
+  '免费翻译通道单次最多支持 {{p0}} 个字符':
+    'The free translation channel supports up to {{p0}} characters per request',
+  免费翻译通道未返回译文: 'The free translation channel returned no translation',
+  免费翻译通道损坏了保护标记: 'The free translation channel corrupted a protected marker',
+  免费翻译通道返回格式无效:
+    'The free endpoint may have changed. Retry manually later or switch engines',
+  '免费翻译通道请求失败（{{p0}}）':
+    'Free translation request failed ({{p0}}). Retry manually later or switch engines',
+  '免费翻译通道已限流，请稍后手动重试或切换引擎':
+    'The free translation channel is rate-limited. Retry manually later or switch engines',
+  '免费翻译通道暂时不可用，请稍后手动重试或切换引擎':
+    'The free translation channel is temporarily unavailable. Retry manually later or switch engines',
+  免费翻译通道响应过大: 'The free translation response is too large',
+  'Microsoft 免费通道鉴权格式已变更':
+    'The Microsoft free endpoint may have changed. Retry manually later or switch engines',
+  'Microsoft 免费通道重定向安全校验失败': 'Microsoft free-channel redirect security check failed',
+  '全文上下文翻译仅支持 AI 配置':
+    'Full-context translation is available only with an AI configuration',
+  '翻译通道未返回译文，请重试': 'The translation channel returned no translation. Please retry',
+  当前翻译引擎不可用: 'The current translation engine is unavailable',
+  翻译引擎: 'Translation engine',
+  'Google 翻译（非官方免费通道）': 'Google Translate (unofficial free channel)',
+  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (unofficial free channel)',
+  '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
+    'Webpage text is sent to {{p0}} through an unofficial free channel whose availability is not guaranteed.',
+  '网页文本会发送到你配置的 AI 服务。': 'Webpage text is sent to your configured AI service.',
+  '仅支持 AI 配置': 'Available only with an AI configuration',
+  '自定义目标语言仅支持 AI 配置':
+    'Custom target languages are available only with an AI configuration',
+  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Translate webpages with free Google or Microsoft channels, or connect your own AI.',
+  '请选择受支持的预设目标语言，或切换到有效的 AI 配置。':
+    'Choose a supported preset target language below, or switch to a valid AI configuration.',
   请填写目标语言: 'Enter a target language',
   展示方式无效: 'Invalid display mode',
   动态翻译设置无效: 'Invalid dynamic translation setting',

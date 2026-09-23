@@ -1,19 +1,21 @@
 import { resolveUiLocale, setUiLanguage, t, type UiLanguage } from '../shared/i18n';
 import { getSettings } from '../shared/settings-store';
 import { SETTINGS_STORAGE_KEY, mergeSettings } from '../shared/settings';
-import {
-  PAGE_TRANSLATION_MENU_ID,
-  SELECTION_TRANSLATION_MENU_ID,
-  RETRY_FAILED_MENU_ID,
-} from './context-menu';
+import { RETRY_FAILED_MENU_ID, updatePageTranslationMenuTitles } from './context-menu';
+import { activeTranslatorName } from '../shared/translation-engines';
 
 /** Updates existing menu registrations, preserving the retry menu's visibility/ownership state. */
-export async function synchronizeInterfaceLanguage(preference: UiLanguage): Promise<void> {
+export async function synchronizeInterfaceLanguage(
+  preference: UiLanguage,
+  translatorName: string,
+): Promise<void> {
   const locale = resolveUiLocale(preference);
   setUiLanguage(locale);
   await Promise.all([
-    chrome.contextMenus.update(PAGE_TRANSLATION_MENU_ID, { title: t('立即翻译') }),
-    chrome.contextMenus.update(SELECTION_TRANSLATION_MENU_ID, { title: t('翻译已选内容') }),
+    updatePageTranslationMenuTitles(
+      { update: (id, properties) => chrome.contextMenus.update(id, properties) },
+      translatorName,
+    ),
     // The retry menu deliberately does not exist when the active tab has no failed paragraphs.
     chrome.contextMenus.update(RETRY_FAILED_MENU_ID, { title: t('重试全部失败') }).catch(() => {}),
     chrome.action.setTitle({ title: t('只是翻译') }),
@@ -36,7 +38,11 @@ export function initializeBackgroundLanguage(menuReady: Promise<void>): void {
       .catch(() => {})
       .then(async () => {
         await menuReady;
-        await synchronizeInterfaceLanguage((await getSettings()).uiLanguage);
+        const settings = await getSettings();
+        await synchronizeInterfaceLanguage(
+          settings.uiLanguage,
+          activeTranslatorName(settings.activeTranslator, settings.profiles),
+        );
       })
       .catch((error: unknown) => {
         console.error('Interface language synchronization failed', error);

@@ -56,6 +56,7 @@ export class SelectionTranslationView {
   private previousFocus?: Element | null;
   private translated = '';
   private targetLanguage = '';
+  private translatorName = '';
   private statusMessage: UiMessage = message('翻译中…');
   private readonly unsubscribe: () => void;
 
@@ -146,6 +147,7 @@ export class SelectionTranslationView {
   pending(): void {
     this.translated = '';
     this.targetLanguage = '';
+    this.translatorName = '';
     this.result.textContent = '';
     this.language.textContent = '';
     this.setStatus(message('翻译中…'));
@@ -158,8 +160,9 @@ export class SelectionTranslationView {
   success(result: SelectionTranslationResult): void {
     this.translated = result.text;
     this.targetLanguage = result.targetLanguage;
+    this.translatorName = result.translatorName;
     this.result.textContent = result.text;
-    this.language.textContent = translationLanguageLabel(this.targetLanguage);
+    this.updateResultIdentity();
     this.setStatus(message('翻译完成'));
     this.popup.setAttribute('aria-busy', 'false');
     this.copy.hidden = false;
@@ -205,8 +208,14 @@ export class SelectionTranslationView {
     this.copy.textContent = t('复制译文');
     this.retry.textContent = t('重试');
     this.status.textContent = renderMessage(this.statusMessage);
-    this.language.textContent = translationLanguageLabel(this.targetLanguage);
+    this.updateResultIdentity();
     this.position();
+  }
+
+  private updateResultIdentity(): void {
+    this.language.textContent = [this.translatorName, translationLanguageLabel(this.targetLanguage)]
+      .filter(Boolean)
+      .join(' · ');
   }
 
   private position(): void {

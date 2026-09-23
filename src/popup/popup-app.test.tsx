@@ -23,7 +23,8 @@ const publicSettings = (
     ...settings,
     uiLanguage,
     profiles: profiles.map(({ id, name, model }) => ({ id, name, configured: Boolean(model) })),
-    configured: true,
+    ready: true,
+    supportsFullDocument: true,
   };
 };
 
@@ -281,6 +282,10 @@ describe('popup reading controls', () => {
       expect(view.container.textContent).not.toContain('部分段落未完成');
       expect(view.container.textContent).not.toContain('重试全部失败');
       expect(view.container.textContent).not.toContain('全文完整翻译');
+      if (phase === 'error') {
+        expect(view.container.textContent).toContain('全文请求失败，未应用译文；共 6 个阅读单元');
+        expect(view.container.textContent).not.toContain('6 个失败');
+      }
       await click(view.container, action);
       expect(tabSend).toHaveBeenCalledWith(7, { type: command }, MAIN_FRAME);
     },
@@ -292,11 +297,88 @@ describe('popup reading controls', () => {
     expect(view.container.textContent).toContain('news.example.com');
     expect(view.container.textContent).not.toContain('更多设置');
     expect(button(view.container, '翻译此网页')).toBeDefined();
-    expect(view.container.querySelector('[aria-label="AI 配置"]')).not.toBeNull();
+    expect(view.container.querySelector('[aria-label="翻译引擎"]')).not.toBeNull();
     expect(view.container.querySelector('[aria-label="翻译为"]')).not.toBeNull();
     expect(button(view.container, '恢复原文').disabled).toBe(true);
     await click(view.container, '打开设置');
     expect(openOptionsPage).toHaveBeenCalledOnce();
+  });
+
+  it('offers zero-configuration engines with disclosure and switches them explicitly', async () => {
+    const { send } = mockExtension(DEFAULT_SETTINGS);
+    view = await mount(<PopupApp />);
+    const engine = view.container.querySelector<HTMLSelectElement>('[aria-label="翻译引擎"]')!;
+    expect(Array.from(engine.options, (option) => option.textContent)).toEqual([
+      'Google 翻译（非官方免费通道）',
+      'Microsoft 翻译（非官方免费通道）',
+      '默认配置（待配置）',
+    ]);
+    expect(view.container.textContent).toContain('网页文本会发送给 Google');
+    expect(view.container.textContent).toContain('可用性不受保证');
+    expect(button(view.container, '全文完整翻译').disabled).toBe(true);
+    expect(button(view.container, '全文完整翻译').title).toBe('仅支持 AI 配置');
+    expect(view.container.textContent).toContain('仅支持 AI 配置');
+    expect(button(view.container, '全文完整翻译').getAttribute('aria-describedby')).toBe(
+      'full-document-ai-only',
+    );
+    expect(
+      view.container.querySelector<HTMLOptionElement>(
+        '[aria-label="翻译为"] option[value="__custom__"]',
+      )?.disabled,
+    ).toBe(true);
+
+    await input(view.container, '翻译引擎', 'builtin:microsoft-free');
+    expect(send).toHaveBeenCalledWith({
+      type: 'SET_ACTIVE_TRANSLATOR',
+      translator: { kind: 'builtin', engine: 'microsoft-free' },
+    });
+    expect(view.container.textContent).toContain('网页文本会发送给 Microsoft');
+  });
+
+  it('keeps engine and language controls available when a free channel has a custom target', async () => {
+    mockExtension({ ...DEFAULT_SETTINGS, targetLanguage: 'Klingon' });
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('当前翻译引擎不可用');
+    expect(view.container.textContent).toContain('免费翻译通道不支持当前目标语言');
+    expect(view.container.textContent).toContain('请选择受支持的预设目标语言');
+    expect(view.container.querySelector('[aria-label="翻译引擎"]')).not.toBeNull();
+    expect(view.container.querySelector('[aria-label="翻译为"]')).not.toBeNull();
+    expect(
+      view.container.querySelector<HTMLOptionElement>(
+        '[aria-label="翻译为"] option[value="__custom__"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      view.container.querySelector<HTMLInputElement>('[aria-label="自定义目标语言"]')?.disabled,
+    ).toBe(true);
+    expect(view.container.textContent).toContain('自定义目标语言仅支持 AI 配置');
+    expect(view.container.textContent).not.toContain('检查 AI 配置');
+  });
+
+  it('keeps custom target-language entry available for AI profiles', async () => {
+    mockExtension(READY_SETTINGS);
+    view = await mount(<PopupApp />);
+    expect(
+      view.container.querySelector<HTMLOptionElement>(
+        '[aria-label="翻译为"] option[value="__custom__"]',
+      )?.disabled,
+    ).toBe(false);
+    expect(view.container.textContent).not.toContain('自定义目标语言仅支持 AI 配置');
+  });
+
+  it('keeps free-channel runtime errors on manual retry or engine-switch recovery', async () => {
+    mockExtension(DEFAULT_SETTINGS, {
+      ...IDLE_STATUS,
+      phase: 'error',
+      total: 1,
+      failed: 1,
+      error: { text: '免费翻译通道暂时不可用，请稍后手动重试或切换引擎' },
+    });
+    view = await mount(<PopupApp />);
+
+    expect(view.container.textContent).toContain('免费翻译通道暂时不可用');
+    expect(view.container.querySelector('[aria-label="翻译引擎"]')).not.toBeNull();
+    expect(view.container.textContent).not.toContain('检查 AI 配置');
   });
   it.each([
     ['idle', 0, '翻译此网页', 'START_TRANSLATION'],
@@ -315,7 +397,10 @@ describe('popup reading controls', () => {
       phase: 'complete',
       translated: 2,
       total: 2,
-      context: { profileId: 'second', targetLanguage: 'Japanese' },
+      context: {
+        translator: { kind: 'ai', profileId: 'second' },
+        targetLanguage: 'Japanese',
+      },
     });
     view = await mount(<PopupApp />);
     expect(button(view.container, '用新设置重新翻译')).toBeDefined();
@@ -337,7 +422,7 @@ describe('popup reading controls', () => {
         total: 2,
         translated: 2,
         context: {
-          profileId: READY_SETTINGS.activeProfileId,
+          translator: READY_SETTINGS.activeTranslator,
           targetLanguage: READY_SETTINGS.targetLanguage,
         },
       },
@@ -375,9 +460,9 @@ describe('popup reading controls', () => {
     const { send, tabSend } = mockExtension();
     view = await mount(<PopupApp />);
     send.mockRejectedValueOnce(new Error('写入失败'));
-    await input(view.container, 'AI 配置', 'second');
-    expect(view.container.querySelector<HTMLSelectElement>('[aria-label="AI 配置"]')?.value).toBe(
-      READY_SETTINGS.activeProfileId,
+    await input(view.container, '翻译引擎', 'ai:second');
+    expect(view.container.querySelector<HTMLSelectElement>('[aria-label="翻译引擎"]')?.value).toBe(
+      'ai:profile-default',
     );
     let finish!: () => void;
     tabSend.mockImplementationOnce(
@@ -404,9 +489,11 @@ describe('popup reading controls', () => {
   it('handles setup, exclusion, restricted pages and empty completion', async () => {
     mockExtension(DEFAULT_SETTINGS);
     view = await mount(<PopupApp />);
-    expect(button(view.container, '连接你的 AI')).toBeDefined();
-    expect(view.container.textContent).not.toContain('翻译此网页');
-    expect(view.container.textContent).not.toContain('全文完整翻译');
+    expect(button(view.container, '翻译此网页')).toBeDefined();
+    expect(view.container.querySelector<HTMLSelectElement>('[aria-label="翻译引擎"]')?.value).toBe(
+      'builtin:google-free',
+    );
+    expect(button(view.container, '全文完整翻译').disabled).toBe(true);
     view.unmount();
     mockExtension({ ...READY_SETTINGS, excludedSites: ['*.example.com'] });
     view = await mount(<PopupApp />);
@@ -444,11 +531,7 @@ describe('popup reading controls', () => {
       translated: 2,
     });
     await click(view.container, '重试全部失败');
-    expect(tabSend).toHaveBeenLastCalledWith(
-      7,
-      { type: 'RETRY_FAILED_TRANSLATIONS' },
-      MAIN_FRAME,
-    );
+    expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' }, MAIN_FRAME);
     expect(close).not.toHaveBeenCalled();
     expect(button(view.container, '停止翻译')).toBeDefined();
     expect(view.container.textContent).toContain('已翻译 2');
@@ -488,11 +571,7 @@ describe('popup reading controls', () => {
     expect(view.container.textContent).toContain('网页未响应');
     expect(button(view.container, '重试全部失败').disabled).toBe(false);
     await click(view.container, '重试全部失败');
-    expect(tabSend).toHaveBeenLastCalledWith(
-      7,
-      { type: 'RETRY_FAILED_TRANSLATIONS' },
-      MAIN_FRAME,
-    );
+    expect(tabSend).toHaveBeenLastCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' }, MAIN_FRAME);
   });
 });
 
@@ -510,11 +589,7 @@ it('shows incremental full-mode progress and retries only failed additions', asy
   expect(view.container.textContent).toContain('部分段落未完成');
   expect(button(view.container, '重新全文翻译')).toBeDefined();
   await click(view.container, '重试全部失败');
-  expect(tabSend).toHaveBeenCalledWith(
-    7,
-    { type: 'RETRY_FAILED_TRANSLATIONS' },
-    MAIN_FRAME,
-  );
+  expect(tabSend).toHaveBeenCalledWith(7, { type: 'RETRY_FAILED_TRANSLATIONS' }, MAIN_FRAME);
 });
 
 it('labels full-mode incremental work separately from the first full request', async () => {

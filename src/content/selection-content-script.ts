@@ -17,7 +17,7 @@ document.addEventListener(
 // Only this listener responds to selection commands; the page controller owns all other commands.
 chrome.runtime.onMessage.addListener((command: PageCommand, _sender, respond) => {
   if (command.type !== 'START_SELECTION_TRANSLATION') return;
-  if (anchor) controller.start(command.text, anchor);
+  if (anchor) controller.start(command.text, anchor, command.translator);
   respond({ ok: Boolean(anchor) });
 });
 

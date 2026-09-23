@@ -1,5 +1,6 @@
 import { t } from '../shared/i18n';
 import type { PageCommand } from '../shared/messages';
+import type { ActiveTranslator } from '../shared/translation-engines';
 
 export const PAGE_TRANSLATION_MENU_ID = 'just-translate-page';
 export const SELECTION_TRANSLATION_MENU_ID = 'just-translate-selection';
@@ -9,6 +10,12 @@ interface ContextMenuApi {
   removeAll: () => Promise<void>;
   create: (properties: chrome.contextMenus.CreateProperties) => Promise<void>;
 }
+interface ContextMenuTitleApi {
+  update: (
+    id: string,
+    properties: Pick<chrome.contextMenus.CreateProperties, 'title'>,
+  ) => Promise<void>;
+}
 
 type TabMessageSender = (
   tabId: number,
@@ -16,8 +23,13 @@ type TabMessageSender = (
   options: { frameId: number } | { documentId: string },
 ) => Promise<unknown>;
 
-const pageTranslationMenuProperties = (): Omit<chrome.contextMenus.CreateProperties, 'id'> => ({
-  title: t('立即翻译'),
+const titled = (title: string, translatorName: string): string =>
+  translatorName ? `${title} · ${translatorName}` : title;
+
+const pageTranslationMenuProperties = (
+  translatorName = '',
+): Omit<chrome.contextMenus.CreateProperties, 'id'> => ({
+  title: titled(t('立即翻译'), translatorName),
   contexts: ['page'],
   documentUrlPatterns: ['http://*/*', 'https://*/*'],
 });
@@ -30,14 +42,33 @@ export const retryFailedMenuProperties = (): chrome.contextMenus.CreatePropertie
 });
 
 /** Native page/selection contexts are exclusive, so only the matching translation action appears. */
-export async function ensurePageTranslationMenu(api: ContextMenuApi): Promise<void> {
+export async function ensurePageTranslationMenu(
+  api: ContextMenuApi,
+  translatorName: string,
+): Promise<void> {
   await api.removeAll();
-  await api.create({ id: PAGE_TRANSLATION_MENU_ID, ...pageTranslationMenuProperties() });
   await api.create({
-    ...pageTranslationMenuProperties(),
+    id: PAGE_TRANSLATION_MENU_ID,
+    ...pageTranslationMenuProperties(translatorName),
+  });
+  await api.create({
+    ...pageTranslationMenuProperties(translatorName),
     id: SELECTION_TRANSLATION_MENU_ID,
-    title: t('翻译已选内容'),
+    title: titled(t('翻译已选内容'), translatorName),
     contexts: ['selection'],
+  });
+}
+
+/** Refreshes the two data-sending actions after a user explicitly changes the recipient. */
+export async function updatePageTranslationMenuTitles(
+  api: ContextMenuTitleApi,
+  translatorName: string,
+): Promise<void> {
+  await api.update(PAGE_TRANSLATION_MENU_ID, {
+    title: titled(t('立即翻译'), translatorName),
+  });
+  await api.update(SELECTION_TRANSLATION_MENU_ID, {
+    title: titled(t('翻译已选内容'), translatorName),
   });
 }
 
@@ -47,6 +78,7 @@ export async function handlePageTranslationMenuClick(
   tabId: number | undefined,
   sendTabMessage: TabMessageSender,
   resolveDocument: (tabId: number, frameId: number) => Promise<string | undefined>,
+  resolveDisplayedTranslator: () => ActiveTranslator | undefined,
 ): Promise<boolean> {
   if (
     ![PAGE_TRANSLATION_MENU_ID, SELECTION_TRANSLATION_MENU_ID, RETRY_FAILED_MENU_ID].includes(
@@ -66,17 +98,20 @@ export async function handlePageTranslationMenuClick(
       await sendTabMessage(tabId, { type: 'RETRY_FAILED_TRANSLATIONS' }, { documentId });
       return true;
     }
+    // The command carries the recipient that Chrome actually disclosed when the menu was drawn.
+    const translator = resolveDisplayedTranslator();
+    if (!translator) return false;
     if (info.menuItemId === SELECTION_TRANSLATION_MENU_ID) {
       if (typeof info.selectionText !== 'string' || !info.selectionText.trim()) return false;
       const documentId = await resolveDocument(tabId, info.frameId ?? 0);
       if (!documentId) return false;
       await sendTabMessage(
         tabId,
-        { type: 'START_SELECTION_TRANSLATION', text: info.selectionText },
+        { type: 'START_SELECTION_TRANSLATION', text: info.selectionText, translator },
         { documentId },
       );
     } else {
-      await sendTabMessage(tabId, { type: 'START_TRANSLATION' }, { frameId: 0 });
+      await sendTabMessage(tabId, { type: 'START_TRANSLATION', translator }, { frameId: 0 });
     }
     return true;
   } catch {

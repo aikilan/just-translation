@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 import type { PageCommand, PublicTranslatorSettings, Result } from '../shared/messages';
+import type { ActiveTranslator } from '../shared/translation-engines';
 
 const observer = vi.hoisted(() => ({ notify: undefined as (() => void) | undefined }));
 const actions = vi.hoisted(() => ({
@@ -39,17 +40,20 @@ let message: Parameters<typeof chrome.runtime.onMessage.addListener>[0];
 let listeners: MockInstance<typeof window.addEventListener>;
 const settings: PublicTranslatorSettings = {
   uiLanguage: 'system',
-  configured: true,
-  activeProfileId: 'p',
+  ready: true,
+  supportsFullDocument: true,
+  activeTranslator: { kind: 'ai', profileId: 'p' },
   profiles: [{ id: 'p', name: 'AI', configured: true }],
   targetLanguage: 'Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,
   translationRetryCount: 1,
+  fullDocumentTimeoutMinutes: 10,
   translateDynamicContent: true,
   autoTranslateSites: [location.hostname],
   excludedSites: [],
 };
+const GOOGLE_TRANSLATOR: ActiveTranslator = { kind: 'builtin', engine: 'google-free' };
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -109,10 +113,19 @@ it('still auto-starts when only status and display preferences changed', async (
 
 it('does not answer selection commands or interrupt automatic page translation', async () => {
   const respond = vi.fn();
-  message({ type: 'START_SELECTION_TRANSLATION', text: 'selected' }, {}, respond);
+  message(
+    { type: 'START_SELECTION_TRANSLATION', text: 'selected', translator: GOOGLE_TRANSLATOR },
+    {},
+    respond,
+  );
   expect(respond).not.toHaveBeenCalled();
   release({ ok: true, data: settings });
   await vi.waitFor(() => expect(actions.start).toHaveBeenCalledOnce());
+});
+
+it('passes the recipient displayed by the native menu into page preflight', () => {
+  message({ type: 'START_TRANSLATION', translator: GOOGLE_TRANSLATOR }, {}, vi.fn());
+  expect(actions.start).toHaveBeenCalledWith(GOOGLE_TRANSLATOR);
 });
 
 it('stops startup on pagehide and resumes only an already running segmented BFCache page', async () => {

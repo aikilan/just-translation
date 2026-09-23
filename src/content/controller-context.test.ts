@@ -9,13 +9,15 @@ let send: ReturnType<typeof vi.fn<(request: RuntimeRequest) => Promise<Result<un
 beforeEach(() => {
   settings = {
     uiLanguage: 'system',
-    configured: true,
+    ready: true,
+    supportsFullDocument: true,
     profiles: [{ id: 'one', name: 'One', configured: true }],
-    activeProfileId: 'one',
+    activeTranslator: { kind: 'ai', profileId: 'one' },
     targetLanguage: 'English',
     displayMode: 'bilingual',
     translationConcurrency: 6,
     translationRetryCount: 1,
+    fullDocumentTimeoutMinutes: 10,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
@@ -29,7 +31,16 @@ beforeEach(() => {
         ok: true,
         data: {
           configurationId: settings.targetLanguage,
-          context: { profileId: settings.activeProfileId, targetLanguage: settings.targetLanguage },
+          context: {
+            translator: settings.activeTranslator,
+            targetLanguage: settings.targetLanguage,
+          },
+          batchProfiles: {
+            visible: { maxCharacters: 6_000, maxItems: 6 },
+            readAhead: { maxCharacters: 12_000, maxItems: 12 },
+            background: { maxCharacters: 24_000, maxItems: 24 },
+          },
+          maxConcurrency: 6,
         },
       };
     if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
@@ -74,9 +85,21 @@ describe('page translation context', () => {
     );
     expect(renderMessage(controller.getStatus().error)).toContain('排除');
   });
+  it('rejects a native-menu recipient that changed before page preflight', async () => {
+    await controller.start({ kind: 'builtin', engine: 'google-free' });
+
+    expect(send.mock.calls.some(([request]) => request.type === 'BEGIN_TRANSLATION_SESSION')).toBe(
+      false,
+    );
+    expect(renderMessage(controller.getStatus().error)).toContain('设置已改变');
+    expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(0);
+  });
   it('reports the actual configuration and requires explicit restart for a new language', async () => {
     await controller.start();
-    expect(controller.getStatus().context).toEqual({ profileId: 'one', targetLanguage: 'English' });
+    expect(controller.getStatus().context).toEqual({
+      translator: { kind: 'ai', profileId: 'one' },
+      targetLanguage: 'English',
+    });
     settings.targetLanguage = 'Japanese';
     const before = send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_BATCH').length;
     await controller.start();
@@ -99,7 +122,16 @@ describe('page translation context', () => {
                 ok: true,
                 data: {
                   configurationId: 'late',
-                  context: { profileId: 'one', targetLanguage: 'English' },
+                  context: {
+                    translator: { kind: 'ai', profileId: 'one' },
+                    targetLanguage: 'English',
+                  },
+                  batchProfiles: {
+                    visible: { maxCharacters: 6_000, maxItems: 6 },
+                    readAhead: { maxCharacters: 12_000, maxItems: 12 },
+                    background: { maxCharacters: 24_000, maxItems: 24 },
+                  },
+                  maxConcurrency: 6,
                 },
               });
           })
@@ -147,7 +179,7 @@ describe('page translation context', () => {
   it('does not mix dynamic content after configuration changes', async () => {
     vi.useFakeTimers();
     await controller.start();
-    settings.activeProfileId = 'two';
+    settings.activeTranslator = { kind: 'ai', profileId: 'two' };
     document
       .querySelector('main')!
       .insertAdjacentHTML('beforeend', '<p>New dynamic paragraph.</p>');
@@ -156,6 +188,29 @@ describe('page translation context', () => {
     expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(1);
     expect(document.querySelectorAll('[data-justranslate-state="pending"]')).toHaveLength(0);
   });
+  it.each(['google-free', 'microsoft-free'] as const)(
+    'translates initial and dynamic content with the selected %s engine identity',
+    async (engine) => {
+      vi.useFakeTimers();
+      settings.activeTranslator = { kind: 'builtin', engine };
+      settings.targetLanguage = 'English';
+      settings.supportsFullDocument = false;
+      await controller.start();
+      document
+        .querySelector('main')!
+        .insertAdjacentHTML('beforeend', '<p>A newly loaded dynamic paragraph.</p>');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.waitFor(() =>
+        expect(document.querySelectorAll('[data-justranslate-state="translated"]')).toHaveLength(2),
+      );
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'BEGIN_TRANSLATION_SESSION',
+          translator: { kind: 'builtin', engine },
+        }),
+      );
+    },
+  );
   it('changes rendering without saving a preference or requesting translation', async () => {
     await controller.start();
     send.mockClear();

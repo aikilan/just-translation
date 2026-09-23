@@ -19,13 +19,15 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   settings = {
     uiLanguage: 'system',
-    configured: true,
+    ready: true,
+    supportsFullDocument: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
-    activeProfileId: 'p',
+    activeTranslator: { kind: 'ai', profileId: 'p' },
     targetLanguage: 'Chinese',
     displayMode: 'bilingual',
     translationConcurrency: 6,
     translationRetryCount: 1,
+    fullDocumentTimeoutMinutes: 10,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
@@ -39,7 +41,19 @@ beforeEach(() => {
     if (request.type === 'BEGIN_TRANSLATION_SESSION')
       return {
         ok: true,
-        data: { configurationId: 'config', context: { profileId: 'p', targetLanguage: 'Chinese' } },
+        data: {
+          configurationId: 'config',
+          context: {
+            translator: { kind: 'ai', profileId: 'p' },
+            targetLanguage: 'Chinese',
+          },
+          batchProfiles: {
+            visible: { maxCharacters: 6_000, maxItems: 6 },
+            readAhead: { maxCharacters: 12_000, maxItems: 12 },
+            background: { maxCharacters: 24_000, maxItems: 24 },
+          },
+          maxConcurrency: 6,
+        },
       };
     if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
       return {

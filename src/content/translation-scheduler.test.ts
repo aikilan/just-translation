@@ -244,6 +244,28 @@ describe('TranslationScheduler', () => {
     }
   });
 
+  it('uses one 1000-character segment per request for a built-in engine profile', async () => {
+    const batches: ScheduledTranslationBatch[] = [];
+    const freeProfiles = {
+      visible: { maxCharacters: 1_000, maxItems: 1 },
+      readAhead: { maxCharacters: 1_000, maxItems: 1 },
+      background: { maxCharacters: 1_000, maxItems: 1 },
+    } as const;
+    const scheduler = new TranslationScheduler(
+      (batch) => {
+        batches.push(batch);
+        return Promise.resolve();
+      },
+      { concurrency: 2, batchProfiles: freeProfiles },
+    );
+    scheduler.enqueue(createUnits('visible', 2, 1_500, 0));
+    await scheduler.waitForIdle();
+
+    expect(batches).toHaveLength(4);
+    expect(batches.every((batch) => batch.segments.length === 1)).toBe(true);
+    expect(batches.every((batch) => batch.segments[0].text.length <= 1_000)).toBe(true);
+  });
+
   it('dispatches higher priorities first and never exceeds four active requests by default', async () => {
     const releases: Array<() => void> = [];
     const priorities: string[] = [];

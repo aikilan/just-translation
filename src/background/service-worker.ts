@@ -1,7 +1,6 @@
 import { initializeBackgroundLanguage } from './ui-language';
+import { withFullDocumentLifetime } from './full-document-lifetime';
 import { message, LocalizedError } from '../shared/i18n';
-import { configuredProviderOptions } from '../shared/providers';
-import { translateBatch, translateFullDocument } from '../shared/translation-client';
 import { AbortableRequestRegistry } from './request-registry';
 import { ProviderRequestQueue } from './provider-request-queue';
 import { SelectionTranslationService } from './selection-translation';
@@ -11,6 +10,7 @@ import {
   RetryMenuRegistration,
   RETRY_FAILED_MENU_ID,
   retryFailedMenuProperties,
+  updatePageTranslationMenuTitles,
 } from './context-menu';
 import {
   readPublicSettings,
@@ -19,7 +19,7 @@ import {
   updateReadingPreferences,
   updateUiLanguage,
   updateSiteRule,
-  selectActiveProfile,
+  selectActiveTranslator,
   setSiteAutoTranslation,
 } from './configuration-service';
 import { getSettings, initializeSettings } from '../shared/settings-store';
@@ -30,7 +30,6 @@ import {
   type TranslationPriority,
   type TranslationBatchProgress,
 } from '../shared/messages';
-import { getActiveProfile, validateTranslationProfile } from '../shared/settings';
 import { CandidateResolver } from './candidate-resolver';
 import { ensureCacheCleanupAlarm, runCacheCleanupForAlarm } from './cache-maintenance';
 import {
@@ -43,14 +42,31 @@ import {
   type TranslationSessionContext,
   type TranslationSessionIdentity,
 } from './translation-session-store';
+import { BuiltinTranslationClient } from './builtin-translation-client';
+import {
+  getRuntimeActiveTranslator,
+  getTranslationBatchProfiles,
+  getTranslationMaxConcurrency,
+  getTranslationRequestTimeout,
+  getTranslationQueueUrl,
+  resolveTranslationRuntimeConfig,
+  translateRuntimeBatch,
+  translateRuntimeFullDocument,
+  type TranslationRuntimeConfig,
+} from './translation-engine';
+import { activeTranslatorName, type ActiveTranslator } from '../shared/translation-engines';
 
 // 后台唯一入口：负责持久化设置、AI 请求调度和浏览器右键菜单注册。
 const activeRequests = new AbortableRequestRegistry(60_000);
 const providerRequests = new ProviderRequestQueue();
+const builtinRequests = new ProviderRequestQueue({ concurrency: 2, intervalCap: 2 });
+const builtinTranslator = new BuiltinTranslationClient();
 const selectionTranslations = new SelectionTranslationService(
   getSettings,
   (details) => chrome.webNavigation.getFrame(details),
   providerRequests,
+  builtinRequests,
+  builtinTranslator,
 );
 const translationCache = new TranslationCache();
 const candidateResolver = new CandidateResolver(translationCache);
@@ -65,12 +81,8 @@ const translationBatches = new Map<
     deferred: boolean;
   }
 >();
-
-const TRANSLATION_REQUEST_POLICIES: Readonly<Record<TranslationPriority, { timeoutMs: number }>> = {
-  visible: { timeoutMs: 20_000 },
-  readAhead: { timeoutMs: 30_000 },
-  background: { timeoutMs: 60_000 },
-};
+// Native menus are global UI. Commands are enabled only while their disclosed recipient is known.
+let displayedMenuTranslator: ActiveTranslator | undefined;
 
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
@@ -119,6 +131,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     tab?.id,
     (tabId, command, options) => chrome.tabs.sendMessage(tabId, command, options),
     async (tabId, frameId) => (await chrome.webNavigation.getFrame({ tabId, frameId }))?.documentId,
+    () => displayedMenuTranslator,
   );
 });
 
@@ -172,7 +185,7 @@ async function handleRuntimeRequest(
         'UPDATE_READING_PREFERENCES',
         'UPDATE_UI_LANGUAGE',
         'UPDATE_SITE_RULE',
-        'SET_ACTIVE_PROFILE',
+        'SET_ACTIVE_TRANSLATOR',
         'SET_SITE_AUTO_TRANSLATE',
       ].includes(request.type)
     ) {
@@ -185,7 +198,12 @@ async function handleRuntimeRequest(
       case 'TRANSLATE_SELECTION':
         return {
           ok: true,
-          data: await selectionTranslations.translate(sender, request.requestId, request.text),
+          data: await selectionTranslations.translate(
+            sender,
+            request.requestId,
+            request.text,
+            request.translator,
+          ),
         };
       case 'CANCEL_SELECTION_TRANSLATION':
         selectionTranslations.cancel(sender, request.requestId);
@@ -197,9 +215,16 @@ async function handleRuntimeRequest(
         if (request.mode !== 'segmented' && request.mode !== 'full-document')
           throw new LocalizedError(message('翻译模式无效'));
         const identity = getSenderPageIdentity(sender, request.sessionId);
-        const settings = await getConfiguredSettings(request.profileId);
+        const settings = await getSettings();
+        const runtimeSettings = resolveTranslationRuntimeConfig(settings, request.translator);
+        if (request.mode === 'full-document' && runtimeSettings.kind !== 'ai')
+          throw new LocalizedError(message('全文上下文翻译仅支持 AI 配置'));
         await assertCurrentDocument(identity);
-        await translationSessions.create({ ...identity, settings, mode: request.mode });
+        await translationSessions.create({
+          ...identity,
+          settings: runtimeSettings,
+          mode: request.mode,
+        });
         try {
           await assertCurrentDocument(identity);
         } catch (error) {
@@ -208,14 +233,22 @@ async function handleRuntimeRequest(
         }
         // Hash the exact trusted snapshot, never send its model, prompt or credentials to the page.
         const configurationId = await createTranslationCacheKey(
-          { ...settings, origin: identity.origin },
+          getCacheContext({ ...identity, settings: runtimeSettings, mode: request.mode }),
           '',
         );
         return {
           ok: true,
           data: {
             configurationId,
-            context: { profileId: settings.id, targetLanguage: settings.targetLanguage },
+            context: {
+              translator: getRuntimeActiveTranslator(runtimeSettings),
+              targetLanguage: runtimeSettings.targetLanguage,
+            },
+            batchProfiles: getTranslationBatchProfiles(runtimeSettings),
+            maxConcurrency: getTranslationMaxConcurrency(
+              runtimeSettings,
+              settings.translationConcurrency,
+            ),
           },
         };
       }
@@ -251,26 +284,28 @@ async function handleRuntimeRequest(
             signal.throwIfAborted();
             assertSessionMode(session, 'full-document');
             // One admitted attempt owns the entire document; queue time consumes no HTTP timeout.
-            const translations = await translateFullDocument(
+            const queue = getRequestQueue(session.settings);
+            const queueUrl = getTranslationQueueUrl(session.settings);
+            const translations = await translateRuntimeFullDocument(
               session.settings,
               request.units,
-              fetch,
+              builtinTranslator,
               signal,
               {
                 scheduleAttempt: (attempt) =>
-                  providerRequests.run(
-                    session.settings.apiUrl,
+                  queue.run(
+                    queueUrl,
                     'visible',
                     signal,
-                    120_000,
+                    0,
                     async (attemptSignal) => {
                       await assertCurrentDocument(session);
                       attemptSignal.throwIfAborted();
-                      return attempt(attemptSignal);
+                      return withFullDocumentLifetime(() => attempt(attemptSignal));
                     },
                     requestKey,
                   ),
-                onRateLimit: (delay) => providerRequests.defer(session.settings.apiUrl, delay),
+                onRateLimit: (delay) => queue.defer(queueUrl, delay),
               },
             );
             await assertCurrentDocument(session);
@@ -311,21 +346,23 @@ async function handleRuntimeRequest(
               .sendMessage(session.tabId, event, { documentId })
               .catch(() => undefined);
           };
+          const queue = getRequestQueue(session.settings);
+          const queueUrl = getTranslationQueueUrl(session.settings);
           const translations = await activeRequests.run(
             requestKey,
             (signal) =>
-              translateBatch(session.settings, request.segments, fetch, signal, {
+              translateRuntimeBatch(session.settings, request.segments, builtinTranslator, signal, {
                 // Keep the retry budget fixed for this session, including later dynamic batches.
                 maxRetries: session.settings.translationRetryCount,
                 onTranslations: (translations) => publish({ translations }),
                 onTiming: (stage, durationMs) =>
                   publish({ translations: {}, timing: { stage, durationMs } }),
                 scheduleAttempt: (attempt) =>
-                  providerRequests.run(
-                    session.settings.apiUrl,
+                  queue.run(
+                    queueUrl,
                     batchState.priority,
                     signal,
-                    TRANSLATION_REQUEST_POLICIES[batchState.priority].timeoutMs,
+                    getTranslationRequestTimeout(session.settings, batchState.priority),
                     async (attemptSignal) => {
                       // A suspended worker can wake for an old message: validate again at HTTP admission.
                       await assertCurrentDocument(session);
@@ -337,7 +374,7 @@ async function handleRuntimeRequest(
                     },
                     requestKey,
                   ),
-                onRateLimit: (delayMs) => providerRequests.defer(session.settings.apiUrl, delayMs),
+                onRateLimit: (delayMs) => queue.defer(queueUrl, delayMs),
               }),
             0,
           );
@@ -376,7 +413,11 @@ async function handleRuntimeRequest(
             state.deferred = true;
             activeRequests.cancel(key);
           } else {
-            providerRequests.updatePriority(session.settings.apiUrl, key, priority);
+            getRequestQueue(session.settings).updatePriority(
+              getTranslationQueueUrl(session.settings),
+              key,
+              priority,
+            );
           }
         }
         return { ok: true, data: undefined };
@@ -393,21 +434,27 @@ async function handleRuntimeRequest(
         return { ok: true, data: undefined };
       }
       case 'SAVE_TRANSLATION_PROFILE': {
-        return { ok: true, data: await saveTranslationProfile(request.profile) };
+        const result = await saveTranslationProfile(request.profile);
+        await refreshTranslationMenuTitles(result);
+        return { ok: true, data: result };
       }
       case 'DELETE_TRANSLATION_PROFILE': {
         return { ok: true, data: await deleteTranslationProfile(request.profileId) };
       }
-      case 'UPDATE_UI_LANGUAGE':
-        return { ok: true, data: await updateUiLanguage(request.uiLanguage) };
+      case 'UPDATE_UI_LANGUAGE': {
+        const result = await updateUiLanguage(request.uiLanguage);
+        return { ok: true, data: result };
+      }
       case 'UPDATE_READING_PREFERENCES': {
         return { ok: true, data: await updateReadingPreferences(request.patch) };
       }
       case 'UPDATE_SITE_RULE': {
         return { ok: true, data: await updateSiteRule(request.rule) };
       }
-      case 'SET_ACTIVE_PROFILE': {
-        return { ok: true, data: await selectActiveProfile(request.profileId) };
+      case 'SET_ACTIVE_TRANSLATOR': {
+        const result = await selectActiveTranslator(request.translator);
+        await refreshTranslationMenuTitles(result);
+        return { ok: true, data: result };
       }
       case 'SET_SITE_AUTO_TRANSLATE': {
         return {
@@ -423,24 +470,6 @@ async function handleRuntimeRequest(
   }
 }
 
-async function getConfiguredSettings(profileId: string) {
-  const settings = await getSettings();
-  const profile = getActiveProfile(settings, profileId);
-  if (!profile) throw new LocalizedError(message('翻译配置不存在'));
-  if (
-    Object.keys(validateTranslationProfile(profile)).length > 0 ||
-    !settings.targetLanguage.trim()
-  ) {
-    throw new LocalizedError(message('请先在设置页完成 API 配置'));
-  }
-  return {
-    ...profile,
-    ...configuredProviderOptions(profile),
-    targetLanguage: settings.targetLanguage,
-    translationRetryCount: settings.translationRetryCount,
-  };
-}
-
 function assertSessionMode(
   session: TranslationSessionContext,
   mode: TranslationSessionContext['mode'],
@@ -450,7 +479,19 @@ function assertSessionMode(
 
 function getCacheContext(session: TranslationSessionContext): TranslationCacheContext {
   const { settings } = session;
-  return { ...settings, origin: session.origin };
+  return settings.kind === 'builtin'
+    ? {
+        kind: 'builtin',
+        origin: session.origin,
+        engine: settings.engine,
+        targetLanguage: settings.targetLanguage,
+        targetLanguageCode: settings.targetLanguageCode,
+      }
+    : { ...settings, kind: 'ai', origin: session.origin };
+}
+
+function getRequestQueue(settings: TranslationRuntimeConfig): ProviderRequestQueue {
+  return settings.kind === 'builtin' ? builtinRequests : providerRequests;
 }
 
 async function getTranslationSession(
@@ -499,13 +540,40 @@ async function getActiveTabId(): Promise<number | undefined> {
   return tab?.id;
 }
 
-function ensureContextMenu(): Promise<void> {
-  return ensurePageTranslationMenu({
-    removeAll: () => chrome.contextMenus.removeAll(),
-    create: createContextMenu,
-  }).catch((error: unknown) => {
+async function ensureContextMenu(): Promise<void> {
+  displayedMenuTranslator = undefined;
+  try {
+    const settings = await getSettings();
+    await ensurePageTranslationMenu(
+      {
+        removeAll: () => chrome.contextMenus.removeAll(),
+        create: createContextMenu,
+      },
+      activeTranslatorName(settings.activeTranslator, settings.profiles),
+    );
+    displayedMenuTranslator = settings.activeTranslator;
+  } catch (error) {
     console.error('右键翻译菜单注册失败', error);
-  });
+  }
+}
+
+async function refreshTranslationMenuTitles(
+  settings: Awaited<ReturnType<typeof readPublicSettings>>,
+): Promise<void> {
+  // A click during a partial Chrome menu update must never use either the old or new recipient.
+  displayedMenuTranslator = undefined;
+  await menuReady;
+  displayedMenuTranslator = undefined;
+  try {
+    await updatePageTranslationMenuTitles(
+      { update: (id, properties) => chrome.contextMenus.update(id, properties) },
+      activeTranslatorName(settings.activeTranslator, settings.profiles),
+    );
+    displayedMenuTranslator = settings.activeTranslator;
+  } catch (error) {
+    // Menu presentation must never roll back an already-persisted translation choice.
+    console.error('右键翻译菜单标题更新失败', error);
+  }
 }
 
 /** Chrome reports create failures through the callback, not the synchronous return ID. */

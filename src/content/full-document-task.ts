@@ -1,4 +1,5 @@
-import { message, LocalizedError, t } from '../shared/i18n';
+import { message, LocalizedError } from '../shared/i18n';
+import { FullDocumentStatusView, isFullDocumentStatusMutation } from './full-document-status-view';
 import { getTitleSourceText, isDocumentTitle } from './document-title';
 import { getLabelText } from './label-presentation';
 import type { TranslationUnit } from '../shared/batching';
@@ -19,8 +20,6 @@ import {
   type OriginalReadingUnit,
   getElementSourceText,
   prepareTranslationRender,
-  renderTranslationError,
-  renderTranslationPending,
   restoreDocument,
   setDocumentDisplayMode,
 } from './dom-translator';
@@ -47,6 +46,7 @@ export class FullDocumentTranslationTask {
   private readonly render = new RenderTasks();
   private readonly metrics = new TranslationMetrics();
   private sources: SourceUnit[] = [];
+  private readonly view: FullDocumentStatusView;
   private status: PageTranslationStatus = {
     mode: 'full-document',
     phase: 'translating',
@@ -60,7 +60,10 @@ export class FullDocumentTranslationTask {
   constructor(
     private readonly readSettings: () => Promise<PublicTranslatorSettings>,
     private readonly onCollect: (settings: PublicTranslatorSettings) => void,
-  ) {}
+    actions: { stop: () => void; retry: () => void },
+  ) {
+    this.view = new FullDocumentStatusView(actions);
+  }
 
   getStatus(): PageTranslationStatus {
     return { ...this.status };
@@ -71,18 +74,21 @@ export class FullDocumentTranslationTask {
 
   async start(): Promise<FullDocumentResult | undefined> {
     let sessionStarted = false;
+    this.view.update(this.status);
     try {
       const finishPreflight = this.metrics.start('preflight');
       const settings = await this.readSettings();
       this.abort.signal.throwIfAborted();
       if (isUrlExcluded(location.href, settings.excludedSites))
         throw new LocalizedError(message('当前站点已被排除'));
+      if (!settings.supportsFullDocument)
+        throw new LocalizedError(message('全文上下文翻译仅支持 AI 配置'));
       this.status.displayMode = settings.displayMode;
       const session = await sendRuntimeMessage<TranslationSessionInfo>({
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'full-document',
         sessionId: this.sessionId,
-        profileId: settings.activeProfileId,
+        translator: settings.activeTranslator,
       });
       if (!session.ok) throw new LocalizedError(session.error);
       sessionStarted = true;
@@ -106,13 +112,8 @@ export class FullDocumentTranslationTask {
           this.status.phase = 'complete';
           return undefined;
         }
-        const firstBodySource = this.sources.find((source) => !isDocumentTitle(source.element));
-        if (firstBodySource) {
-          const pending = renderTranslationPending(firstBodySource.element, firstBodySource.id);
-          pending.dataset.justranslateFullStatus = 'true';
-          pending.setAttribute('aria-label', t('正在翻译全文'));
-        }
         this.status.stage = 'requesting';
+        this.view.update(this.status);
         // Only IDs and protected source text cross the extension message boundary.
         const units = this.sources.map(({ id, text }) => ({ id, text }));
         this.metrics.recordBatch(
@@ -132,6 +133,7 @@ export class FullDocumentTranslationTask {
       const finishRender = this.metrics.start('render');
       await this.withCurrentSnapshot(() => {
         this.status.stage = 'applying';
+        this.view.update(this.status);
         // DOM writes remain framed; CSS withholds all staged translations until the final check.
         document.documentElement.setAttribute(COMMIT_ATTRIBUTE, '');
         for (const source of this.sources) {
@@ -165,29 +167,13 @@ export class FullDocumentTranslationTask {
       this.render.stop();
       restoreDocument();
       document.documentElement.removeAttribute(COMMIT_ATTRIBUTE);
-      // Restoring raw-prose anchors may remove our original element references. Recollect the
-      // current first reading unit, remaining cancellable until the error control is committed.
-      const first = this.sources.length
-        ? (await this.collect().catch(() => [])).find((element) => !isDocumentTitle(element))
-        : undefined;
       if (this.abort.signal.aborted) return;
       this.status.phase = 'error';
       this.status.failed = this.sources.length;
       this.status.error = getErrorMessage(error);
-      // Only a generic full retry enters page text; diagnostics remain in the popup.
-      if (first) {
-        const control = renderTranslationError(first, 'full-retry');
-        if (control.getAttribute('role') !== 'button') return;
-        control.dataset.justranslateFullStatus = 'true';
-        control.textContent = t('全文翻译失败 · 重试全文');
-        control.setAttribute('aria-label', control.textContent);
-        // The first reading unit can be a heading; feedback stays compact at that location.
-        control.style.setProperty('font-size', '14px', 'important');
-        control.style.setProperty('font-weight', '400', 'important');
-        control.style.setProperty('line-height', '1.5', 'important');
-      }
     } finally {
       this.status.stage = undefined;
+      this.view.update(this.status);
       this.metrics.finish();
       // A begin response may arrive after stop: still retire the captured trusted session.
       if (sessionStarted)
@@ -211,11 +197,13 @@ export class FullDocumentTranslationTask {
       this.status.translated = 0;
       this.status.failed = this.sources.length;
       this.status.error = getErrorMessage(error);
+      this.view.update(this.status);
       return false;
     }
   }
 
   stop(): void {
+    this.view.destroy();
     if (this.status.phase === 'complete') {
       // Stop can arrive between the atomic commit and the controller's asynchronous handoff.
       this.abort.abort();
@@ -261,6 +249,7 @@ export class FullDocumentTranslationTask {
     let changed = false;
     const inspect = (records: MutationRecord[]) => {
       changed ||= records.some((record) => {
+        if (isFullDocumentStatusMutation(record)) return false;
         const element =
           record.target instanceof Element ? record.target : record.target.parentElement;
         return !element?.closest('[data-justranslate-translation]');

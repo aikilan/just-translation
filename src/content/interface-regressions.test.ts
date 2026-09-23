@@ -12,13 +12,15 @@ let failure: string | undefined;
 beforeEach(() => {
   settings = {
     uiLanguage: 'system',
-    configured: true,
+    ready: true,
+    supportsFullDocument: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
-    activeProfileId: 'p',
+    activeTranslator: { kind: 'ai', profileId: 'p' },
     targetLanguage: 'Chinese',
     displayMode: 'translation',
     translationConcurrency: 6,
     translationRetryCount: 1,
+    fullDocumentTimeoutMinutes: 10,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
@@ -35,7 +37,16 @@ beforeEach(() => {
         ok: true,
         data: {
           configurationId: 'config',
-          context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+          context: {
+            translator: { kind: 'ai', profileId: 'p' },
+            targetLanguage: settings.targetLanguage,
+          },
+          batchProfiles: {
+            visible: { maxCharacters: 1_200, maxItems: 4 },
+            readAhead: { maxCharacters: 1_800, maxItems: 4 },
+            background: { maxCharacters: 2_400, maxItems: 4 },
+          },
+          maxConcurrency: settings.translationConcurrency,
         },
       };
     if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
@@ -269,4 +280,207 @@ it('preserves detached text changes without retaining observation after restorat
   expect(button.textContent).toBe('普通译文 添加学员');
   controller.restore();
   expect(button.textContent).toBe('添加学员');
+});
+
+it('translates a dynamically added custom reading block', async () => {
+  document.body.innerHTML = '<main><p>Initial readable paragraph.</p></main>';
+  await controller.start();
+
+  document
+    .querySelector('main')!
+    .insertAdjacentHTML(
+      'beforeend',
+      '<x-paragraph id="dynamic-custom" style="display:block">Dynamically added custom paragraph.</x-paragraph>',
+    );
+
+  await vi.waitFor(
+    () =>
+      expect(
+        document.querySelector('#dynamic-custom [data-justranslate-state="translated"]'),
+      ).not.toBeNull(),
+    { timeout: 2_200 },
+  );
+});
+
+it.each([true, false])(
+  'revalidates ownership changed during preflight with dynamic=%s',
+  async (dynamic) => {
+    settings.translateDynamicContent = dynamic;
+    document.body.innerHTML =
+      '<main><x-owner style="display:block">Before words <x-fragment id="fragment" style="display:inline">middle words</x-fragment> after words.</x-owner></main>';
+    const normal = send.getMockImplementation()!;
+    let release: (() => void) | undefined;
+    send.mockImplementation((request) =>
+      request.type === 'GET_PUBLIC_SETTINGS'
+        ? new Promise((resolve) => {
+            release = () => {
+              void normal(request).then(resolve);
+            };
+          })
+        : normal(request),
+    );
+    const work = controller.start();
+    try {
+      await vi.waitFor(() => expect(release).toBeDefined());
+      document.querySelector<HTMLElement>('#fragment')!.style.display = 'block';
+      release!();
+      await work;
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words', 'middle words', 'after words.']);
+    } finally {
+      release?.();
+      controller.stop();
+      await work;
+    }
+  },
+);
+
+it('preserves translated node identity after an attribute change with unchanged reading structure', async () => {
+  document.body.innerHTML =
+    '<main><x-owner style="display:block">Before words <x-fragment id="fragment">middle words</x-fragment> after words.</x-owner></main>';
+  await controller.start();
+  const translation = document.querySelector('[data-justranslate-translation]')!;
+  const requests = send.mock.calls.filter(([request]) => request.type === 'TRANSLATE_BATCH').length;
+  document.querySelector('#fragment')!.setAttribute('data-tracking-tick', '1');
+  await new Promise((resolve) => setTimeout(resolve, 1050));
+  expect(document.querySelector('[data-justranslate-translation]')).toBe(translation);
+  expect(send.mock.calls.filter(([request]) => request.type === 'TRANSLATE_BATCH')).toHaveLength(
+    requests,
+  );
+});
+
+it('repartitions a same-text inline-to-block replacement inside a translated owner', async () => {
+  document.body.innerHTML =
+    '<main><x-owner style="display:block">Before words <span id="fragment">middle words</span> after words.</x-owner></main>';
+  await controller.start();
+  document.querySelector('#fragment')!.outerHTML =
+    '<x-block style="display:block">middle words</x-block>';
+  await vi.waitFor(
+    () =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words', 'middle words', 'after words.']),
+    { timeout: 2200 },
+  );
+});
+
+it('repartitions after removing a protected boundary that never had a translation record', async () => {
+  document.body.innerHTML =
+    '<main><x-owner style="display:block">Before words <x-fragment id="fragment" style="display:block"><code>PRIVATE_TOKEN</code></x-fragment> after words.</x-owner></main>';
+  await controller.start();
+  expect(document.querySelectorAll('[data-justranslate-source]')).toHaveLength(2);
+  document.querySelector('#fragment')!.remove();
+  await vi.waitFor(
+    () =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words after words.']),
+    { timeout: 2200 },
+  );
+});
+
+it('repartitions a translated custom block when a child changes from inline to block', async () => {
+  document.body.innerHTML = `
+    <main>
+      <x-paragraph id="owner" style="display:block">Before words <x-fragment id="fragment" style="display:inline">middle words</x-fragment> after words.</x-paragraph>
+    </main>
+  `;
+  await controller.start();
+  expect(
+    [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+      getElementSourceText,
+    ),
+  ).toEqual(['Before words middle words after words.']);
+
+  document.querySelector<HTMLElement>('#fragment')!.style.display = 'block';
+
+  await vi.waitFor(
+    () =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words', 'middle words', 'after words.']),
+    { timeout: 2_200 },
+  );
+});
+
+it('recombines translated custom runs when a child changes from block to inline', async () => {
+  document.body.innerHTML = `
+    <main>
+      <x-paragraph id="owner" style="display:block">Before words <x-fragment id="fragment" style="display:block">middle words</x-fragment> after words.</x-paragraph>
+    </main>
+  `;
+  await controller.start();
+  expect(
+    [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+      getElementSourceText,
+    ),
+  ).toEqual(['Before words', 'middle words', 'after words.']);
+
+  document.querySelector<HTMLElement>('#fragment')!.style.display = 'inline';
+
+  await vi.waitFor(
+    () =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words middle words after words.']),
+    { timeout: 2_200 },
+  );
+});
+
+it('recombines translated custom runs after a nested block is removed', async () => {
+  document.body.innerHTML = `
+    <main>
+      <x-paragraph id="owner" style="display:block">Before words <x-fragment id="fragment" style="display:block">removed words</x-fragment> after words.</x-paragraph>
+    </main>
+  `;
+  await controller.start();
+  expect(
+    [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+      getElementSourceText,
+    ),
+  ).toEqual(['Before words', 'removed words', 'after words.']);
+
+  document.querySelector('#fragment')!.remove();
+
+  await vi.waitFor(
+    () =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>('[data-justranslate-source]')].map(
+          getElementSourceText,
+        ),
+      ).toEqual(['Before words after words.']),
+    { timeout: 2_200 },
+  );
+});
+
+it('removes and restores custom-element translation when host visibility changes', async () => {
+  document.body.innerHTML = `
+    <main><x-paragraph id="visibility-target" style="display:block">Visibility-aware custom paragraph.</x-paragraph></main>
+  `;
+  await controller.start();
+  const target = document.querySelector<HTMLElement>('#visibility-target')!;
+  expect(target.querySelector('[data-justranslate-state="translated"]')).not.toBeNull();
+
+  target.hidden = true;
+  await vi.waitFor(
+    () => expect(target.querySelector('[data-justranslate-translation]')).toBeNull(),
+    { timeout: 2_200 },
+  );
+
+  target.hidden = false;
+  await vi.waitFor(
+    () => expect(target.querySelector('[data-justranslate-state="translated"]')).not.toBeNull(),
+    { timeout: 2_200 },
+  );
 });

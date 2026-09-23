@@ -1,14 +1,15 @@
 import { message, LocalizedError } from '../shared/i18n';
 import { parseConfiguredProviderOptions } from '../shared/providers';
-import type { TranslationRequestConfig } from '../shared/translation-client';
 import type { TranslationMode } from '../shared/messages';
-import { isValidTranslationRetryCount, type TranslatorSettings } from '../shared/settings';
+import { isValidTranslationRetryCount, isValidFullDocumentTimeout } from '../shared/settings';
+import { isBuiltinTranslatorId, resolveBuiltinTargetLanguage } from '../shared/translation-engines';
+import type { TranslationRuntimeConfig } from './translation-engine';
 
 const SESSION_STORAGE_PREFIX = 'translation-session:';
 
 export interface TranslationSessionContext extends TranslationSessionIdentity {
   mode: TranslationMode;
-  settings: TranslationRequestConfig & Pick<TranslatorSettings, 'translationRetryCount'>;
+  settings: TranslationRuntimeConfig;
 }
 
 export interface TranslationSessionIdentity {
@@ -33,6 +34,8 @@ export class TranslationSessionStore {
 
   async create(context: TranslationSessionContext): Promise<void> {
     assertIdentity(context);
+    if (context.mode === 'full-document' && context.settings.kind !== 'ai')
+      throw new LocalizedError(message('全文上下文翻译仅支持 AI 配置'));
     await this.storage.set({ [getStorageKey(context.tabId, context.sessionId)]: context });
   }
 
@@ -95,20 +98,62 @@ function assertIdentity(identity: TranslationSessionIdentity): void {
 function parseStoredContext(value: unknown): TranslationSessionContext | undefined {
   if (!isRecord(value) || !isRecord(value.settings)) return undefined;
   const { tabId, documentId, sessionId, origin, settings, mode } = value;
+  const identityValid =
+    (mode === 'segmented' || mode === 'full-document') &&
+    typeof tabId === 'number' &&
+    Number.isInteger(tabId) &&
+    typeof sessionId === 'string' &&
+    typeof documentId === 'string' &&
+    typeof origin === 'string';
+  if (!identityValid || !isValidTranslationRetryCount(settings.translationRetryCount))
+    return undefined;
+  if (settings.kind === 'builtin') {
+    const engine = settings.engine;
+    const translationRetryCount = settings.translationRetryCount;
+    const targetLanguage = settings.targetLanguage;
+    const targetLanguageCode = settings.targetLanguageCode;
+    if (
+      mode === 'full-document' ||
+      !isBuiltinTranslatorId(engine) ||
+      !isValidTranslationRetryCount(translationRetryCount) ||
+      typeof targetLanguage !== 'string' ||
+      typeof targetLanguageCode !== 'string' ||
+      resolveBuiltinTargetLanguage(engine, targetLanguage) !== targetLanguageCode
+    )
+      return undefined;
+    return {
+      mode,
+      tabId,
+      documentId,
+      sessionId,
+      origin,
+      settings: {
+        kind: 'builtin',
+        engine,
+        targetLanguage,
+        targetLanguageCode,
+        translationRetryCount,
+      },
+    };
+  }
+  if (settings.kind !== 'ai') return undefined;
   const providerOptions = parseConfiguredProviderOptions(settings);
   const translationRetryCount = settings.translationRetryCount;
   const thinkingEnabled = settings.thinkingEnabled;
+  const fullDocumentTimeoutMinutes = settings.fullDocumentTimeoutMinutes;
   if (
     !providerOptions ||
-    (mode !== 'segmented' && mode !== 'full-document') ||
-    typeof tabId !== 'number' ||
-    !Number.isInteger(tabId) ||
-    typeof sessionId !== 'string' ||
-    typeof documentId !== 'string' ||
-    typeof origin !== 'string' ||
+    !isValidFullDocumentTimeout(fullDocumentTimeoutMinutes) ||
     typeof thinkingEnabled !== 'boolean' ||
-    !isValidTranslationRetryCount(translationRetryCount) ||
-    !hasStringFields(settings, ['apiUrl', 'apiKey', 'model', 'targetLanguage', 'translationPrompt'])
+    !hasStringFields(settings, [
+      'profileId',
+      'profileName',
+      'apiUrl',
+      'apiKey',
+      'model',
+      'targetLanguage',
+      'translationPrompt',
+    ])
   ) {
     return undefined;
   }
@@ -119,6 +164,10 @@ function parseStoredContext(value: unknown): TranslationSessionContext | undefin
     sessionId,
     origin,
     settings: {
+      kind: 'ai',
+      fullDocumentTimeoutMinutes,
+      profileId: settings.profileId,
+      profileName: settings.profileName,
       ...providerOptions,
       translationRetryCount,
       thinkingEnabled,

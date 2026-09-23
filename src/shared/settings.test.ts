@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_PROFILE_ID,
   DEFAULT_TRANSLATION_PROMPT,
   MAX_TRANSLATION_PROMPT_CHARACTERS,
   getActiveProfile,
@@ -59,16 +60,14 @@ describe('validateSettings', () => {
     });
 
     expect(result.valid).toBe(false);
+    expect(typeof renderMessage(result.errors.profileErrors[DEFAULT_PROFILE_ID]?.apiUrl)).toBe(
+      'string',
+    );
+    expect(typeof renderMessage(result.errors.profileErrors[DEFAULT_PROFILE_ID]?.model)).toBe(
+      'string',
+    );
     expect(
-      typeof renderMessage(result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl),
-    ).toBe('string');
-    expect(
-      typeof renderMessage(result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.model),
-    ).toBe('string');
-    expect(
-      typeof renderMessage(
-        result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
-      ),
+      typeof renderMessage(result.errors.profileErrors[DEFAULT_PROFILE_ID]?.translationPrompt),
     ).toBe('string');
     expect(typeof renderMessage(result.errors.targetLanguage)).toBe('string');
   });
@@ -86,9 +85,7 @@ describe('validateSettings', () => {
     });
 
     expect(
-      renderMessage(
-        result.errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.translationPrompt,
-      ),
+      renderMessage(result.errors.profileErrors[DEFAULT_PROFILE_ID]?.translationPrompt),
     ).toContain(String(MAX_TRANSLATION_PROMPT_CHARACTERS));
   });
 
@@ -105,7 +102,7 @@ describe('validateSettings', () => {
               model: 'model',
             },
           ],
-        }).errors.profileErrors[DEFAULT_SETTINGS.activeProfileId]?.apiUrl,
+        }).errors.profileErrors[DEFAULT_PROFILE_ID]?.apiUrl,
       ),
     ).toMatch(/HTTPS/u);
 
@@ -171,7 +168,7 @@ describe('validateSettings', () => {
           translationPrompt: 'Use natural Chinese.',
         },
       ],
-      activeProfileId: 'local',
+      activeTranslator: { kind: 'ai' as const, profileId: 'local' },
     };
 
     expect(validateSettings(settings).valid).toBe(true);

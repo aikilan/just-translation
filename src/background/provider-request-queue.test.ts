@@ -95,6 +95,26 @@ describe('ProviderRequestQueue', () => {
     await Promise.all(requests);
   });
 
+  it('supports a dedicated two-concurrent, two-starts-per-second free-engine budget', async () => {
+    const queue = new ProviderRequestQueue({ concurrency: 2, intervalCap: 2 });
+    const releases: Array<() => void> = [];
+    const work = vi.fn(() => new Promise<void>((resolve) => releases.push(resolve)));
+    const signal = new AbortController().signal;
+    const requests = Array.from({ length: 4 }, () =>
+      queue.run('https://www.bing.com', 'visible', signal, 30_000, work),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(work).toHaveBeenCalledTimes(2);
+    releases.splice(0).forEach((release) => release());
+    await vi.advanceTimersByTimeAsync(999);
+    expect(work).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(work).toHaveBeenCalledTimes(4);
+    releases.splice(0).forEach((release) => release());
+    await Promise.all(requests);
+  });
+
   it('honors provider cooldown across requests without delaying other API origins', async () => {
     const queue = new ProviderRequestQueue();
     const signal = new AbortController().signal;

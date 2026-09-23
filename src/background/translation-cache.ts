@@ -1,15 +1,17 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 import { normalizeEndpoint, resolveProviderOptions, type ModelOptions } from '../shared/providers';
+import type { BuiltinTranslatorId } from '../shared/translation-engines';
 
 const CACHE_DATABASE_NAME = 'just-translate-cache';
 const CACHE_DATABASE_VERSION = 1;
 const CACHE_STORE_NAME = 'translations';
-const CACHE_POLICY_VERSION = 'translation-cache-v1:prompt-v2';
+const CACHE_POLICY_VERSION = 'translation-cache-v2:engine-v1';
 
 export const CACHE_TTL_MS = 72 * 60 * 60 * 1_000;
 
-export interface TranslationCacheContext extends ModelOptions {
+export interface AiTranslationCacheContext extends ModelOptions {
+  kind: 'ai';
   origin: string;
   apiUrl: string;
   model: string;
@@ -17,6 +19,16 @@ export interface TranslationCacheContext extends ModelOptions {
   targetLanguage: string;
   translationPrompt: string;
 }
+
+export interface BuiltinTranslationCacheContext {
+  kind: 'builtin';
+  origin: string;
+  engine: BuiltinTranslatorId;
+  targetLanguage: string;
+  targetLanguageCode: string;
+}
+
+export type TranslationCacheContext = AiTranslationCacheContext | BuiltinTranslationCacheContext;
 
 export interface TranslationCacheLookupCandidate {
   id: string;
@@ -191,20 +203,32 @@ export async function createTranslationCacheKey(
   context: TranslationCacheContext,
   sourceText: string,
 ): Promise<string> {
-  const canonical = [
-    CACHE_POLICY_VERSION,
-    new URL(context.origin).origin,
-    context.provider,
-    context.protocol,
-    normalizeEndpoint(context.apiUrl, context.protocol!),
-    context.model.trim(),
-    // Reasoning changes generated output and must also change the session configuration fingerprint.
-    JSON.stringify(resolveProviderOptions(context).parameters),
-    String(resolveProviderOptions(context).maxOutputTokens),
-    context.targetLanguage.trim(),
-    context.translationPrompt.normalize('NFC').trim(),
-    normalizeSourceText(sourceText),
-  ].join('\u0000');
+  const canonical =
+    context.kind === 'builtin'
+      ? [
+          CACHE_POLICY_VERSION,
+          new URL(context.origin).origin,
+          context.kind,
+          context.engine,
+          context.targetLanguage.trim(),
+          context.targetLanguageCode,
+          normalizeSourceText(sourceText),
+        ].join('\u0000')
+      : [
+          CACHE_POLICY_VERSION,
+          new URL(context.origin).origin,
+          context.kind,
+          context.provider,
+          context.protocol,
+          normalizeEndpoint(context.apiUrl, context.protocol!),
+          context.model.trim(),
+          // Reasoning changes generated output and must also change the session fingerprint.
+          JSON.stringify(resolveProviderOptions(context).parameters),
+          String(resolveProviderOptions(context).maxOutputTokens),
+          context.targetLanguage.trim(),
+          context.translationPrompt.normalize('NFC').trim(),
+          normalizeSourceText(sourceText),
+        ].join('\u0000');
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

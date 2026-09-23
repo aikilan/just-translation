@@ -20,6 +20,11 @@ import {
   type ThinkingControl,
   type ReasoningEffort,
 } from './providers';
+import {
+  DEFAULT_ACTIVE_TRANSLATOR,
+  isActiveTranslator,
+  type ActiveTranslator,
+} from './translation-engines';
 export type DisplayMode = 'bilingual' | 'translation';
 
 export interface TranslationProfile extends ProviderOptions {
@@ -34,10 +39,11 @@ export interface TranslationProfile extends ProviderOptions {
 }
 
 export interface TranslatorSettings {
+  schemaVersion: typeof SETTINGS_SCHEMA_VERSION;
   /** Interface preference, independent of translation target and session identity. */
   uiLanguage: UiLanguage;
   profiles: TranslationProfile[];
-  activeProfileId: string;
+  activeTranslator: ActiveTranslator;
   targetLanguage: string;
   displayMode: DisplayMode;
   translateDynamicContent: boolean;
@@ -45,6 +51,8 @@ export interface TranslatorSettings {
   translationConcurrency: number;
   /** Additional attempts per ordinary translation batch; zero disables automatic retry. */
   translationRetryCount: number;
+  /** Hard deadline of an admitted full-document request, independent of idle protection. */
+  fullDocumentTimeoutMinutes: number;
   excludedSites: string[];
   autoTranslateSites: string[];
 }
@@ -65,7 +73,7 @@ export type TranslationProfileValidationErrors = Partial<
 
 export interface SettingsValidationErrors {
   profiles?: UiMessage;
-  activeProfileId?: UiMessage;
+  activeTranslator?: UiMessage;
   targetLanguage?: UiMessage;
   profileErrors: Record<string, TranslationProfileValidationErrors>;
 }
@@ -76,8 +84,12 @@ export interface SettingsValidationResult {
 }
 
 export const SETTINGS_STORAGE_KEY = 'translatorSettings';
+export const SETTINGS_SCHEMA_VERSION = 2 as const;
 export const MAX_TRANSLATION_CONCURRENCY = 6;
 export const MAX_TRANSLATION_RETRY_COUNT = 5;
+export function isValidFullDocumentTimeout(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 60;
+}
 export const DEFAULT_PROFILE_ID = 'profile-default';
 export const MAX_TRANSLATION_PROMPT_CHARACTERS = 8_000;
 export const DEFAULT_TRANSLATION_PROMPT = [
@@ -87,6 +99,7 @@ export const DEFAULT_TRANSLATION_PROMPT = [
 ].join(' ');
 
 export const DEFAULT_SETTINGS: TranslatorSettings = {
+  schemaVersion: SETTINGS_SCHEMA_VERSION,
   uiLanguage: 'system',
   profiles: [
     {
@@ -100,12 +113,13 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
       translationPrompt: DEFAULT_TRANSLATION_PROMPT,
     },
   ],
-  activeProfileId: DEFAULT_PROFILE_ID,
+  activeTranslator: { ...DEFAULT_ACTIVE_TRANSLATOR },
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translateDynamicContent: true,
   translationConcurrency: 4,
   translationRetryCount: 1,
+  fullDocumentTimeoutMinutes: 10,
   excludedSites: [],
   autoTranslateSites: [],
 };
@@ -118,8 +132,11 @@ export function normalizeApiUrl(input: string, protocol: ApiProtocol = 'openai')
 /** Returns the selected profile without silently falling back to another provider. */
 export function getActiveProfile(
   settings: TranslatorSettings,
-  profileId = settings.activeProfileId,
+  profileId = settings.activeTranslator.kind === 'ai'
+    ? settings.activeTranslator.profileId
+    : undefined,
 ): TranslationProfile | undefined {
+  if (!profileId) return undefined;
   return settings.profiles.find((profile) => profile.id === profileId);
 }
 
@@ -181,13 +198,14 @@ export function validateSettings(settings: TranslatorSettings): SettingsValidati
     names.add(normalizedName);
     if (Object.keys(profileErrors).length > 0) errors.profileErrors[profile.id] = profileErrors;
   }
-  if (!getActiveProfile(settings)) errors.activeProfileId = message('当前翻译配置不存在');
+  if (settings.activeTranslator.kind === 'ai' && !getActiveProfile(settings))
+    errors.activeTranslator = message('当前翻译配置不存在');
   if (!settings.targetLanguage.trim()) errors.targetLanguage = message('请填写目标语言');
   return {
     valid:
       Object.keys(errors.profileErrors).length === 0 &&
       !errors.profiles &&
-      !errors.activeProfileId &&
+      !errors.activeTranslator &&
       !errors.targetLanguage,
     errors,
   };
@@ -198,7 +216,7 @@ export function getSettingsValidationMessage(
   result: SettingsValidationResult,
 ): UiMessage | undefined {
   if (result.errors.profiles) return result.errors.profiles;
-  if (result.errors.activeProfileId) return result.errors.activeProfileId;
+  if (result.errors.activeTranslator) return result.errors.activeTranslator;
   if (result.errors.targetLanguage) return result.errors.targetLanguage;
   for (const profileErrors of Object.values(result.errors.profileErrors)) {
     const message =
@@ -264,13 +282,16 @@ export function mergeSettings(value: unknown): TranslatorSettings {
       }))
     : [];
   const resolvedProfiles = profiles.length > 0 ? profiles : cloneDefaultSettings().profiles;
+  const activeTranslator = isActiveTranslator(value.activeTranslator)
+    ? cloneActiveTranslator(value.activeTranslator)
+    : typeof value.activeProfileId === 'string' && value.activeProfileId.trim()
+      ? ({ kind: 'ai', profileId: value.activeProfileId } satisfies ActiveTranslator)
+      : cloneActiveTranslator(DEFAULT_ACTIVE_TRANSLATOR);
   return {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
     profiles: resolvedProfiles,
     uiLanguage: isUiLanguage(value.uiLanguage) ? value.uiLanguage : 'system',
-    activeProfileId: readString(
-      value.activeProfileId,
-      resolvedProfiles[0]?.id ?? DEFAULT_PROFILE_ID,
-    ),
+    activeTranslator,
     targetLanguage: readString(value.targetLanguage, DEFAULT_SETTINGS.targetLanguage),
     displayMode:
       value.displayMode === 'bilingual' || value.displayMode === 'translation'
@@ -286,6 +307,9 @@ export function mergeSettings(value: unknown): TranslatorSettings {
     translationRetryCount: isValidTranslationRetryCount(value.translationRetryCount)
       ? value.translationRetryCount
       : DEFAULT_SETTINGS.translationRetryCount,
+    fullDocumentTimeoutMinutes: isValidFullDocumentTimeout(value.fullDocumentTimeoutMinutes)
+      ? value.fullDocumentTimeoutMinutes
+      : DEFAULT_SETTINGS.fullDocumentTimeoutMinutes,
     excludedSites: readStringArray(value.excludedSites),
     autoTranslateSites: readStringArray(value.autoTranslateSites),
   };
@@ -355,8 +379,15 @@ export function normalizeSiteRule(input: string, allowWildcard: boolean): string
 function cloneDefaultSettings(): TranslatorSettings {
   return {
     ...DEFAULT_SETTINGS,
+    activeTranslator: cloneActiveTranslator(DEFAULT_SETTINGS.activeTranslator),
     profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile, name: t('默认配置') })),
   };
+}
+
+function cloneActiveTranslator(translator: ActiveTranslator): ActiveTranslator {
+  return translator.kind === 'builtin'
+    ? { kind: 'builtin', engine: translator.engine }
+    : { kind: 'ai', profileId: translator.profileId };
 }
 
 function readTranslationPrompt(value: unknown): string {

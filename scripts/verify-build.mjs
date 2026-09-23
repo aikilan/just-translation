@@ -38,7 +38,7 @@ const requiredBackgroundMarkers = [
   'UPDATE_READING_PREFERENCES',
   'UPDATE_UI_LANGUAGE',
   'UPDATE_SITE_RULE',
-  'SET_ACTIVE_PROFILE',
+  'SET_ACTIVE_TRANSLATOR',
   'SET_SITE_AUTO_TRANSLATE',
   'contextMenus',
 ];

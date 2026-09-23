@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ActiveTranslator } from '../shared/translation-engines';
 
 import {
   PAGE_TRANSLATION_MENU_ID,
@@ -6,7 +7,11 @@ import {
   RETRY_FAILED_MENU_ID,
   ensurePageTranslationMenu,
   handlePageTranslationMenuClick,
+  updatePageTranslationMenuTitles,
 } from './context-menu';
+
+const GOOGLE_TRANSLATOR: ActiveTranslator = { kind: 'builtin', engine: 'google-free' };
+const resolveGoogleTranslator = () => GOOGLE_TRANSLATOR;
 
 describe('page translation context menu', () => {
   it('starts translation for the clicked tab without toggling an existing translation off', async () => {
@@ -17,10 +22,15 @@ describe('page translation context menu', () => {
       42,
       sendTabMessage,
       vi.fn(),
+      resolveGoogleTranslator,
     );
 
     expect(handled).toBe(true);
-    expect(sendTabMessage).toHaveBeenCalledWith(42, { type: 'START_TRANSLATION' }, { frameId: 0 });
+    expect(sendTabMessage).toHaveBeenCalledWith(
+      42,
+      { type: 'START_TRANSLATION', translator: GOOGLE_TRANSLATOR },
+      { frameId: 0 },
+    );
   });
 
   it('replaces persisted menus with context-specific directly clickable translation actions', async () => {
@@ -36,19 +46,19 @@ describe('page translation context menu', () => {
       return Promise.resolve();
     });
 
-    await ensurePageTranslationMenu({ removeAll, create });
-    await ensurePageTranslationMenu({ removeAll, create });
+    await ensurePageTranslationMenu({ removeAll, create }, 'Google');
+    await ensurePageTranslationMenu({ removeAll, create }, 'Google');
 
     expect([...menus.values()]).toEqual([
       {
         id: PAGE_TRANSLATION_MENU_ID,
-        title: '立即翻译',
+        title: '立即翻译 · Google',
         contexts: ['page'],
         documentUrlPatterns: ['http://*/*', 'https://*/*'],
       },
       {
         id: SELECTION_TRANSLATION_MENU_ID,
-        title: '翻译已选内容',
+        title: '翻译已选内容 · Google',
         contexts: ['selection'],
         documentUrlPatterns: ['http://*/*', 'https://*/*'],
       },
@@ -65,7 +75,7 @@ describe('page translation context menu', () => {
         }),
     );
     const create = vi.fn().mockResolvedValue(undefined);
-    const registration = ensurePageTranslationMenu({ removeAll, create });
+    const registration = ensurePageTranslationMenu({ removeAll, create }, 'Microsoft');
     expect(create).not.toHaveBeenCalled();
     finish();
     await registration;
@@ -75,19 +85,34 @@ describe('page translation context menu', () => {
   it('propagates registration failures instead of adding another action after failed removal', async () => {
     const create = vi.fn().mockResolvedValue(undefined);
     await expect(
-      ensurePageTranslationMenu({
-        removeAll: vi.fn().mockRejectedValue(new Error('removal failed')),
-        create,
-      }),
+      ensurePageTranslationMenu(
+        {
+          removeAll: vi.fn().mockRejectedValue(new Error('removal failed')),
+          create,
+        },
+        'Google',
+      ),
     ).rejects.toThrow('removal failed');
     expect(create).not.toHaveBeenCalled();
     create.mockRejectedValueOnce(new Error('creation failed'));
     await expect(
-      ensurePageTranslationMenu({
-        removeAll: vi.fn().mockResolvedValue(undefined),
-        create,
-      }),
+      ensurePageTranslationMenu(
+        {
+          removeAll: vi.fn().mockResolvedValue(undefined),
+          create,
+        },
+        'Google',
+      ),
     ).rejects.toThrow('creation failed');
+  });
+
+  it('updates both send actions when the selected engine changes', async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    await updatePageTranslationMenuTitles({ update }, 'Microsoft');
+    expect(update.mock.calls).toEqual([
+      [PAGE_TRANSLATION_MENU_ID, { title: '立即翻译 · Microsoft' }],
+      [SELECTION_TRANSLATION_MENU_ID, { title: '翻译已选内容 · Microsoft' }],
+    ]);
   });
 
   it('ignores unrelated menu items and tabs without an id', async () => {
@@ -99,6 +124,7 @@ describe('page translation context menu', () => {
         42,
         sendTabMessage,
         vi.fn(),
+        resolveGoogleTranslator,
       ),
     ).resolves.toBe(false);
     await expect(
@@ -107,6 +133,7 @@ describe('page translation context menu', () => {
         42,
         sendTabMessage,
         vi.fn(),
+        resolveGoogleTranslator,
       ),
     ).resolves.toBe(false);
     await expect(
@@ -115,6 +142,7 @@ describe('page translation context menu', () => {
         undefined,
         sendTabMessage,
         vi.fn(),
+        resolveGoogleTranslator,
       ),
     ).resolves.toBe(false);
     expect(sendTabMessage).not.toHaveBeenCalled();
@@ -129,6 +157,7 @@ describe('page translation context menu', () => {
         42,
         sendTabMessage,
         vi.fn(),
+        resolveGoogleTranslator,
       ),
     ).resolves.toBe(false);
   });
@@ -142,11 +171,16 @@ it('routes selected text to its exact document and ignores whitespace selections
     42,
     send,
     resolve,
+    resolveGoogleTranslator,
   );
   expect(resolve).toHaveBeenCalledWith(42, 5);
   expect(send).toHaveBeenCalledWith(
     42,
-    { type: 'START_SELECTION_TRANSLATION', text: '  selected\ntext  ' },
+    {
+      type: 'START_SELECTION_TRANSLATION',
+      text: '  selected\ntext  ',
+      translator: GOOGLE_TRANSLATOR,
+    },
     { documentId: 'child-document' },
   );
   send.mockClear();
@@ -155,6 +189,7 @@ it('routes selected text to its exact document and ignores whitespace selections
     42,
     send,
     resolve,
+    resolveGoogleTranslator,
   );
   expect(send).not.toHaveBeenCalled();
 });
@@ -171,6 +206,7 @@ it('retries failed page paragraphs in the exact top document even when selecting
       42,
       send,
       resolve,
+      resolveGoogleTranslator,
     ),
   ).toBe(true);
   expect(resolve).toHaveBeenCalledWith(42, 0);
@@ -190,6 +226,7 @@ it.each([undefined, { mode: 'segmented', failed: 0 }, { mode: 'full-document', f
         42,
         send,
         vi.fn().mockResolvedValue('doc'),
+        resolveGoogleTranslator,
       ),
     ).toBe(false);
     expect(send).not.toHaveBeenCalledWith(
@@ -209,8 +246,33 @@ it('never starts page translation from a selection action without selected text'
       42,
       send,
       resolve,
+      resolveGoogleTranslator,
     ),
   ).toBe(false);
   expect(send).not.toHaveBeenCalled();
   expect(resolve).not.toHaveBeenCalled();
+});
+
+it('fails closed when no successfully displayed translator is available', async () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+
+  await expect(
+    handlePageTranslationMenuClick(
+      { menuItemId: PAGE_TRANSLATION_MENU_ID },
+      42,
+      send,
+      vi.fn(),
+      () => undefined,
+    ),
+  ).resolves.toBe(false);
+  await expect(
+    handlePageTranslationMenuClick(
+      { menuItemId: SELECTION_TRANSLATION_MENU_ID, selectionText: 'text' },
+      42,
+      send,
+      vi.fn().mockResolvedValue('doc'),
+      () => undefined,
+    ),
+  ).resolves.toBe(false);
+  expect(send).not.toHaveBeenCalled();
 });

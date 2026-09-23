@@ -45,7 +45,7 @@ const TARGET_SCRIPTS: Readonly<Record<string, RegExp>> = {
   hi: /\p{Script=Devanagari}/u,
 };
 
-/** Skips only declared or strongly detected target-language content to avoid false negatives. */
+/** Declarations describe the UI as often as the content; only corroborated text may be skipped. */
 export function shouldSkipTargetLanguage(
   text: string,
   declaredLanguage: string | undefined,
@@ -59,10 +59,14 @@ export function shouldSkipTargetLanguage(
   // must reach the AI unless the nearest declaration positively identifies the same variant.
   const targetVariant = getChineseVariant(targetLanguage);
   if (targetCode === 'zh' && targetVariant) {
-    return getChineseVariant(declaredLanguage ?? '') === targetVariant;
+    const letters = text.match(/\p{L}/gu) ?? [];
+    return (
+      getChineseVariant(declaredLanguage ?? '') === targetVariant &&
+      /\p{Script=Han}/u.test(text) &&
+      letters.every((letter) => /\p{Script=Han}/u.test(letter))
+    );
   }
 
-  if (normalizeLanguageCode(declaredLanguage) === targetCode) return true;
   const requiredScript = TARGET_SCRIPTS[targetCode];
   if (requiredScript && !requiredScript.test(text)) return false;
   const letterCount = text.match(/\p{L}/gu)?.length ?? 0;

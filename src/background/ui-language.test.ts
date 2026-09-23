@@ -33,8 +33,10 @@ it('updates titles without creating or removing retry menus and broadcasts no pr
     action: { setTitle },
     tabs: { query: () => Promise.resolve([{ id: 7 }, { id: 8 }]), sendMessage: send },
   });
-  await synchronizeInterfaceLanguage('fr');
-  expect(update).toHaveBeenCalledWith('just-translate-page', { title: 'Traduire maintenant' });
+  await synchronizeInterfaceLanguage('fr', 'Microsoft');
+  expect(update).toHaveBeenCalledWith('just-translate-page', {
+    title: 'Traduire maintenant · Microsoft',
+  });
   expect(update).toHaveBeenCalledWith(
     'just-translate-retry-failed',
     expect.objectContaining({ title: 'Réessayer tous les paragraphes en échec' }),

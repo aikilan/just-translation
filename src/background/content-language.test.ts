@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { shouldSkipTargetLanguage, type LanguageScore } from './content-language';
 
 describe('shouldSkipTargetLanguage', () => {
+  it.each(['A complete English paragraph.', '中文 mixed English', '日本語の文章', '한국어 문장'])(
+    'does not trust a Chinese UI declaration for %s',
+    (text) => {
+      expect(shouldSkipTargetLanguage(text, 'zh-CN', 'Simplified Chinese')).toBe(false);
+    },
+  );
+  it('does not skip short foreign text solely because its declaration matches', () => {
+    expect(shouldSkipTargetLanguage('Bonjour', 'en', 'English')).toBe(false);
+  });
   it('preserves Chinese script variants instead of skipping simplified/traditional conversion', () => {
     const detector = vi.fn(() => [{ lang: 'zh', accuracy: 0.99 }]);
     expect(

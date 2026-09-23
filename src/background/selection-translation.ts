@@ -1,14 +1,19 @@
 import { message, LocalizedError } from '../shared/i18n';
-import { configuredProviderOptions } from '../shared/providers';
-import { translateBatch } from '../shared/translation-client';
+import { createTranslationBatches, mergeTranslatedSegments } from '../shared/batching';
+import { runWithConcurrency } from '../shared/concurrency';
 import type { SelectionTranslationResult } from '../shared/messages';
-import {
-  getActiveProfile,
-  validateTranslationProfile,
-  type TranslatorSettings,
-} from '../shared/settings';
+import type { TranslatorSettings } from '../shared/settings';
+import { builtinTranslatorName, type ActiveTranslator } from '../shared/translation-engines';
 import { AbortableRequestRegistry } from './request-registry';
 import { ProviderRequestQueue } from './provider-request-queue';
+import { BuiltinTranslationClient } from './builtin-translation-client';
+import {
+  getTranslationBatchProfiles,
+  getTranslationMaxConcurrency,
+  getTranslationQueueUrl,
+  resolveTranslationRuntimeConfig,
+  translateRuntimeBatch,
+} from './translation-engine';
 
 interface SelectionIdentity {
   tabId: number;
@@ -28,13 +33,16 @@ export class SelectionTranslationService {
   constructor(
     private readonly readSettings: () => Promise<TranslatorSettings>,
     private readonly getFrame: FrameReader,
-    private readonly queue = new ProviderRequestQueue(),
+    private readonly aiQueue = new ProviderRequestQueue(),
+    private readonly builtinQueue = new ProviderRequestQueue({ concurrency: 2, intervalCap: 2 }),
+    private readonly builtinTranslator = new BuiltinTranslationClient(),
   ) {}
 
   async translate(
     sender: chrome.runtime.MessageSender,
     requestId: string,
     text: string,
+    requestedTranslator: ActiveTranslator,
   ): Promise<SelectionTranslationResult> {
     const identity = getIdentity(sender);
     const key = requestKey(identity, requestId);
@@ -44,17 +52,13 @@ export class SelectionTranslationService {
     // Register before any storage/document await: close and navigation must cancel preflight too.
     this.identities.set(key, identity);
     try {
-      return await this.requests.run(key, async (signal) => {
+      return await this.requests.run(key, async (requestSignal) => {
+        // One failed shard owns the whole logical selection and immediately retires its siblings.
+        const operation = new AbortController();
+        const signal = AbortSignal.any([requestSignal, operation.signal]);
         const settings = await this.readSettings();
         signal.throwIfAborted();
-        const profile = getActiveProfile(settings);
-        if (
-          !profile ||
-          Object.keys(validateTranslationProfile(profile)).length ||
-          !settings.targetLanguage.trim()
-        ) {
-          throw new LocalizedError(message('请先在扩展设置页完成 API 配置，再重试'));
-        }
+        const config = resolveTranslationRuntimeConfig(settings, requestedTranslator);
         const assertCurrent = async () => {
           const frame = await this.getFrame({ tabId: identity.tabId, frameId: identity.frameId });
           signal.throwIfAborted();
@@ -62,39 +66,61 @@ export class SelectionTranslationService {
             throw new LocalizedError(message('当前网页已变化，请重新划选翻译'));
         };
         await assertCurrent();
-        const config = {
-          ...profile,
-          ...configuredProviderOptions(profile),
-          targetLanguage: settings.targetLanguage,
-        };
-        const result = await translateBatch(
-          config,
-          [{ requestId: 'selection', unitId: 'selection', partIndex: 0, text }],
-          fetch,
-          signal,
-          {
-            maxRetries: settings.translationRetryCount,
-            scheduleAttempt: (attempt) =>
-              this.queue.run(
-                config.apiUrl,
-                'visible',
-                signal,
-                20_000,
-                async (attemptSignal) => {
-                  await assertCurrent();
-                  attemptSignal.throwIfAborted();
-                  return attempt(attemptSignal);
-                },
-                key,
-              ),
-            onRateLimit: (delay) => this.queue.defer(config.apiUrl, delay),
+        const prepared =
+          config.kind === 'builtin'
+            ? createTranslationBatches(
+                [{ id: 'selection', text }],
+                getTranslationBatchProfiles(config).visible,
+              )
+            : {
+                segments: [{ requestId: 'selection', unitId: 'selection', partIndex: 0, text }],
+                batches: [[{ requestId: 'selection', unitId: 'selection', partIndex: 0, text }]],
+              };
+        const queue = config.kind === 'builtin' ? this.builtinQueue : this.aiQueue;
+        const queueUrl = getTranslationQueueUrl(config);
+        const results = await runWithConcurrency(
+          prepared.batches,
+          getTranslationMaxConcurrency(config, settings.translationConcurrency),
+          async (segments, index) => {
+            try {
+              return await translateRuntimeBatch(config, segments, this.builtinTranslator, signal, {
+                maxRetries: settings.translationRetryCount,
+                scheduleAttempt: (attempt) =>
+                  queue.run(
+                    queueUrl,
+                    'visible',
+                    signal,
+                    20_000,
+                    async (attemptSignal) => {
+                      await assertCurrent();
+                      attemptSignal.throwIfAborted();
+                      return attempt(attemptSignal);
+                    },
+                    `${key}:${index}`,
+                  ),
+                onRateLimit: (delay) => queue.defer(queueUrl, delay),
+              });
+            } catch (error) {
+              if (!operation.signal.aborted) operation.abort(error);
+              throw error;
+            }
           },
         );
         await assertCurrent();
-        const translated = result.translations.selection;
-        if (!translated)
-          throw new LocalizedError(result.failures.selection ?? message('AI 未返回译文，请重试'));
-        return { text: translated, targetLanguage: settings.targetLanguage };
+        const translations: Record<string, string> = {};
+        for (const result of results) Object.assign(translations, result.translations);
+        const failure = results.flatMap((result) => Object.values(result.failures))[0];
+        if (failure) throw new LocalizedError(failure);
+        const translated = mergeTranslatedSegments(prepared.segments, translations).get(
+          'selection',
+        );
+        if (!translated) throw new LocalizedError(message('翻译通道未返回译文，请重试'));
+        return {
+          text: translated,
+          targetLanguage: settings.targetLanguage,
+          translatorName:
+            config.kind === 'builtin' ? builtinTranslatorName(config.engine) : config.profileName,
+        };
       });
     } finally {
       this.identities.delete(key);

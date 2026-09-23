@@ -30,9 +30,12 @@ interface Props {
 
 export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
   const [draft, setDraft] =
-    useState<Omit<ReadingPreferences, 'translationConcurrency' | 'translationRetryCount'>>(
-      settings,
-    );
+    useState<
+      Omit<
+        ReadingPreferences,
+        'translationConcurrency' | 'translationRetryCount' | 'fullDocumentTimeoutMinutes'
+      >
+    >(settings);
   const { feedback, save, clear } = useSettingsMutation();
   const previous = useRef(settings);
   useEffect(() => {
@@ -72,6 +75,7 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
           <LanguagePicker
             label={t('目标语言')}
             value={draft.targetLanguage}
+            allowCustom={settings.activeTranslator.kind === 'ai'}
             disabled={feedback.targetLanguage?.status === 'saving'}
             onChange={(value) => change('targetLanguage', value)}
           />

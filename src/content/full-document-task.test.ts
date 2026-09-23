@@ -2,7 +2,6 @@ import { renderMessage } from '../shared/i18n';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TranslationController } from './controller';
-import { registerRetryInteractions } from './retry-interaction';
 import type { RuntimeRequest, Result, PublicTranslatorSettings } from '../shared/messages';
 
 let controller: TranslationController;
@@ -14,13 +13,15 @@ const resultNodes = () => document.querySelectorAll('[data-justranslate-state="t
 beforeEach(() => {
   settings = {
     uiLanguage: 'system',
-    configured: true,
+    ready: true,
+    supportsFullDocument: true,
     profiles: [{ id: 'p', name: 'AI', configured: true }],
-    activeProfileId: 'p',
+    activeTranslator: { kind: 'ai', profileId: 'p' },
     targetLanguage: 'Chinese',
     displayMode: 'translation',
     translationConcurrency: 6,
     translationRetryCount: 1,
+    fullDocumentTimeoutMinutes: 10,
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
@@ -37,7 +38,16 @@ beforeEach(() => {
         ok: true,
         data: {
           configurationId: 'config',
-          context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+          context: {
+            translator: settings.activeTranslator,
+            targetLanguage: settings.targetLanguage,
+          },
+          batchProfiles: {
+            visible: { maxCharacters: 1_200, maxItems: 4 },
+            readAhead: { maxCharacters: 1_800, maxItems: 4 },
+            background: { maxCharacters: 2_400, maxItems: 4 },
+          },
+          maxConcurrency: 6,
         },
       };
     if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
@@ -90,6 +100,29 @@ async function pending() {
 }
 
 describe('full document lifecycle', () => {
+  it('shows independent progress when the first unit is a control, then removes it on success', async () => {
+    document.body.innerHTML =
+      '<main><button>Share this post</button><p>A visible paragraph.</p></main>';
+    const { work } = await pending();
+    const host = document.querySelector('[data-justranslate-full-status]')!;
+    expect(host?.parentElement).toBe(document.documentElement);
+    expect(host.getAttribute('translate')).toBe('no');
+    expect(host.shadowRoot?.querySelector('[role="status"]')?.textContent).toContain('全文翻译');
+    expect(document.querySelector('[data-justranslate-state="pending"]')).toBeNull();
+    finish();
+    await work;
+    expect(document.querySelector('[data-justranslate-full-status]')).toBeNull();
+  });
+  it('rejects a built-in engine before collecting or sending the document', async () => {
+    settings.activeTranslator = { kind: 'builtin', engine: 'google-free' };
+    settings.supportsFullDocument = false;
+    await controller.startFullDocument();
+    expect(send.mock.calls.some(([request]) => request.type === 'BEGIN_TRANSLATION_SESSION')).toBe(
+      false,
+    );
+    expect(renderMessage(controller.getStatus().error)).toContain('仅支持 AI');
+  });
+
   it('captures all ordered original blocks, keeps repeats, and publishes only a complete result', async () => {
     const { work } = await pending();
     await controller.startFullDocument();
@@ -158,33 +191,27 @@ describe('full document lifecycle', () => {
     expect(send.mock.calls.some(([r]) => r.type === 'CANCEL_TRANSLATION_REQUESTS')).toBe(true);
   });
 
-  it.each(['Enter', ' '])(
-    'retries the entire document using %s without exposing API errors in text',
-    async (key) => {
-      failure = 'PRIVATE_PROVIDER_ERROR';
-      const { work } = await pending();
-      finish();
-      await work;
-      expect(resultNodes()).toHaveLength(0);
-      expect(document.body.textContent).not.toContain('PRIVATE_PROVIDER_ERROR');
-      const control = document.querySelector<HTMLElement>('[data-justranslate-state="error"]')!;
-      expect(control.textContent).toBe('全文翻译失败 · 重试全文');
-      const remove = registerRetryInteractions((source) => {
-        void controller.retry(source);
-      });
-      failure = undefined;
-      control.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-      await vi.waitFor(() =>
-        expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(
-          2,
-        ),
-      );
-      finish();
-      await vi.waitFor(() => expect(controller.getStatus().phase).toBe('complete'));
-      remove();
-      expect(resultNodes()).toHaveLength(6);
-    },
-  );
+  it('retries the entire document from its native button without changing page text', async () => {
+    failure = 'PRIVATE_PROVIDER_ERROR';
+    const { work } = await pending();
+    finish();
+    await work;
+    expect(resultNodes()).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('PRIVATE_PROVIDER_ERROR');
+    const control = document
+      .querySelector('[data-justranslate-full-status]')!
+      .shadowRoot!.querySelector('button')!;
+    expect(control.textContent).toBe('重新全文翻译');
+    expect(control.type).toBe('button');
+    failure = undefined;
+    control.click();
+    await vi.waitFor(() =>
+      expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(2),
+    );
+    finish();
+    await vi.waitFor(() => expect(controller.getStatus().phase).toBe('complete'));
+    expect(resultNodes()).toHaveLength(6);
+  });
 
   it('incrementally translates new content after full completion', async () => {
     const { work } = await pending();
@@ -193,7 +220,13 @@ describe('full document lifecycle', () => {
     document
       .querySelector('main')!
       .insertAdjacentHTML('beforeend', '<p>Later reading content.</p>');
-    await vi.waitFor(() => expect(resultNodes()).toHaveLength(7), { timeout: 2200 });
+    await vi.waitFor(
+      () => {
+        expect(renderMessage(controller.getStatus().error)).toBe('');
+        expect(resultNodes()).toHaveLength(7);
+      },
+      { timeout: 2200 },
+    );
     expect(send.mock.calls.filter(([r]) => r.type === 'TRANSLATE_FULL_DOCUMENT')).toHaveLength(1);
     expect(controller.getStatus()).toMatchObject({
       mode: 'full-document',
@@ -233,7 +266,16 @@ describe('full document lifecycle', () => {
                 ok: true,
                 data: {
                   configurationId: 'config',
-                  context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+                  context: {
+                    translator: { kind: 'ai', profileId: 'p' },
+                    targetLanguage: settings.targetLanguage,
+                  },
+                  batchProfiles: {
+                    visible: { maxCharacters: 1_200, maxItems: 4 },
+                    readAhead: { maxCharacters: 1_800, maxItems: 4 },
+                    background: { maxCharacters: 2_400, maxItems: 4 },
+                  },
+                  maxConcurrency: 6,
                 },
               });
           })
@@ -324,16 +366,17 @@ describe('full document lifecycle', () => {
     expect(renderMessage(controller.getStatus().error)).toContain('正文已变化');
   });
 
-  it('places the full retry on the first reading unit even when restoring unwraps raw prose', async () => {
+  it('keeps the full retry independent of restored raw prose', async () => {
     document.body.innerHTML =
       '<main><div>Opening raw prose before the nested paragraph.<p>A separate paragraph.</p>Closing raw prose after the paragraph.</div></main>';
     failure = 'Failed response';
     const { work } = await pending();
     finish();
     await work;
-    const control = document.querySelector('[data-justranslate-state="error"]')!;
-    expect(control.parentElement?.textContent).toContain('Opening raw prose');
-    expect(document.querySelectorAll('[data-justranslate-state="error"]')).toHaveLength(1);
+    const host = document.querySelector('[data-justranslate-full-status]')!;
+    expect(host.parentElement).toBe(document.documentElement);
+    expect(host.shadowRoot?.querySelector('button')?.textContent).toBe('重新全文翻译');
+    expect(document.querySelectorAll('[data-justranslate-state="error"]')).toHaveLength(0);
   });
 
   it('does not touch an excluded page or open a translation session', async () => {
@@ -488,7 +531,16 @@ describe('full snapshot to incremental handoff', () => {
             ok: true,
             data: {
               configurationId: 'new-config',
-              context: { profileId: 'p', targetLanguage: settings.targetLanguage },
+              context: {
+                translator: { kind: 'ai', profileId: 'p' },
+                targetLanguage: settings.targetLanguage,
+              },
+              batchProfiles: {
+                visible: { maxCharacters: 1_200, maxItems: 4 },
+                readAhead: { maxCharacters: 1_800, maxItems: 4 },
+                background: { maxCharacters: 2_400, maxItems: 4 },
+              },
+              maxConcurrency: 6,
             },
           })
         : normal(request),

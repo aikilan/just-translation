@@ -65,16 +65,20 @@ it('localizes a preset selection target after success and every later locale cha
     getRect: () => ({ left: 20, right: 40, top: 20, bottom: 40 }),
   });
   setUiLanguage('fr');
-  view.success({ text: '译文', targetLanguage: 'Simplified Chinese' });
+  view.success({
+    text: '译文',
+    targetLanguage: 'Simplified Chinese',
+    translatorName: 'Google',
+  });
   const shadow = document.querySelector('[data-justranslate-selection]')!.shadowRoot!;
-  expect(shadow.querySelector('.language')?.textContent).toBe(t('简体中文'));
+  expect(shadow.querySelector('.language')?.textContent).toBe(`Google · ${t('简体中文')}`);
   setUiLanguage('ar');
-  expect(shadow.querySelector('.language')?.textContent).toBe(t('简体中文'));
+  expect(shadow.querySelector('.language')?.textContent).toBe(`Google · ${t('简体中文')}`);
   expect(shadow.querySelector('.result')?.textContent).toBe('译文');
 
-  view.success({ text: '译文', targetLanguage: 'Klingon' });
+  view.success({ text: '译文', targetLanguage: 'Klingon', translatorName: 'Google' });
   setUiLanguage('de');
-  expect(shadow.querySelector('.language')?.textContent).toBe('Klingon');
+  expect(shadow.querySelector('.language')?.textContent).toBe('Google · Klingon');
   view.destroy();
 });
 

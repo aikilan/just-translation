@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PageCommand } from '../shared/messages';
+import type { ActiveTranslator } from '../shared/translation-engines';
 
 const actions = vi.hoisted(() => ({ start: vi.fn(), anchor: { getRect: vi.fn() } }));
+const GOOGLE_TRANSLATOR: ActiveTranslator = { kind: 'builtin', engine: 'google-free' };
 vi.mock('./ui-language', () => ({ initializeContentLanguage: vi.fn() }));
 vi.mock('./selection-translation', () => ({
   SelectionTranslationController: class {
@@ -41,18 +43,30 @@ it('only answers selection commands, using the previously captured anchor', () =
   listener({ type: 'GET_PAGE_STATUS' } satisfies PageCommand, {}, respond);
   expect(respond).not.toHaveBeenCalled();
   listener(
-    { type: 'START_SELECTION_TRANSLATION', text: 'exact selected text' } satisfies PageCommand,
+    {
+      type: 'START_SELECTION_TRANSLATION',
+      text: 'exact selected text',
+      translator: GOOGLE_TRANSLATOR,
+    } satisfies PageCommand,
     {},
     respond,
   );
-  expect(actions.start).toHaveBeenCalledWith('exact selected text', actions.anchor);
+  expect(actions.start).toHaveBeenCalledWith(
+    'exact selected text',
+    actions.anchor,
+    GOOGLE_TRANSLATOR,
+  );
   expect(respond).toHaveBeenCalledWith({ ok: true });
 });
 
 it('does not translate in a newly navigated document with no selection anchor', () => {
   const respond = vi.fn();
   listener(
-    { type: 'START_SELECTION_TRANSLATION', text: 'old document selection' } satisfies PageCommand,
+    {
+      type: 'START_SELECTION_TRANSLATION',
+      text: 'old document selection',
+      translator: GOOGLE_TRANSLATOR,
+    } satisfies PageCommand,
     {},
     respond,
   );

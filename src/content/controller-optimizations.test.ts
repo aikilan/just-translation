@@ -8,12 +8,14 @@ import { ProviderRequestQueue } from '../background/provider-request-queue';
 type Batch = Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
 const SETTINGS = {
   uiLanguage: 'system',
-  configured: true,
-  activeProfileId: 'one',
+  ready: true,
+  supportsFullDocument: true,
+  activeTranslator: { kind: 'ai' as const, profileId: 'one' },
   profiles: [{ id: 'one', name: 'Test', configured: true }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,
+  translationRetryCount: 1,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: [],
@@ -51,9 +53,15 @@ function installRuntime(
             data: {
               configurationId: 'config-one',
               context: {
-                profileId: SETTINGS.activeProfileId,
+                translator: SETTINGS.activeTranslator,
                 targetLanguage: SETTINGS.targetLanguage,
               },
+              batchProfiles: {
+                visible: { maxCharacters: 1_200, maxItems: 4 },
+                readAhead: { maxCharacters: 1_800, maxItems: 4 },
+                background: { maxCharacters: 2_400, maxItems: 4 },
+              },
+              maxConcurrency: SETTINGS.translationConcurrency,
             },
           });
         if (request.type === 'RESOLVE_TRANSLATION_CANDIDATES')
@@ -74,6 +82,70 @@ function installRuntime(
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+});
+it('discovers newly inserted readable content inside ordinary ad-named classes', async () => {
+  document.body.innerHTML = '<main><h2>Original message subject.</h2></main>';
+  const sent: string[] = [];
+  installRuntime((request) => {
+    if (request.type !== 'TRANSLATE_BATCH') return;
+    sent.push(...request.segments.map((segment) => segment.text));
+    return Promise.resolve(successful(request));
+  });
+  const instance = controller();
+  await instance.start();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'adn ads';
+  wrapper.innerHTML = '<p>A newly loaded readable message body.</p>';
+  document.querySelector('main')!.append(wrapper);
+  await vi.waitFor(() => expect(sent).toContain('A newly loaded readable message body.'));
+  await vi.waitFor(() =>
+    expect(wrapper.querySelector('[data-justranslate-state="translated"]')).not.toBeNull(),
+  );
+  expect(sent.filter((text) => text === 'A newly loaded readable message body.')).toHaveLength(1);
+  instance.restore();
+  expect(wrapper.textContent).toBe('A newly loaded readable message body.');
+});
+it('settles skipped raw reading runs without self-triggered rediscovery', async () => {
+  document.body.innerHTML =
+    '<main><div>原始中文正文足够长。<p>独立中文正文。</p>末尾中文正文足够长。</div></main>';
+  const resolve = vi.fn(
+    (request: Extract<RuntimeRequest, { type: 'RESOLVE_TRANSLATION_CANDIDATES' }>) =>
+      Promise.resolve({
+        ok: true as const,
+        data: {
+          skippedIds: request.candidates.map((c) => c.id),
+          missIds: [],
+          cachedTranslations: {},
+        },
+      }),
+  );
+  installRuntime((request) =>
+    request.type === 'RESOLVE_TRANSLATION_CANDIDATES' ? resolve(request) : undefined,
+  );
+  const instance = controller();
+  let settled = false;
+  const work = instance.start().then(() => {
+    settled = true;
+  });
+  await vi.waitFor(() => expect(settled).toBe(true), { timeout: 3000 });
+  const calls = resolve.mock.calls.length;
+  await new Promise((r) => setTimeout(r, 1000));
+  expect(resolve).toHaveBeenCalledTimes(calls);
+  expect(instance.getStatus().phase).not.toBe('translating');
+  const anchors = document.querySelectorAll('[data-justranslate-reading-run]').length;
+  document.querySelector('p')!.firstChild!.textContent = '宿主更新后的正文仍需要重新判断。';
+  await vi.waitFor(() => expect(resolve.mock.calls.length).toBeGreaterThan(calls));
+  await new Promise((r) => setTimeout(r, 300));
+  const afterHostUpdate = resolve.mock.calls.length;
+  await new Promise((r) => setTimeout(r, 300));
+  expect(resolve).toHaveBeenCalledTimes(afterHostUpdate);
+  expect(document.querySelectorAll('[data-justranslate-reading-run]')).toHaveLength(anchors);
+  instance.stop();
+  await work;
+  expect(document.querySelectorAll('[data-justranslate-reading-run]')).toHaveLength(0);
+  document.querySelector('p')!.textContent = '停止之后的修改不再调度。';
+  await new Promise((r) => setTimeout(r, 300));
+  expect(resolve).toHaveBeenCalledTimes(afterHostUpdate);
 });
 afterEach(() => {
   for (const instance of controllers.splice(0)) instance.restore();
@@ -112,6 +184,23 @@ describe('translation pipeline regressions', () => {
           ok: true,
           data: { ...SETTINGS, translationConcurrency: limit },
         });
+      if (request.type === 'BEGIN_TRANSLATION_SESSION')
+        return Promise.resolve({
+          ok: true,
+          data: {
+            configurationId: `config-${limit}`,
+            context: {
+              translator: SETTINGS.activeTranslator,
+              targetLanguage: SETTINGS.targetLanguage,
+            },
+            batchProfiles: {
+              visible: { maxCharacters: 1_200, maxItems: 4 },
+              readAhead: { maxCharacters: 1_800, maxItems: 4 },
+              background: { maxCharacters: 2_400, maxItems: 4 },
+            },
+            maxConcurrency: limit,
+          },
+        });
       if (request.type === 'TRANSLATE_BATCH' && !drain)
         return new Promise((resolve) => {
           releases.push(() => resolve(successful(request)));
@@ -141,6 +230,23 @@ describe('translation pipeline regressions', () => {
         return Promise.resolve({
           ok: true,
           data: { ...SETTINGS, translationConcurrency: retrying ? 1 : 6 },
+        });
+      if (request.type === 'BEGIN_TRANSLATION_SESSION')
+        return Promise.resolve({
+          ok: true,
+          data: {
+            configurationId: retrying ? 'retry-config' : 'initial-config',
+            context: {
+              translator: SETTINGS.activeTranslator,
+              targetLanguage: SETTINGS.targetLanguage,
+            },
+            batchProfiles: {
+              visible: { maxCharacters: 1_200, maxItems: 4 },
+              readAhead: { maxCharacters: 1_800, maxItems: 4 },
+              background: { maxCharacters: 2_400, maxItems: 4 },
+            },
+            maxConcurrency: retrying ? 1 : 6,
+          },
         });
       if (request.type !== 'TRANSLATE_BATCH') return;
       if (!retrying) return Promise.resolve({ ok: false, error: { text: 'Failed request' } });
@@ -1289,9 +1395,15 @@ describe('translation pipeline regressions', () => {
             data: {
               configurationId: 'config-two',
               context: {
-                profileId: SETTINGS.activeProfileId,
+                translator: SETTINGS.activeTranslator,
                 targetLanguage: SETTINGS.targetLanguage,
               },
+              batchProfiles: {
+                visible: { maxCharacters: 1_200, maxItems: 4 },
+                readAhead: { maxCharacters: 1_800, maxItems: 4 },
+                background: { maxCharacters: 2_400, maxItems: 4 },
+              },
+              maxConcurrency: SETTINGS.translationConcurrency,
             },
           });
         if (request.type !== 'TRANSLATE_BATCH') return;

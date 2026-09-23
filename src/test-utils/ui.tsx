@@ -13,9 +13,12 @@ import type {
   Result,
   RuntimeRequest,
 } from '../shared/messages';
+import { resolveBuiltinTargetLanguage } from '../shared/translation-engines';
+import { message } from '../shared/i18n';
 
 export const READY_SETTINGS: TranslatorSettings = {
   ...DEFAULT_SETTINGS,
+  activeTranslator: { kind: 'ai', profileId: TEST_PROFILE.id },
   profiles: [
     { ...TEST_PROFILE, model: 'test-model', apiKey: 'test-secret' },
     { ...TEST_PROFILE, id: 'second', name: '备用配置', model: 'second-model' },
@@ -35,15 +38,28 @@ export function mockExtension(
   url = 'https://news.example.com/article',
 ) {
   let stored = structuredClone(settings);
-  const publicState = (): PublicTranslatorSettings => ({
-    ...stored,
-    profiles: stored.profiles.map(({ id, name, model }) => ({
-      id,
-      name,
-      configured: Boolean(model),
-    })),
-    configured: Boolean(stored.profiles.find((p) => p.id === stored.activeProfileId)?.model),
-  });
+  const publicState = (): PublicTranslatorSettings => {
+    const translator = stored.activeTranslator;
+    const ready =
+      translator.kind === 'builtin'
+        ? Boolean(resolveBuiltinTargetLanguage(translator.engine, stored.targetLanguage))
+        : Boolean(stored.profiles.find((p) => p.id === translator.profileId)?.model);
+    return {
+      ...stored,
+      profiles: stored.profiles.map(({ id, name, model }) => ({
+        id,
+        name,
+        configured: Boolean(model),
+      })),
+      ready,
+      supportsFullDocument: translator.kind === 'ai' && ready,
+      configurationError: ready
+        ? undefined
+        : translator.kind === 'builtin'
+          ? message('免费翻译通道不支持当前目标语言')
+          : message('当前翻译配置不存在'),
+    };
+  };
   const send = vi.fn<(request: RuntimeRequest) => Promise<Result<PublicTranslatorSettings>>>(
     async (request) => {
       await Promise.resolve();
@@ -56,8 +72,8 @@ export function mockExtension(
         case 'DELETE_TRANSLATION_PROFILE':
           stored.profiles = stored.profiles.filter((p) => p.id !== request.profileId);
           break;
-        case 'SET_ACTIVE_PROFILE':
-          stored.activeProfileId = request.profileId;
+        case 'SET_ACTIVE_TRANSLATOR':
+          stored.activeTranslator = request.translator;
           break;
         case 'UPDATE_UI_LANGUAGE':
           stored = { ...stored, uiLanguage: request.uiLanguage };

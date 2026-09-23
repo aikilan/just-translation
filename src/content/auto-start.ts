@@ -20,7 +20,7 @@ export async function tryStartAutomaticTranslation(
   const result = await readSettings();
   // A later user command retires this startup intent, including after restore returns to idle.
   if (signal.aborted) return;
-  if (!result.ok || !result.data.configured) return;
+  if (!result.ok || !result.data.ready) return;
   if (isUrlExcluded(pageUrl, result.data.excludedSites)) return;
   if (!isUrlAutoTranslated(pageUrl, result.data.autoTranslateSites)) return;
   await controller.start();

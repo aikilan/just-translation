@@ -21,6 +21,7 @@ import {
 } from '../shared/messages';
 import { isUrlExcluded } from '../shared/settings';
 import { translationLanguageLabel } from '../shared/translation-languages';
+import { activeTranslatorEquals } from '../shared/translation-engines';
 import {
   DisplayModeControl,
   LanguagePicker,
@@ -28,6 +29,7 @@ import {
   Switch,
   useSettingsMutation,
 } from '../ui/controls';
+import { TranslatorDisclosure, TranslatorSelect } from '../ui/translator-select';
 
 type TranslationCommand = Extract<
   PageCommand['type'],
@@ -131,9 +133,7 @@ export function PopupApp() {
             ),
           );
         const nextStatus =
-          !restricted && tab?.id !== undefined
-            ? await readPageStatus(tab.id)
-            : null;
+          !restricted && tab?.id !== undefined ? await readPageStatus(tab.id) : null;
         if (!mounted) return;
         setPage({
           tabId: tab?.id,
@@ -201,12 +201,12 @@ export function PopupApp() {
   const contextChanged = Boolean(
     settings &&
     status.context &&
-    (settings.activeProfileId !== status.context.profileId ||
+    (!activeTranslatorEquals(settings.activeTranslator, status.context.translator) ||
       settings.targetLanguage !== status.context.targetLanguage),
   );
   const needsRestart = status.context ? contextChanged : Boolean(status.needsRestart);
   const saving = Object.values(feedback).some((value) => value?.status === 'saving');
-  const canTranslate = Boolean(page?.available && settings?.configured && !excluded);
+  const canTranslate = Boolean(page?.available && settings?.ready && !excluded);
   const fullDocument = status.mode === 'full-document';
   const incremental = fullDocument && status.stage === 'incremental';
   const action = needsRestart
@@ -289,18 +289,21 @@ export function PopupApp() {
             <h1>{t('尚未连接到当前网页')}</h1>
             <p>{t('请刷新网页后重新打开插件。')}</p>
           </section>
-        ) : !settings.configured ? (
+        ) : !settings.ready ? (
           <section className="popup-notice">
-            <h1>{t('用你的 AI，读懂网页')}</h1>
-            <p>{t('连接支持 OpenAI 协议的 API，即可开始双语阅读。')}</p>
+            <CircleAlert aria-hidden="true" />
+            <h1>{t('当前翻译引擎不可用')}</h1>
             {settings.configurationError ? (
               <p>{renderMessage(settings.configurationError)}</p>
             ) : null}
-            <button className="button button-primary button-block" onClick={() => openSettings()}>
-              {t('连接你的 AI')}
-              <ArrowUpRight aria-hidden="true" />
-            </button>
-            <small>{t('配置仅保存在本地，请求直接发送到你的 API。')}</small>
+            {settings.activeTranslator.kind === 'builtin' ? (
+              <p>{t('请选择受支持的预设目标语言，或切换到有效的 AI 配置。')}</p>
+            ) : (
+              <button className="button button-primary button-block" onClick={() => openSettings()}>
+                {t('检查 AI 配置')}
+                <ArrowUpRight aria-hidden="true" />
+              </button>
+            )}
           </section>
         ) : !page.available || excluded ? (
           <section className="popup-notice">
@@ -351,17 +354,21 @@ export function PopupApp() {
                   ? status.total
                     ? t('totalCount', { count: status.total })
                     : t('全文完成后统一显示译文。')
-                  : status.total > 0
-                    ? [
-                        t('translatedCount', {
-                          translated: status.translated,
-                          count: status.total,
-                        }),
-                        ...(status.failed ? [t('failedCount', { count: status.failed })] : []),
-                      ].join(' · ')
-                    : status.phase === 'translating'
-                      ? t('正在查找需要翻译的内容…')
-                      : t('译文将显示在原文下方。')}
+                  : fullDocument && !incremental && status.phase === 'error'
+                    ? t('全文请求失败，未应用译文；共 {{count}} 个阅读单元。', {
+                        count: status.total,
+                      })
+                    : status.total > 0
+                      ? [
+                          t('translatedCount', {
+                            translated: status.translated,
+                            count: status.total,
+                          }),
+                          ...(status.failed ? [t('failedCount', { count: status.failed })] : []),
+                        ].join(' · ')
+                      : status.phase === 'translating'
+                        ? t('正在查找需要翻译的内容…')
+                        : t('译文将显示在原文下方。')}
             </p>
             {!fullDocument && !incremental && status.phase === 'translating' && status.total > 0 ? (
               <div
@@ -401,16 +408,30 @@ export function PopupApp() {
               {action}
             </button>
             {!fullDocument || (incremental && status.failed > 0) ? (
-              <button
-                type="button"
-                className="text-button full-document-action"
-                title={t('让 AI 一次理解全文，保留跨段上下文；会重新翻译当前已加载的正文。')}
-                disabled={busy || saving}
-                onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
-              >
-                <FileText aria-hidden="true" />
-                {fullDocument ? t('重新全文翻译') : t('全文完整翻译')}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="text-button full-document-action"
+                  title={
+                    settings.supportsFullDocument
+                      ? t('让 AI 一次理解全文，保留跨段上下文；会重新翻译当前已加载的正文。')
+                      : t('仅支持 AI 配置')
+                  }
+                  aria-describedby={
+                    settings.supportsFullDocument ? undefined : 'full-document-ai-only'
+                  }
+                  disabled={busy || saving || !settings.supportsFullDocument}
+                  onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
+                >
+                  <FileText aria-hidden="true" />
+                  {fullDocument ? t('重新全文翻译') : t('全文完整翻译')}
+                </button>
+                {!settings.supportsFullDocument ? (
+                  <p id="full-document-ai-only" className="full-document-note">
+                    {t('仅支持 AI 配置')}
+                  </p>
+                ) : null}
+              </>
             ) : null}
             {status.failed ? (
               <p className="retry-guidance">
@@ -423,10 +444,12 @@ export function PopupApp() {
               <details className="popup-error" open>
                 <summary>{t('错误详情')}</summary>
                 <p>{renderMessage(status.error)}</p>
-                <button className="text-button" onClick={() => openSettings()}>
-                  {t('检查 AI 配置')}
-                  <ArrowUpRight aria-hidden="true" />
-                </button>
+                {settings.activeTranslator.kind === 'ai' ? (
+                  <button className="text-button" onClick={() => openSettings()}>
+                    {t('检查 AI 配置')}
+                    <ArrowUpRight aria-hidden="true" />
+                  </button>
+                ) : null}
               </details>
             ) : null}
           </section>
@@ -436,12 +459,26 @@ export function PopupApp() {
             {renderMessage(commandError)}
           </p>
         ) : null}
-        {settings?.configured ? (
+        {settings ? (
           <div className="popup-preferences">
+            <SettingRow label={t('翻译引擎')} feedback={feedback.profile}>
+              <TranslatorSelect
+                activeTranslator={settings.activeTranslator}
+                profiles={settings.profiles}
+                disabled={saving || busy}
+                onChange={(translator) => {
+                  void save('profile', { type: 'SET_ACTIVE_TRANSLATOR', translator }, accept);
+                }}
+              />
+            </SettingRow>
+            <p className="translator-disclosure">
+              <TranslatorDisclosure translator={settings.activeTranslator} />
+            </p>
             <SettingRow label={t('翻译为')} feedback={feedback.language}>
               <LanguagePicker
                 label={t('翻译为')}
                 value={settings.targetLanguage}
+                allowCustom={settings.activeTranslator.kind === 'ai'}
                 disabled={saving || busy}
                 onChange={(targetLanguage) => {
                   void save(
@@ -477,27 +514,6 @@ export function PopupApp() {
                   );
                 }}
               />
-            </SettingRow>
-            <SettingRow label={t('AI 配置')} feedback={feedback.profile}>
-              <select
-                aria-label={t('AI 配置')}
-                value={settings.activeProfileId}
-                disabled={saving || busy}
-                onChange={(event) => {
-                  void save(
-                    'profile',
-                    { type: 'SET_ACTIVE_PROFILE', profileId: event.target.value },
-                    accept,
-                  );
-                }}
-              >
-                {settings.profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id} disabled={!profile.configured}>
-                    {profile.name}
-                    {profile.configured ? '' : t('（待配置）')}
-                  </option>
-                ))}
-              </select>
             </SettingRow>
             <SettingRow label={t('此站自动翻译')} feedback={feedback.auto}>
               <Switch

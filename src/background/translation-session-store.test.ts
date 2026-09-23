@@ -1,20 +1,32 @@
 import { DEFAULT_PROVIDER_OPTIONS } from '../shared/providers';
 import { describe, expect, it } from 'vitest';
 
-import type { TranslationRequestConfig } from '../shared/translation-client';
+import type { AiTranslationRuntimeConfig } from './translation-engine';
 import { TranslationSessionStore } from './translation-session-store';
 
-const SETTINGS: TranslationRequestConfig & { translationRetryCount: number } = {
+const SETTINGS: AiTranslationRuntimeConfig = {
+  kind: 'ai',
+  profileId: 'profile',
+  profileName: 'AI',
   ...DEFAULT_PROVIDER_OPTIONS,
   provider: 'custom',
   protocol: 'openai',
   thinkingEnabled: true,
   translationRetryCount: 3,
+  fullDocumentTimeoutMinutes: 10,
   apiUrl: 'https://gateway.example.com/v1',
   apiKey: 'test-secret',
   model: 'translation-model',
   targetLanguage: 'Simplified Chinese',
   translationPrompt: 'Translate into {{targetLanguage}}.',
+};
+
+const BUILTIN_SETTINGS = {
+  kind: 'builtin' as const,
+  engine: 'microsoft-free' as const,
+  targetLanguage: 'Simplified Chinese',
+  targetLanguageCode: 'zh-Hans',
+  translationRetryCount: 1,
 };
 
 describe('TranslationSessionStore', () => {
@@ -52,6 +64,7 @@ describe('TranslationSessionStore', () => {
     mutableSettings.model = 'changed-after-session-start';
     mutableSettings.translationPrompt = 'A different prompt.';
     mutableSettings.translationRetryCount = 0;
+    mutableSettings.fullDocumentTimeoutMinutes = 60;
     mutableSettings.thinkingEnabled = false;
     mutableSettings.provider = 'mimo';
     mutableSettings.protocol = 'anthropic';
@@ -68,6 +81,59 @@ describe('TranslationSessionStore', () => {
         origin: 'https://news.ycombinator.com',
       }),
     ).resolves.toMatchObject({ settings: SETTINGS });
+  });
+
+  it('restores a built-in engine snapshot after worker suspension without ephemeral tokens', async () => {
+    const storage = new InMemorySessionStorage();
+    const identity = {
+      tabId: 20,
+      documentId: 'document',
+      sessionId: 'builtin-session',
+      origin: 'https://page.test',
+    };
+    await new TranslationSessionStore(storage).create({
+      ...identity,
+      mode: 'segmented',
+      settings: BUILTIN_SETTINGS,
+    });
+
+    await expect(new TranslationSessionStore(storage).read(identity)).resolves.toMatchObject({
+      settings: BUILTIN_SETTINGS,
+    });
+    expect(JSON.stringify(await storage.get(null))).not.toContain('token');
+  });
+
+  it('rejects a restored built-in snapshot whose provider language code was tampered with', async () => {
+    const storage = new InMemorySessionStorage();
+    const identity = {
+      tabId: 20,
+      documentId: 'document',
+      sessionId: 'tampered-builtin',
+      origin: 'https://page.test',
+    };
+    await storage.set({
+      'translation-session:20:tampered-builtin': {
+        ...identity,
+        mode: 'segmented',
+        settings: { ...BUILTIN_SETTINGS, targetLanguageCode: 'ar' },
+      },
+    });
+
+    await expect(new TranslationSessionStore(storage).read(identity)).rejects.toThrow('已失效');
+  });
+
+  it('rejects a built-in full-document session at the persistence boundary', async () => {
+    const store = new TranslationSessionStore(new InMemorySessionStorage());
+    await expect(
+      store.create({
+        tabId: 20,
+        documentId: 'document',
+        sessionId: 'builtin-full',
+        origin: 'https://page.test',
+        mode: 'full-document',
+        settings: BUILTIN_SETTINGS,
+      }),
+    ).rejects.toThrow('仅支持 AI');
   });
 
   it('rejects a session from another tab or page origin', async () => {

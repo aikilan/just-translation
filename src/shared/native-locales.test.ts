@@ -9,6 +9,8 @@ it('generates complete native metadata from the same catalogs and shares simplif
   expect(locales.zh_CN).toEqual(locales.zh_TW);
   expect(locales.en.extensionName.message).toBe('Just Translate');
   expect(locales.zh_CN.extensionName.message).toBe('只是翻译');
+  expect(locales.en.extensionDescription.message).toContain('Google');
+  expect(locales.en.extensionDescription.message).toContain('Microsoft');
   expect(manifest.default_locale).toBe('en');
   for (const name of [
     manifest.name,

@@ -24,6 +24,7 @@ export interface ScheduledTranslationBatch {
 
 export interface TranslationSchedulerOptions {
   concurrency?: number;
+  batchProfiles?: Readonly<Record<TranslationPriority, TranslationBatchProfile>>;
   /** Refresh viewport discovery and pending priorities before filling available worker slots. */
   beforeDispatch?: () => Promise<void>;
   /** Includes visible candidate preflight and DOM commits outside the worker pool. */
@@ -41,7 +42,6 @@ interface PendingSegment {
 }
 
 const PRIORITIES: readonly TranslationPriority[] = ['visible', 'readAhead', 'background'];
-const SMALLEST_SEGMENT_LIMIT = 1_200;
 const COALESCE_WINDOW_MS = 20;
 
 export const TRANSLATION_BATCH_PROFILES: Readonly<
@@ -66,6 +66,8 @@ export class TranslationScheduler {
     reject: (error: unknown) => void;
   }>();
   private readonly active = new Map<ScheduledTranslationBatch, PendingSegment[]>();
+  private readonly batchProfiles: Readonly<Record<TranslationPriority, TranslationBatchProfile>>;
+  private readonly smallestSegmentLimit: number;
 
   private get activeCount(): number {
     return this.active.size;
@@ -88,6 +90,10 @@ export class TranslationScheduler {
     private readonly options: TranslationSchedulerOptions = {},
   ) {
     this.concurrency = options.concurrency ?? DEFAULT_SETTINGS.translationConcurrency;
+    this.batchProfiles = options.batchProfiles ?? TRANSLATION_BATCH_PROFILES;
+    this.smallestSegmentLimit = Math.min(
+      ...Object.values(this.batchProfiles).map((profile) => profile.maxCharacters),
+    );
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) {
       throw new LocalizedError(message('翻译调度并发数必须是正整数'));
     }
@@ -113,7 +119,7 @@ export class TranslationScheduler {
       if (this.knownUnitIds.has(unit.id)) continue;
       this.knownUnitIds.add(unit.id);
       const prepared = createTranslationBatches([{ id: unit.id, text: unit.text }], {
-        maxCharacters: SMALLEST_SEGMENT_LIMIT,
+        maxCharacters: this.smallestSegmentLimit,
         maxItems: Number.MAX_SAFE_INTEGER,
       });
       for (const segment of prepared.segments) {
@@ -252,7 +258,7 @@ export class TranslationScheduler {
   /** A following item that cannot fit also seals the batch; never wait to fill impossible space. */
   private hasFullBatch(): boolean {
     const priority = this.pending[0].priority;
-    const profile = TRANSLATION_BATCH_PROFILES[priority];
+    const profile = this.batchProfiles[priority];
     let characters = 0;
     let items = 0;
     for (const item of this.pending) {
@@ -266,7 +272,7 @@ export class TranslationScheduler {
 
   private takeNextBatch(): ScheduledTranslationBatch {
     const priority = this.pending[0].priority;
-    const profile = TRANSLATION_BATCH_PROFILES[priority];
+    const profile = this.batchProfiles[priority];
     const segments: TranslationSegment[] = [];
     const items: PendingSegment[] = [];
     let characters = 0;

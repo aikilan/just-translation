@@ -83,4 +83,22 @@ describe('settings store initialization', () => {
     expect(stored[SETTINGS_STORAGE_KEY]).toEqual(DEFAULT_SETTINGS);
     expect(storageSet).toHaveBeenCalledOnce();
   });
+
+  it('persists the one-time legacy AI selection migration without the removed field', async () => {
+    stored[SETTINGS_STORAGE_KEY] = {
+      ...DEFAULT_SETTINGS,
+      activeTranslator: undefined,
+      schemaVersion: undefined,
+      activeProfileId: DEFAULT_SETTINGS.profiles[0].id,
+      autoTranslateSites: ['private.example.com'],
+    };
+
+    await initializeSettings();
+
+    expect(stored[SETTINGS_STORAGE_KEY]).toMatchObject({
+      activeTranslator: { kind: 'ai', profileId: DEFAULT_SETTINGS.profiles[0].id },
+      autoTranslateSites: ['private.example.com'],
+    });
+    expect(stored[SETTINGS_STORAGE_KEY]).not.toHaveProperty('activeProfileId');
+  });
 });

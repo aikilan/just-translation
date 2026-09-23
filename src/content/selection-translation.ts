@@ -6,6 +6,7 @@ import {
   type RuntimeRequest,
   type SelectionTranslationResult,
 } from '../shared/messages';
+import type { ActiveTranslator } from '../shared/translation-engines';
 import { SelectionTranslationView, type SelectionAnchor } from './selection-translation-view';
 
 type SelectionSender = (request: RuntimeRequest) => Promise<Result<unknown>>;
@@ -16,19 +17,20 @@ export class SelectionTranslationController {
     requestId: string;
     text: string;
     anchor: SelectionAnchor;
+    translator: ActiveTranslator;
     view: SelectionTranslationView;
   };
   constructor(private readonly send: SelectionSender = sendRuntimeMessage) {}
 
-  start(text: string, anchor: SelectionAnchor): void {
+  start(text: string, anchor: SelectionAnchor, translator: ActiveTranslator): void {
     if (!text.trim()) return;
     this.close();
     const requestId = crypto.randomUUID();
     const view = new SelectionTranslationView({
       close: () => this.close(),
-      retry: () => this.start(text, anchor),
+      retry: () => this.start(text, anchor, translator),
     });
-    const task = { requestId, text, anchor, view };
+    const task = { requestId, text, anchor, translator, view };
     this.active = task;
     view.show(text, anchor);
     if (this.active !== task) return;
@@ -53,6 +55,7 @@ export class SelectionTranslationController {
         type: 'TRANSLATE_SELECTION',
         requestId: task.requestId,
         text: task.text,
+        translator: task.translator,
       });
       if (this.active !== task) return;
       if (!result.ok) throw new LocalizedError(result.error);
@@ -72,7 +75,10 @@ function isTranslationResult(value: unknown): value is SelectionTranslationResul
     'text' in value &&
     typeof value.text === 'string' &&
     'targetLanguage' in value &&
-    typeof value.targetLanguage === 'string'
+    typeof value.targetLanguage === 'string' &&
+    'translatorName' in value &&
+    typeof value.translatorName === 'string' &&
+    Boolean(value.translatorName.trim())
   );
 }
 

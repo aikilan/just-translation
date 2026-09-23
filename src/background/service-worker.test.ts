@@ -8,6 +8,7 @@ import {
   SETTINGS_STORAGE_KEY,
   type TranslationProfile,
 } from '../shared/settings';
+import type { ActiveTranslator } from '../shared/translation-engines';
 import { contentEvent, STREAM_END, completionResponse } from '../test-utils/sse';
 
 type MessageListener = (
@@ -26,6 +27,7 @@ describe('background document lifecycle', () => {
   let holdSettings: (() => Promise<void>) | undefined;
   let translationRetryCount: number;
   let activeProfile: TranslationProfile;
+  let activeTranslator: ActiveTranslator;
   let activeTabs: chrome.tabs.Tab[];
   let menuStatus: unknown;
   const sender = (id: string): chrome.runtime.MessageSender => ({
@@ -47,6 +49,7 @@ describe('background document lifecycle', () => {
     translationRetryCount = 1;
     holdSessionRead = undefined;
     activeProfile = { ...TEST_PROFILE, model: 'test-model' };
+    activeTranslator = { kind: 'ai', profileId: activeProfile.id };
     const settings = {
       ...DEFAULT_SETTINGS,
       profiles: [activeProfile],
@@ -68,7 +71,9 @@ describe('background document lifecycle', () => {
           setAccessLevel: vi.fn(),
           get: async () => {
             await holdSettings?.();
-            return { [SETTINGS_STORAGE_KEY]: { ...settings, translationRetryCount } };
+            return {
+              [SETTINGS_STORAGE_KEY]: { ...settings, activeTranslator, translationRetryCount },
+            };
           },
           set: vi.fn(),
         },
@@ -90,6 +95,7 @@ describe('background document lifecycle', () => {
         },
       },
       runtime: {
+        getPlatformInfo: vi.fn().mockResolvedValue({ os: 'mac' }),
         id: 'test-extension',
         onInstalled: event(),
         onStartup: event(),
@@ -135,7 +141,7 @@ describe('background document lifecycle', () => {
   it('requeues only never-sent offscreen batches and preserves admitted HTTP', async () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'viewport',
       mode: 'segmented',
     });
@@ -173,7 +179,7 @@ describe('background document lifecycle', () => {
   it('returns work still awaiting session lookup without ever submitting HTTP', async () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'preflight',
       mode: 'segmented',
     });
@@ -215,7 +221,7 @@ describe('background document lifecycle', () => {
       });
       await send({
         type: 'BEGIN_TRANSLATION_SESSION',
-        profileId: DEFAULT_SETTINGS.activeProfileId,
+        translator: { kind: 'ai', profileId: activeProfile.id },
         sessionId: 'order',
         mode: 'segmented',
       });
@@ -274,10 +280,15 @@ describe('background document lifecycle', () => {
       type: 'TRANSLATE_SELECTION',
       requestId: 'selected',
       text: 'Only this paragraph',
+      translator: activeTranslator,
     });
     expect(response).toEqual({
       ok: true,
-      data: { text: '选区译文', targetLanguage: DEFAULT_SETTINGS.targetLanguage },
+      data: {
+        text: '选区译文',
+        targetLanguage: DEFAULT_SETTINGS.targetLanguage,
+        translatorName: activeProfile.name,
+      },
     });
     expect(Object.keys(session)).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -289,10 +300,156 @@ describe('background document lifecycle', () => {
     });
   });
 
+  it('translates without an API profile through the selected Google free engine', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'google-free' };
+    activeProfile.model = '';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ sentences: [{ trans: '你好 [[JT_KEEP_0]]' }] }), {
+        status: 200,
+      }),
+    );
+
+    await expect(
+      send({
+        type: 'TRANSLATE_SELECTION',
+        requestId: 'free-selection',
+        text: 'Hello [[JT_KEEP_0]]',
+        translator: activeTranslator,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      data: {
+        text: '你好 [[JT_KEEP_0]]',
+        targetLanguage: 'Simplified Chinese',
+        translatorName: 'Google',
+      },
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('translate.googleapis.com');
+
+    fetchMock.mockClear();
+    const begin = await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      translator: activeTranslator,
+      sessionId: 'free-page',
+      mode: 'segmented',
+    });
+    expect(begin).toMatchObject({
+      ok: true,
+      data: {
+        context: { translator: activeTranslator, targetLanguage: 'Simplified Chinese' },
+        maxConcurrency: 2,
+        batchProfiles: { visible: { maxCharacters: 1_000, maxItems: 1 } },
+      },
+    });
+    await expect(
+      send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        translator: activeTranslator,
+        sessionId: 'free-full',
+        mode: 'full-document',
+      }),
+    ).resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches an ordinary page batch through the snapshotted Google free engine', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'google-free' };
+    activeProfile.model = '';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ sentences: [{ trans: '页面译文' }] }), { status: 200 }),
+    );
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      translator: activeTranslator,
+      sessionId: 'google-page',
+      mode: 'segmented',
+    });
+
+    await expect(
+      send({
+        type: 'TRANSLATE_BATCH',
+        sessionId: 'google-page',
+        batchId: 'google-batch',
+        priority: 'background',
+        segments: [{ requestId: 'p:0', unitId: 'p', partIndex: 0, text: 'Page text' }],
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      data: { translations: { 'p:0': '页面译文' }, failures: {} },
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('translate.googleapis.com');
+  });
+
+  it('translates a selection through the current Bing page-token flow', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'microsoft-free' };
+    activeProfile.model = '';
+    const auth = new Response(
+      '<script>var params_AbusePreventionHelper=[1720000000000,"token",3600000];var _G={IG:"0123456789ABCDEF0123456789ABCDEF"};</script><div id="rich_tta" data-iid="translator.5028.1"></div>',
+      { status: 200 },
+    );
+    Object.defineProperty(auth, 'url', { value: 'https://www.bing.com/translator' });
+    fetchMock.mockResolvedValueOnce(auth).mockResolvedValueOnce(
+      new Response(JSON.stringify([{ translations: [{ text: 'Bing 译文', to: 'zh-Hans' }] }]), {
+        status: 200,
+      }),
+    );
+
+    await expect(
+      send({
+        type: 'TRANSLATE_SELECTION',
+        requestId: 'bing-selection',
+        text: 'Selected text',
+        translator: activeTranslator,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      data: {
+        text: 'Bing 译文',
+        targetLanguage: 'Simplified Chinese',
+        translatorName: 'Microsoft',
+      },
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain('www.bing.com/ttranslatev3');
+  });
+
+  it('rejects a stale engine selection before storing a session or issuing HTTP', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'google-free' };
+    await expect(
+      send({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        translator: { kind: 'builtin', engine: 'microsoft-free' },
+        sessionId: 'stale-engine',
+        mode: 'segmented',
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { key: '翻译设置已改变，请重新开始翻译' },
+    });
+    expect(Object.keys(session)).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale menu-bound selection recipient before issuing HTTP', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'google-free' };
+
+    await expect(
+      send({
+        type: 'TRANSLATE_SELECTION',
+        requestId: 'stale-selection',
+        text: 'Selected text',
+        translator: { kind: 'builtin', engine: 'microsoft-free' },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { key: '翻译设置已改变，请重新开始翻译' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('closing a selection does not cancel concurrent page translation', async () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'page',
       mode: 'segmented',
     });
@@ -307,6 +464,7 @@ describe('background document lifecycle', () => {
       type: 'TRANSLATE_SELECTION',
       requestId: 'selected',
       text: 'Selected paragraph',
+      translator: activeTranslator,
     });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await send({ type: 'CANCEL_SELECTION_TRANSLATION', requestId: 'selected' });
@@ -328,7 +486,7 @@ describe('background document lifecycle', () => {
       send({
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'segmented',
-        profileId: DEFAULT_SETTINGS.activeProfileId,
+        translator: { kind: 'ai', profileId: activeProfile.id },
         sessionId,
       });
     const first = await begin('thinking-off');
@@ -369,7 +527,7 @@ describe('background document lifecycle', () => {
       await send({
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'segmented',
-        profileId: DEFAULT_SETTINGS.activeProfileId,
+        translator: { kind: 'ai', profileId: activeProfile.id },
         sessionId: 'retry-budget',
       });
       translationRetryCount = count === 0 ? 5 : 0;
@@ -464,7 +622,7 @@ describe('background document lifecycle', () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'full-document',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'full',
     });
     expect(Object.values(session)[0]).toMatchObject({ mode: 'full-document' });
@@ -492,7 +650,7 @@ describe('background document lifecycle', () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'full-document',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'full',
     });
     const work = send({
@@ -511,7 +669,7 @@ describe('background document lifecycle', () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'full-document',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'full',
     });
     let release!: () => void;
@@ -531,14 +689,14 @@ describe('background document lifecycle', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses a 120 second HTTP deadline for full-document mode without retrying', async () => {
+  it('uses a 120 second first-output deadline for full-document mode without retrying', async () => {
     translationRetryCount = 5;
     vi.useFakeTimers();
     try {
       await send({
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'full-document',
-        profileId: DEFAULT_SETTINGS.activeProfileId,
+        translator: { kind: 'ai', profileId: activeProfile.id },
         sessionId: 'deadline',
       });
       let settled = false;
@@ -559,6 +717,7 @@ describe('background document lifecycle', () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('Expected timeout');
       expect(renderMessage(result.error)).toContain('超时');
+      expect(renderMessage(result.error)).toContain('首次');
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -603,7 +762,7 @@ describe('background document lifecycle', () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'segmented',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'stream',
     });
     const work = send({
@@ -650,7 +809,7 @@ describe('background document lifecycle', () => {
         await send({
           type: 'BEGIN_TRANSLATION_SESSION',
           mode: 'segmented',
-          profileId: DEFAULT_SETTINGS.activeProfileId,
+          translator: { kind: 'ai', profileId: activeProfile.id },
           sessionId: 'old',
         })
       ).ok,
@@ -667,7 +826,7 @@ describe('background document lifecycle', () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'segmented',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'new',
     });
     committed({ tabId: 18, frameId: 0, documentId });
@@ -680,7 +839,7 @@ describe('background document lifecycle', () => {
           {
             type: 'BEGIN_TRANSLATION_SESSION',
             mode: 'segmented',
-            profileId: DEFAULT_SETTINGS.activeProfileId,
+            translator: { kind: 'ai', profileId: activeProfile.id },
             sessionId: 'late',
           },
           'old-document',
@@ -699,7 +858,7 @@ describe('background document lifecycle', () => {
     const work = send({
       type: 'BEGIN_TRANSLATION_SESSION',
       mode: 'segmented',
-      profileId: DEFAULT_SETTINGS.activeProfileId,
+      translator: { kind: 'ai', profileId: activeProfile.id },
       sessionId: 'late',
     });
     await vi.waitFor(() => expect(release).toBeTypeOf('function'));

@@ -9,6 +9,11 @@ interface ProviderQueue {
   resumeTimer?: ReturnType<typeof setTimeout>;
 }
 
+export interface ProviderRequestQueueOptions {
+  concurrency?: number;
+  intervalCap?: number;
+}
+
 const PRIORITY: Readonly<Record<TranslationPriority, number>> = {
   visible: 2,
   readAhead: 1,
@@ -23,6 +28,22 @@ export class ProviderRequestQueue {
     string,
     { provider: ProviderQueue; priority: TranslationPriority }
   >();
+
+  private readonly concurrency: number;
+  private readonly intervalCap: number;
+
+  constructor(options: ProviderRequestQueueOptions = {}) {
+    this.concurrency = options.concurrency ?? 6;
+    this.intervalCap = options.intervalCap ?? 6;
+    if (
+      !Number.isInteger(this.concurrency) ||
+      this.concurrency < 1 ||
+      !Number.isInteger(this.intervalCap) ||
+      this.intervalCap < 1
+    ) {
+      throw new LocalizedError('Provider queue limits must be positive integers');
+    }
+  }
 
   async run<T>(
     apiUrl: string,
@@ -41,10 +62,14 @@ export class ProviderRequestQueue {
           this.waiting.delete(jobId);
           signal.throwIfAborted();
           const timeout = new AbortController();
-          const timer = setTimeout(
-            () => timeout.abort(new LocalizedError(message('API 请求超时'))),
-            timeoutMs,
-          );
+          // Zero delegates the deadline to a streaming request's first/idle/total budget.
+          const timer =
+            timeoutMs > 0
+              ? setTimeout(
+                  () => timeout.abort(new LocalizedError(message('API 请求超时'))),
+                  timeoutMs,
+                )
+              : undefined;
           const attemptSignal = AbortSignal.any([signal, timeout.signal]);
           try {
             return await task(attemptSignal);
@@ -93,7 +118,12 @@ export class ProviderRequestQueue {
     let provider = this.providers.get(origin);
     if (!provider) {
       provider = {
-        queue: new PQueue({ concurrency: 6, intervalCap: 6, interval: 1_000, strict: true }),
+        queue: new PQueue({
+          concurrency: this.concurrency,
+          intervalCap: this.intervalCap,
+          interval: 1_000,
+          strict: true,
+        }),
         resumeAt: 0,
       };
       this.providers.set(origin, provider);

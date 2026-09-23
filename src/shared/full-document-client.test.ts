@@ -21,6 +21,152 @@ const stream = (body: string) =>
   new Response(body, { headers: { 'content-type': 'text/event-stream' } });
 
 describe('full document request', () => {
+  it('starts all request clocks after queue admission rather than while waiting', async () => {
+    vi.useFakeTimers();
+    try {
+      let admit!: () => void;
+      const queued = new Promise<void>((resolve) => {
+        admit = resolve;
+      });
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(completionResponse(translations));
+      const work = translateFullDocument(settings, units, fetcher, undefined, {
+        timeoutMs: 120_000,
+        scheduleAttempt: async (attempt) => {
+          await queued;
+          return attempt(new AbortController().signal);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(700_000);
+      expect(fetcher).not.toHaveBeenCalled();
+      admit();
+      await expect(work).resolves.toEqual(
+        Object.fromEntries(translations.map(({ id, text }) => [id, text])),
+      );
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each(['openai', 'anthropic'] as const)(
+    'keeps a progressing %s stream alive beyond two minutes',
+    async (protocol) => {
+      vi.useFakeTimers();
+      try {
+        let writer!: ReadableStreamDefaultController<Uint8Array>;
+        const encode = (wire: string) => writer.enqueue(new TextEncoder().encode(wire));
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                writer = c;
+              },
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          ),
+        );
+        const event = (type: string, value: object = {}) =>
+          `event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`;
+        const work = translateFullDocument(
+          { ...settings, protocol },
+          [{ id: 'one', text: 'Source' }],
+          fetcher,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        if (protocol === 'anthropic')
+          encode(
+            event('message_start', {
+              message: { type: 'message', role: 'assistant', content: [], stop_reason: null },
+            }) +
+              event('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }),
+          );
+        for (const text of ['{"translations":[', '{"id":"one",', '"text":"', '译文"}]}']) {
+          await vi.advanceTimersByTimeAsync(50_000);
+          encode(
+            protocol === 'openai'
+              ? contentEvent(text)
+              : event('content_block_delta', { index: 0, delta: { type: 'text_delta', text } }),
+          );
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        encode(
+          protocol === 'openai'
+            ? STREAM_END
+            : event('content_block_stop', { index: 0 }) +
+                event('message_delta', { delta: { stop_reason: 'end_turn' } }) +
+                event('message_stop'),
+        );
+        await expect(work).resolves.toEqual({ one: '译文' });
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+  it.each(['openai', 'anthropic'] as const)(
+    'does not count %s reasoning, whitespace or usage as first translation output',
+    async (protocol) => {
+      vi.useFakeTimers();
+      try {
+        let writer!: ReadableStreamDefaultController<Uint8Array>;
+        const cancel = vi.fn();
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                writer = c;
+              },
+              cancel,
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          ),
+        );
+        const work = translateFullDocument({ ...settings, protocol }, units, fetcher);
+        const failed = expect(work).rejects.toThrow('首次');
+        await vi.advanceTimersByTimeAsync(0);
+        writer.enqueue(
+          new TextEncoder().encode(
+            protocol === 'openai'
+              ? sseEvent({
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { reasoning_content: 'thinking', content: ' ' },
+                      finish_reason: null,
+                    },
+                  ],
+                }) + sseEvent({ choices: [], usage: {} })
+              : [
+                  { type: 'message_start', message: { role: 'assistant', content: [] } },
+                  { type: 'ping' },
+                  { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+                  {
+                    type: 'content_block_delta',
+                    index: 0,
+                    delta: { type: 'thinking_delta', thinking: 'thinking' },
+                  },
+                  { type: 'content_block_stop', index: 0 },
+                  {
+                    type: 'content_block_start',
+                    index: 1,
+                    content_block: { type: 'text', text: ' ' },
+                  },
+                  { type: 'message_delta', delta: {}, usage: { output_tokens: 20 } },
+                ]
+                  .map(sseEvent)
+                  .join(''),
+          ),
+        );
+        await vi.advanceTimersByTimeAsync(120_000);
+        await failed;
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
   it('sends every ordered paragraph once, including repeated text and an unsplit long paragraph', async () => {
     const input = [
       ...units,

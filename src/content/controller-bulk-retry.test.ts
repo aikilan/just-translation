@@ -7,8 +7,9 @@ import { DEFAULT_SETTINGS } from '../shared/settings';
 type Batch = Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>;
 const settings = {
   ...DEFAULT_SETTINGS,
-  configured: true,
-  activeProfileId: 'test-profile',
+  ready: true,
+  supportsFullDocument: true,
+  activeTranslator: { kind: 'ai' as const, profileId: 'test-profile' },
   profiles: [{ id: 'test-profile', name: 'Test', configured: true }],
   translationConcurrency: 2,
   translateDynamicContent: false,
@@ -51,7 +52,16 @@ function installRuntime(
         ok: true,
         data: {
           configurationId: 'unchanged-configuration',
-          context: { profileId: settings.activeProfileId, targetLanguage: settings.targetLanguage },
+          context: {
+            translator: settings.activeTranslator,
+            targetLanguage: settings.targetLanguage,
+          },
+          batchProfiles: {
+            visible: { maxCharacters: 1_200, maxItems: 4 },
+            readAhead: { maxCharacters: 1_800, maxItems: 4 },
+            background: { maxCharacters: 2_400, maxItems: 4 },
+          },
+          maxConcurrency: settings.translationConcurrency,
         },
       });
     }

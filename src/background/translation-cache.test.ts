@@ -11,6 +11,7 @@ import {
 } from './translation-cache';
 
 const BASE_CONTEXT: TranslationCacheContext = {
+  kind: 'ai',
   ...TEST_PROFILE,
   thinkingEnabled: true,
   origin: 'https://news.example.com',
@@ -134,6 +135,26 @@ describe('TranslationCache', () => {
     cache.close();
   });
 
+  it('isolates built-in engines and never includes ephemeral Microsoft authentication', async () => {
+    const google: TranslationCacheContext = {
+      kind: 'builtin',
+      origin: 'https://page.test',
+      engine: 'google-free',
+      targetLanguage: 'Simplified Chinese',
+      targetLanguageCode: 'zh-CN',
+    };
+    const microsoft: TranslationCacheContext = {
+      ...google,
+      engine: 'microsoft-free',
+      targetLanguageCode: 'zh-Hans',
+    };
+    const googleKey = await createTranslationCacheKey(google, 'Hello');
+    const microsoftKey = await createTranslationCacheKey(microsoft, 'Hello');
+    expect(googleKey).not.toBe(microsoftKey);
+    expect(googleKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(microsoftKey).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
   it('uses a fixed 72-hour expiry that is not extended by cache hits', async () => {
     let now = 10_000;
     const cache = createCache(() => now);
@@ -196,6 +217,7 @@ function createCache(now: () => number): TranslationCache {
 it('isolates protocols, endpoints and effective thinking fields, ignoring inactive fields', async () => {
   const { DEFAULT_PROVIDER_OPTIONS } = await import('../shared/providers');
   const context = {
+    kind: 'ai' as const,
     ...DEFAULT_PROVIDER_OPTIONS,
     origin: 'https://page.test',
     apiUrl: 'https://gateway.test/prefix',

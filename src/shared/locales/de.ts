@@ -1,11 +1,63 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  '全文最长等待（分钟）': 'Zeitlimit der Seitenübersetzung (Minuten)',
+  '全文最长等待必须是 2–60 的整数': 'Das Zeitlimit muss eine ganze Zahl von 2 bis 60 sein',
+  '仅用于 AI 全文翻译。默认 10 分钟；首次输出 120 秒、输出停滞 60 秒保护仍然有效。下次翻译生效。':
+    'Nur für KI-Seitenübersetzung. Standard: 10 Minuten. Die Grenzen für erste Ausgabe (120 s) und Ausgabepause (60 s) gelten weiterhin. Wirksam ab der nächsten Übersetzung.',
+  全文首次有效输出超时: 'Zeitlimit vor der ersten Übersetzungsausgabe erreicht',
+  全文译文输出停滞超时: 'Die Ausgabe der Seitenübersetzung stockt',
+  全文翻译已达到总时限: 'Die Seitenübersetzung hat ihr Gesamtzeitlimit erreicht',
+  应用全文译文: 'Seitenübersetzung anwenden',
+  '全文请求失败，未应用译文；共 {{count}} 个阅读单元。':
+    'Seitenanfrage fehlgeschlagen; keine Übersetzung angewendet. {{count}} Leseeinheiten.',
   '全文完成后统一显示译文。': 'Übersetzungen erscheinen, sobald die gesamte Seite fertig ist.',
   '配置 ID 不能为空': 'Konfigurations-ID erforderlich',
   翻译配置名称不能重复: 'Konfigurationsnamen müssen eindeutig sein',
   翻译配置不存在: 'Übersetzungskonfiguration nicht gefunden',
   '至少保留一个 AI 配置': 'Mindestens eine KI-Konfiguration muss bestehen bleiben',
   '请先启用其他配置，再删除当前配置': 'Aktivieren Sie vor dem Löschen eine andere Konfiguration',
+  翻译引擎无效: 'Ungültige Übersetzungs-Engine',
+  '翻译设置已改变，请重新开始翻译':
+    'Die Übersetzungseinstellungen wurden geändert. Starten Sie erneut',
+  免费翻译通道不支持当前目标语言: 'Der kostenlose Kanal unterstützt diese Zielsprache nicht',
+  免费翻译通道每次只能处理一个文本分片:
+    'Der kostenlose Kanal akzeptiert einen Textabschnitt pro Anfrage',
+  '免费翻译通道单次最多支持 {{p0}} 个字符':
+    'Der kostenlose Kanal unterstützt bis zu {{p0}} Zeichen pro Anfrage',
+  免费翻译通道未返回译文: 'Der kostenlose Kanal hat keine Übersetzung geliefert',
+  免费翻译通道损坏了保护标记: 'Der kostenlose Kanal hat eine Schutzmarkierung beschädigt',
+  免费翻译通道返回格式无效:
+    'Die kostenlose Schnittstelle hat sich möglicherweise geändert. Versuchen Sie es später manuell erneut oder wechseln Sie die Engine',
+  '免费翻译通道请求失败（{{p0}}）':
+    'Kostenlose Übersetzungsanfrage fehlgeschlagen ({{p0}}). Versuchen Sie es später manuell erneut oder wechseln Sie die Engine',
+  '免费翻译通道已限流，请稍后手动重试或切换引擎':
+    'Der kostenlose Kanal ist gedrosselt. Versuchen Sie es später manuell erneut oder wechseln Sie die Engine',
+  '免费翻译通道暂时不可用，请稍后手动重试或切换引擎':
+    'Der kostenlose Kanal ist vorübergehend nicht verfügbar. Versuchen Sie es später manuell erneut oder wechseln Sie die Engine',
+  免费翻译通道响应过大: 'Die kostenlose Übersetzungsantwort ist zu groß',
+  'Microsoft 免费通道鉴权格式已变更':
+    'Die kostenlose Microsoft-Schnittstelle hat sich möglicherweise geändert. Versuchen Sie es später manuell erneut oder wechseln Sie die Engine',
+  'Microsoft 免费通道重定向安全校验失败':
+    'Sicherheitsprüfung der Microsoft-Weiterleitung fehlgeschlagen',
+  '全文上下文翻译仅支持 AI 配置':
+    'Vollständige Kontextübersetzung ist nur mit einer KI-Konfiguration verfügbar',
+  '翻译通道未返回译文，请重试':
+    'Der Übersetzungskanal lieferte kein Ergebnis. Versuchen Sie es erneut',
+  当前翻译引擎不可用: 'Die aktuelle Übersetzungs-Engine ist nicht verfügbar',
+  翻译引擎: 'Übersetzungs-Engine',
+  'Google 翻译（非官方免费通道）': 'Google Übersetzer (inoffizieller kostenloser Kanal)',
+  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (inoffizieller kostenloser Kanal)',
+  '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
+    'Webseitentext wird über einen inoffiziellen kostenlosen Kanal ohne Verfügbarkeitsgarantie an {{p0}} gesendet.',
+  '网页文本会发送到你配置的 AI 服务。':
+    'Webseitentext wird an Ihren konfigurierten KI-Dienst gesendet.',
+  '仅支持 AI 配置': 'Nur mit einer KI-Konfiguration verfügbar',
+  '自定义目标语言仅支持 AI 配置':
+    'Benutzerdefinierte Zielsprachen sind nur mit einer KI-Konfiguration verfügbar',
+  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Übersetzen Sie Webseiten kostenlos mit Google oder Microsoft oder verbinden Sie Ihre eigene KI.',
+  '请选择受支持的预设目标语言，或切换到有效的 AI 配置。':
+    'Wählen Sie unten eine unterstützte Zielsprache oder wechseln Sie zu einer gültigen KI-Konfiguration.',
   请填写目标语言: 'Geben Sie eine Zielsprache ein',
   展示方式无效: 'Ungültiger Anzeigemodus',
   动态翻译设置无效: 'Ungültige Einstellung für dynamische Übersetzung',

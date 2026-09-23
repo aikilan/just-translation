@@ -5,18 +5,21 @@ import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Result, RuntimeRequest, TranslationBatchResult } from '../shared/messages';
+import type { ActiveTranslator } from '../shared/translation-engines';
 import { TranslationController } from './controller';
 import { translateBatch } from '../shared/translation-client';
 import { completionResponse, contentEvent } from '../test-utils/sse';
 
 const PUBLIC_SETTINGS = {
   uiLanguage: 'system',
-  configured: true,
-  activeProfileId: 'profile-one',
+  ready: true,
+  supportsFullDocument: true,
+  activeTranslator: { kind: 'ai' as const, profileId: 'profile-one' },
   profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual' as const,
   translationConcurrency: 6,
+  translationRetryCount: 1,
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: [],
@@ -356,7 +359,7 @@ describe('TranslationController', () => {
       if (request.type === 'GET_PUBLIC_SETTINGS') {
         return Promise.resolve({
           ok: true,
-          data: { ...PUBLIC_SETTINGS, configured: false },
+          data: { ...PUBLIC_SETTINGS, ready: false },
         });
       }
       return Promise.resolve(controlResponse(request));
@@ -373,7 +376,7 @@ describe('TranslationController', () => {
       phase: 'error',
       failed: 1,
       total: 1,
-      error: { key: '请先在插件设置中补全当前翻译配置（包括翻译 Prompt）' },
+      error: { key: '当前翻译引擎不可用' },
     });
     controller.restore();
   });
@@ -525,7 +528,11 @@ describe('TranslationController', () => {
 
   it('binds candidate lookup, AI requests, and cache writes to one background session', async () => {
     document.body.innerHTML = '<main><p>Profile-scoped translation source.</p></main>';
-    const observedRequests: Array<{ type: string; sessionId: string; profileId?: string }> = [];
+    const observedRequests: Array<{
+      type: string;
+      sessionId: string;
+      translator?: ActiveTranslator;
+    }> = [];
     const sendMessage = vi.fn((request: RuntimeRequest): Promise<Result<unknown>> => {
       if (request.type === 'GET_PUBLIC_SETTINGS') {
         return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
@@ -534,7 +541,7 @@ describe('TranslationController', () => {
         observedRequests.push({
           type: request.type,
           sessionId: request.sessionId,
-          profileId: request.profileId,
+          translator: request.translator,
         });
       }
       if (request.type === 'TRANSLATE_BATCH') {
@@ -578,7 +585,7 @@ describe('TranslationController', () => {
       'END_TRANSLATION_SESSION',
     ]);
     expect(new Set(observedRequests.map((request) => request.sessionId)).size).toBe(1);
-    expect(observedRequests[0]?.profileId).toBe('profile-one');
+    expect(observedRequests[0]?.translator).toEqual({ kind: 'ai', profileId: 'profile-one' });
     controller.restore();
   });
 
@@ -2005,9 +2012,15 @@ function controlResponse(request: RuntimeRequest): Extract<Result<unknown>, { ok
         ? {
             configurationId: 'config-one',
             context: {
-              profileId: PUBLIC_SETTINGS.activeProfileId,
+              translator: PUBLIC_SETTINGS.activeTranslator,
               targetLanguage: PUBLIC_SETTINGS.targetLanguage,
             },
+            batchProfiles: {
+              visible: { maxCharacters: 1_200, maxItems: 4 },
+              readAhead: { maxCharacters: 1_800, maxItems: 4 },
+              background: { maxCharacters: 2_400, maxItems: 4 },
+            },
+            maxConcurrency: PUBLIC_SETTINGS.translationConcurrency,
           }
         : undefined,
   };

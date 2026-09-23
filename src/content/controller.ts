@@ -1,5 +1,6 @@
 import { message, LocalizedError, type UiMessage } from '../shared/i18n';
 import { isDocumentTitle } from './document-title';
+import { isFullDocumentStatusMutation } from './full-document-status-view';
 import { getLabelSource } from './label-presentation';
 import { isSourcePresentationMutation, synchronizeSourcePresentation } from './source-presentation';
 import PQueue from 'p-queue';
@@ -30,8 +31,11 @@ import { TranslationMetrics, type TranslationDiagnostics } from '../shared/trans
 import { FullDocumentTranslationTask } from './full-document-task';
 import { RenderTasks } from './render-tasks';
 import { isUrlExcluded, type DisplayMode } from '../shared/settings';
+import { activeTranslatorEquals, type ActiveTranslator } from '../shared/translation-engines';
 import {
   cleanupReadingRuns,
+  collectOriginalReadingUnits,
+  ownsOriginalReadingUnit,
   discoverTranslatableElements,
   getOriginalSourceText,
   getElementDeclaredLanguage,
@@ -45,8 +49,8 @@ import {
   setDocumentDisplayMode,
   setSourceDisplayMode,
 } from './dom-translator';
+import { findNearestRenderedReadingRoot } from './reading-structure';
 import {
-  TRANSLATION_BATCH_PROFILES,
   TranslationScheduler,
   TranslationBatchDeferredError,
   type ScheduledTranslationBatch,
@@ -60,8 +64,6 @@ const PREFLIGHT_MESSAGE_TIMEOUT_MS = 5_000;
 const CANDIDATE_CHUNK_MAX_ITEMS = 24;
 const CANDIDATE_CHUNK_MAX_CHARACTERS = 12_000;
 const MAX_PENDING_DISCOVERY_SLICES = 3;
-const DYNAMIC_READING_ROOT_SELECTOR =
-  'h1,h2,h3,h4,h5,h6,p,li,blockquote,figcaption,dt,dd,td,th,a,article,section,div';
 const TRANSLATION_PRIORITIES: readonly TranslationPriority[] = [
   'visible',
   'readAhead',
@@ -146,6 +148,7 @@ interface ReadingWindowRenderCoordinator {
 
 interface ActiveTranslationPass {
   sessionId: string;
+  session: TranslationSessionInfo;
   settings: PublicTranslatorSettings;
   scheduler: TranslationScheduler;
   renderQueue: ReadingWindowRenderCoordinator;
@@ -199,6 +202,7 @@ export class TranslationController {
     requiresRescan: boolean;
   } | null = null;
   private readonly sessionConfigurations = new Map<string, string>();
+  private readonly sessionInfos = new Map<string, TranslationSessionInfo>();
   private readonly sessionCacheWrites = new Map<string, Set<Promise<void>>>();
   private observer: MutationObserver | null = null;
   /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
@@ -206,7 +210,7 @@ export class TranslationController {
     const element = event.target;
     if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
       return;
-    this.addDynamicRoot(element);
+    this.addNearestDynamicRoot(element);
     this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
   };
   private observerTimer: number | undefined;
@@ -289,9 +293,9 @@ export class TranslationController {
     return this.fullDocument?.getStatus() ?? { ...this.status };
   }
 
-  async start(): Promise<void> {
+  async start(expectedTranslator?: ActiveTranslator): Promise<void> {
     if (this.getStatus().mode === 'full-document') this.restore();
-    return this.startTranslation();
+    return this.startTranslation(undefined, expectedTranslator);
   }
 
   /** Full mode always replaces the previous snapshot; repeated starts during work are ignored. */
@@ -304,6 +308,12 @@ export class TranslationController {
         if (this.fullDocument !== task) return;
         this.dynamicContentEnabled = settings.translateDynamicContent;
         if (this.dynamicContentEnabled) this.observeDynamicContent();
+      },
+      {
+        stop: () => this.stop(),
+        retry: () => {
+          void this.startFullDocument();
+        },
       },
     );
     this.fullDocument = task;
@@ -340,7 +350,10 @@ export class TranslationController {
     else await this.start();
   }
 
-  private async startTranslation(scopeRoots?: readonly HTMLElement[]): Promise<void> {
+  private async startTranslation(
+    scopeRoots?: readonly HTMLElement[],
+    expectedTranslator?: ActiveTranslator,
+  ): Promise<void> {
     if (this.hasActiveOperation()) return;
     this.disconnectObserver(scopeRoots === undefined);
     this.purgeDisconnectedRecords();
@@ -353,14 +366,34 @@ export class TranslationController {
     this.discoveryAbort = new AbortController();
     this.metrics = new TranslationMetrics();
     let sessionStarted = false;
+    // Preflight is asynchronous even when ongoing dynamic translation is disabled.
+    // Track host writes so a suspended discovery snapshot is never resumed after a layout change.
+    let preflightChanged = false;
+    const capturePreflight = (mutations: MutationRecord[]) => {
+      if (mutations.some((mutation) => !isSourcePresentationMutation(mutation)))
+        preflightChanged = true;
+    };
+    const preflightObserver = new MutationObserver(capturePreflight);
 
     try {
       // Capture only the first discovered slice before preflight; remaining DOM work is streamed.
-      const initialPass = await this.prepareInitialRecords(scopeRoots);
+      let initialPass = await this.prepareInitialRecords(scopeRoots);
+      preflightObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+      });
       if (this.mainSessionId !== sessionId) return;
       const finishPreflight = this.metrics.start('preflight');
       const settings = await this.readValidSettings();
       if (this.mainSessionId !== sessionId) return;
+      if (
+        expectedTranslator &&
+        !activeTranslatorEquals(expectedTranslator, settings.activeTranslator)
+      ) {
+        throw new LocalizedError(message('翻译设置已改变，请重新开始翻译'));
+      }
       if (isUrlExcluded(location.href, settings.excludedSites)) {
         // Preflight exclusions are extension feedback, never failed paragraphs in the host page.
         this.stop();
@@ -373,13 +406,14 @@ export class TranslationController {
         this.status.needsRestart = true;
         return;
       }
-      const context = await this.beginTranslationSession(sessionId, settings.activeProfileId);
+      const session = await this.beginTranslationSession(sessionId, settings.activeTranslator);
+      const context = session.context;
       finishPreflight();
       sessionStarted = true;
       if (this.mainSessionId !== sessionId) return;
       if (
         this.hasDifferentContext({
-          activeProfileId: context.profileId,
+          activeTranslator: context.translator,
           targetLanguage: context.targetLanguage,
         })
       ) {
@@ -389,6 +423,23 @@ export class TranslationController {
       }
       this.status.context = context;
       this.status.needsRestart = false;
+
+      capturePreflight(preflightObserver.takeRecords());
+      preflightObserver.disconnect();
+      if (preflightChanged) {
+        await initialPass.discovery.return();
+        // Only the bounded preflight slice has records at this point. Preserve valid
+        // translated records from previous passes and repartition changed local owners.
+        for (const element of initialPass.elements) {
+          if (element.isConnected && !isDocumentTitle(element))
+            this.invalidateRenderedReadingContext(element, true);
+          const record = this.records.get(element);
+          if (record?.phase === 'queued') this.discardRecord(record);
+        }
+        cleanupReadingRuns();
+        initialPass = await this.prepareInitialRecords(scopeRoots);
+        if (this.mainSessionId !== sessionId) return;
+      }
 
       this.dynamicContentEnabled = settings.translateDynamicContent;
       this.status.displayMode = settings.displayMode;
@@ -430,6 +481,7 @@ export class TranslationController {
       this.status.phase = 'error';
       this.status.error = message;
     } finally {
+      preflightObserver.disconnect();
       if (sessionStarted) void this.closeSessionAfterCacheWrites(sessionId);
       if (!this.hasActiveOperation()) this.metrics.finish();
     }
@@ -518,12 +570,13 @@ export class TranslationController {
         this.status.needsRestart = true;
         throw new LocalizedError(message('翻译设置已改变，请在插件中用新设置重新翻译'));
       }
-      const context = await this.beginTranslationSession(sessionId, settings.activeProfileId);
+      const session = await this.beginTranslationSession(sessionId, settings.activeTranslator);
+      const context = session.context;
       sessionStarted = true;
       if (!this.isCurrentRetry(record, sessionId, generation)) return;
       if (
         this.hasDifferentContext({
-          activeProfileId: context.profileId,
+          activeTranslator: context.translator,
           targetLanguage: context.targetLanguage,
         })
       ) {
@@ -573,8 +626,7 @@ export class TranslationController {
       }
 
       const prepared = createTranslationBatches([{ id: record.id, text: record.sourceText }], {
-        maxCharacters: TRANSLATION_BATCH_PROFILES.visible.maxCharacters,
-        maxItems: TRANSLATION_BATCH_PROFILES.visible.maxItems,
+        ...session.batchProfiles.visible,
       });
       const translations: Record<string, string> = Object.fromEntries(
         prepared.segments.flatMap((segment) => {
@@ -587,7 +639,7 @@ export class TranslationController {
         .filter((batch) => batch.length > 0);
       const responses = await runWithConcurrency(
         missingBatches,
-        settings.translationConcurrency,
+        session.maxConcurrency,
         async (batch) => {
           const publish = (partial: Record<string, string>) => {
             if (!this.isCurrentRetry(record, sessionId, generation)) return;
@@ -732,6 +784,8 @@ export class TranslationController {
     sessionId: string,
     preparedPass?: PreparedTranslationPass,
   ): Promise<TranslationPassResult> {
+    const session = this.sessionInfos.get(sessionId);
+    if (!session) throw new LocalizedError(message('翻译会话不存在或已失效'));
     const prepared = preparedPass ?? (await this.prepareInitialRecords());
     const elements = prepared.elements;
     const candidates = prepared.candidates;
@@ -871,7 +925,8 @@ export class TranslationController {
       },
       {
         // Snapshot the saved limit for this pass; active requests are never interrupted by edits.
-        concurrency: settings.translationConcurrency,
+        concurrency: session.maxConcurrency,
+        batchProfiles: session.batchProfiles,
         beforeDispatch: async () => {
           // An asynchronous viewport refresh must not hold old-order dispatch behind a cache lookup.
           if (activePass.viewportRefreshWork) return;
@@ -890,6 +945,7 @@ export class TranslationController {
     );
     const activePass: ActiveTranslationPass = {
       sessionId,
+      session,
       settings,
       scheduler,
       renderQueue,
@@ -1016,6 +1072,7 @@ export class TranslationController {
         this.applyCandidateResolution(
           chunk,
           resolution,
+          pass.session.batchProfiles.visible.maxCharacters,
           pass.activeGroups,
           pass.expectedSegmentsByGroup,
           pass.scheduler,
@@ -1399,6 +1456,7 @@ export class TranslationController {
   private applyCandidateResolution(
     groups: readonly CandidateGroup[],
     resolution: CandidateResolution,
+    maxSegmentCharacters: number,
     activeGroups: Map<string, ActiveTranslationGroup>,
     expectedSegmentsByGroup: Map<string, TranslationSegment[]>,
     scheduler: TranslationScheduler,
@@ -1417,7 +1475,12 @@ export class TranslationController {
         for (const element of group.members) {
           const slot = this.ensureOrderedRenderSlot(renderQueue, element);
           const record = this.records.get(element);
-          if (record) this.discardRecord(record);
+          // A language skip settles work, not presentation ownership. Unwrapping this
+          // anchor here is observed as new raw prose and starts a fresh dynamic pass.
+          if (record) {
+            this.records.delete(element);
+            record.generation += 1;
+          }
           slot.record = undefined;
           slot.skipped = true;
         }
@@ -1468,7 +1531,7 @@ export class TranslationController {
       }
       if (records.length === 0) continue;
       const expected = createTranslationBatches([{ id: group.id, text: group.sourceText }], {
-        maxCharacters: TRANSLATION_BATCH_PROFILES.visible.maxCharacters,
+        maxCharacters: maxSegmentCharacters,
         maxItems: Number.MAX_SAFE_INTEGER,
       }).segments;
       expectedSegmentsByGroup.set(group.id, expected);
@@ -1887,19 +1950,20 @@ export class TranslationController {
     this.sessionCacheWrites.delete(sessionId);
     await this.endTranslationSession(sessionId);
     this.sessionConfigurations.delete(sessionId);
+    this.sessionInfos.delete(sessionId);
   }
 
   /** Captures provider, prompt and target language once before any page work is dispatched. */
   private async beginTranslationSession(
     sessionId: string,
-    profileId: string,
-  ): Promise<TranslationSessionInfo['context']> {
+    translator: ActiveTranslator,
+  ): Promise<TranslationSessionInfo> {
     const response = await sendPreflightMessage<TranslationSessionInfo>(
       {
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'segmented',
         sessionId,
-        profileId,
+        translator,
       },
       message('创建翻译会话'),
     );
@@ -1916,7 +1980,8 @@ export class TranslationController {
       throw new LocalizedError(message('翻译设置已改变，请用新设置重新全文翻译'));
     }
     this.sessionConfigurations.set(sessionId, response.data.configurationId);
-    return response.data.context;
+    this.sessionInfos.set(sessionId, response.data);
+    return response.data;
   }
 
   private async endTranslationSession(sessionId: string): Promise<void> {
@@ -1954,12 +2019,15 @@ export class TranslationController {
     let requiresTranslation = false;
     let removedRecord = false;
     for (const mutation of mutations) {
+      if (isFullDocumentStatusMutation(mutation)) continue;
+      let removedRecordInMutation = false;
       const targetElement = getMutationTargetElement(mutation.target);
       if (targetElement?.closest('[data-justranslate-translation]')) continue;
       if (isSourcePresentationMutation(mutation)) continue;
       if (this.fullDocument) {
         // The full task validates its captured sources; additions wait for successful handoff.
-        if (targetElement instanceof HTMLElement) this.addDynamicRoot(targetElement);
+        if (targetElement instanceof HTMLElement)
+          this.addNearestDynamicRoot(targetElement, mutation.type === 'attributes');
         continue;
       }
       // Title writes have no body presentation marker. Reuse source identity to ignore our
@@ -1976,9 +2044,33 @@ export class TranslationController {
         requiresTranslation = true;
         continue;
       }
+      if (mutation.type === 'attributes' && targetElement instanceof HTMLElement) {
+        this.addDynamicRoot(this.invalidateRenderedReadingContext(targetElement));
+        requiresTranslation = true;
+        continue;
+      }
       const source = targetElement?.closest<HTMLElement>('[data-justranslate-source]') ?? null;
       if (source) {
         synchronizeSourcePresentation(source);
+        // Equal text is not sufficient when the host replaces an inline element
+        // with a block. Extension wrappers/feedback do not change reading ownership.
+        const hostStructureChanged =
+          mutation.type === 'childList' &&
+          [...mutation.addedNodes, ...mutation.removedNodes].some(
+            (node) =>
+              node instanceof HTMLElement &&
+              !node.matches(
+                '[data-justranslate-translation],[data-justranslate-source-text],[data-justranslate-reading-run]',
+              ),
+          );
+        if (hostStructureChanged) {
+          const root = this.invalidateRenderedReadingContext(source, true);
+          if (!this.records.has(source)) {
+            this.addDynamicRoot(root);
+            requiresTranslation = true;
+            continue;
+          }
+        }
         const record = this.records.get(source);
         // Wrapping/moving the original nodes and replacing only the translation
         // does not change the source. Never discard unrelated records to suppress it.
@@ -1998,28 +2090,18 @@ export class TranslationController {
         else restoreSourceElement(source);
         // Restoring a raw-prose anchor unwraps it. Rescan its still-connected owner, not the
         // detached anchor; otherwise the changed original text would never be discovered again.
-        if (source.isConnected) this.addDynamicRoot(source);
-        else if (parent) this.addDynamicRoot(parent);
-        requiresTranslation = true;
-      }
-      if (mutation.type === 'attributes' && targetElement instanceof HTMLElement) {
-        this.addDynamicRoot(targetElement);
+        if (source.isConnected) this.addNearestDynamicRoot(source);
+        else if (parent) this.addNearestDynamicRoot(parent);
         requiresTranslation = true;
       }
       if (mutation.type === 'characterData' && targetElement) {
-        this.addDynamicRoot(
-          targetElement.closest<HTMLElement>(DYNAMIC_READING_ROOT_SELECTOR) ??
-            (targetElement as HTMLElement),
-        );
+        this.addNearestDynamicRoot(targetElement);
         requiresTranslation = true;
       }
       for (const addedNode of mutation.addedNodes) {
         const addedElement = getMutationTargetElement(addedNode);
         if (!addedElement || addedElement.closest('[data-justranslate-translation]')) continue;
-        this.addDynamicRoot(
-          addedElement.closest<HTMLElement>(DYNAMIC_READING_ROOT_SELECTOR) ??
-            (addedElement as HTMLElement),
-        );
+        this.addNearestDynamicRoot(addedElement);
         requiresTranslation = true;
       }
       for (const removedNode of mutation.removedNodes) {
@@ -2029,6 +2111,7 @@ export class TranslationController {
           if (record) this.discardRecord(record);
           else restoreSourceElement(label);
           removedRecord = true;
+          removedRecordInMutation = true;
         }
         if (removedNode.nodeType !== 1) continue;
         const removedElement = removedNode as Element;
@@ -2036,8 +2119,17 @@ export class TranslationController {
           if (removedElement === record.element || removedElement.contains(record.element)) {
             this.discardRecord(record);
             removedRecord = true;
+            removedRecordInMutation = true;
           }
         }
+      }
+      if (
+        (removedRecordInMutation || mutation.removedNodes.length > 0) &&
+        targetElement instanceof HTMLElement &&
+        targetElement.isConnected
+      ) {
+        this.addDynamicRoot(this.invalidateRenderedReadingContext(targetElement, true));
+        requiresTranslation = true;
       }
     }
     if (removedRecord) this.syncStatusCounts();
@@ -2126,6 +2218,51 @@ export class TranslationController {
   }
 
   /** Coalesce subtrees; the one full-document catch-up deadline cannot slide with page activity. */
+  private invalidateRenderedReadingContext(
+    target: HTMLElement,
+    includeTarget = false,
+  ): HTMLElement {
+    const context = findNearestRenderedReadingRoot(
+      includeTarget ? target : (target.parentElement ?? target),
+    );
+    // Inspect without mutating the document. Synthetic prose anchors are transparent:
+    // a removed boundary may merge two runs even when no removed node had a record.
+    const units = collectOriginalReadingUnits(context, { url: location.href, repartition: true });
+    let discarded = false;
+    for (const record of [...this.records.values()]) {
+      const intersectsTarget =
+        record.element === target ||
+        record.element.contains(target) ||
+        target.contains(record.element);
+      if (!intersectsTarget && !context.contains(record.element)) continue;
+      if (
+        this.isRecordSourceCurrent(record) &&
+        units.some((unit) => ownsOriginalReadingUnit(record.element, unit))
+      )
+        continue;
+      this.discardRecord(record);
+      discarded = true;
+    }
+    if (discarded) {
+      this.activePass?.markStale();
+      this.syncStatusCounts();
+    }
+    if (context.isConnected) return context;
+    const liveStart = target.isConnected ? (target.parentElement ?? target) : document.body;
+    return findNearestRenderedReadingRoot(liveStart);
+  }
+
+  private addNearestDynamicRoot(
+    element: Element,
+    includeParentContext = false,
+    fixedDeadline = false,
+  ): void {
+    const htmlElement = element instanceof HTMLElement ? element : element.parentElement;
+    if (!htmlElement) return;
+    const start = includeParentContext ? (htmlElement.parentElement ?? htmlElement) : htmlElement;
+    this.addDynamicRoot(findNearestRenderedReadingRoot(start), fixedDeadline);
+  }
+
   private addDynamicRoot(root: HTMLElement, fixedDeadline = false): void {
     if (!root.isConnected) return;
     let changedAt = performance.now();
@@ -2168,12 +2305,12 @@ export class TranslationController {
 
   /** Retains the language/profile of existing output across dynamic scans and manual continuation. */
   private hasDifferentContext(
-    settings: Pick<PublicTranslatorSettings, 'activeProfileId' | 'targetLanguage'>,
+    settings: Pick<PublicTranslatorSettings, 'activeTranslator' | 'targetLanguage'>,
   ): boolean {
     const context = this.status.context;
     return Boolean(
       context &&
-      (context.profileId !== settings.activeProfileId ||
+      (!activeTranslatorEquals(context.translator, settings.activeTranslator) ||
         context.targetLanguage !== settings.targetLanguage),
     );
   }
@@ -2184,9 +2321,10 @@ export class TranslationController {
       message('读取翻译配置'),
     );
     if (!settingsResult.ok) throw new LocalizedError(settingsResult.error);
-    if (!settingsResult.data.configured) {
-      throw new LocalizedError(message('请先在插件设置中补全当前翻译配置（包括翻译 Prompt）'));
-    }
+    if (!settingsResult.data.ready)
+      throw new LocalizedError(
+        settingsResult.data.configurationError ?? message('当前翻译引擎不可用'),
+      );
     return settingsResult.data;
   }
 

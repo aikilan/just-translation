@@ -15,6 +15,52 @@ afterEach(() => {
   vi.mocked(testTranslatorConfiguration).mockReset();
 });
 describe('settings workspace', () => {
+  it('retains the full-document deadline draft after a failed save and permits retry', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    await click(view.container, '阅读偏好');
+    const field = view.container.querySelector<HTMLInputElement>(
+      '[aria-label="全文最长等待（分钟）"]',
+    )!;
+    await input(view.container, '全文最长等待（分钟）', '25');
+    send.mockRejectedValueOnce(new Error('保存失败'));
+    await act(() => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(field.value).toBe('25');
+    expect(view.container.textContent).toContain('保存失败');
+    expect(field.disabled).toBe(false);
+    await act(() => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(view.container.textContent).not.toContain('保存失败');
+    view.unmount();
+    view = await mount(<OptionsApp />);
+    await click(view.container, '阅读偏好');
+    expect(
+      view.container.querySelector<HTMLInputElement>('[aria-label="全文最长等待（分钟）"]')?.value,
+    ).toBe('25');
+  });
+  it('validates and independently saves the full-document deadline', async () => {
+    const { send } = mockExtension();
+    view = await mount(<OptionsApp />);
+    await click(view.container, '阅读偏好');
+    const field = view.container.querySelector<HTMLInputElement>(
+      '[aria-label="全文最长等待（分钟）"]',
+    )!;
+    expect(field.value).toBe('10');
+    await input(view.container, '全文最长等待（分钟）', '1');
+    await act(() => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(view.container.textContent).toContain('2–60');
+    expect(
+      send.mock.calls.some(
+        ([r]) =>
+          r.type === 'UPDATE_READING_PREFERENCES' && r.patch.fullDocumentTimeoutMinutes === 1,
+      ),
+    ).toBe(false);
+    await input(view.container, '全文最长等待（分钟）', '20');
+    await act(() => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { fullDocumentTimeoutMinutes: 20 },
+    });
+  });
   it('puts the connection editor before independently saved translation preferences', async () => {
     mockExtension();
     view = await mount(<OptionsApp />);
@@ -31,6 +77,27 @@ describe('settings workspace', () => {
     expect(preferences.textContent).toContain('自动保存');
     expect(editor.querySelector('fieldset')?.textContent).toContain('连接信息');
     expect(editor.querySelector('fieldset[aria-label="模型行为"]')).not.toBeNull();
+  });
+  it('selects free engines separately from AI profiles and explains their recipient', async () => {
+    const { send } = mockExtension(DEFAULT_SETTINGS);
+    view = await mount(<OptionsApp />);
+    const engine = view.container.querySelector<HTMLSelectElement>('[aria-label="翻译引擎"]')!;
+    expect(engine.value).toBe('builtin:google-free');
+    expect(view.container.textContent).toContain('网页文本会发送给 Google');
+    expect(view.container.textContent).toContain('非官方免费通道');
+    await input(view.container, '翻译引擎', 'builtin:microsoft-free');
+    expect(send).toHaveBeenCalledWith({
+      type: 'SET_ACTIVE_TRANSLATOR',
+      translator: { kind: 'builtin', engine: 'microsoft-free' },
+    });
+    expect(view.container.textContent).toContain('网页文本会发送给 Microsoft');
+    await click(view.container, '阅读偏好');
+    expect(
+      view.container.querySelector<HTMLOptionElement>(
+        '[aria-label="目标语言"] option[value="__custom__"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(view.container.textContent).toContain('自定义目标语言仅支持 AI 配置');
   });
   it('keeps draft state next to save actions and restores it when switching sections', async () => {
     mockExtension();
@@ -211,7 +278,7 @@ describe('settings workspace', () => {
     expect(send).not.toHaveBeenCalled();
     await click(view.container, '阅读偏好');
     await click(view.container, 'AI 配置');
-    await input(view.container, '正在编辑的配置', DEFAULT_SETTINGS.activeProfileId);
+    await input(view.container, '正在编辑的配置', DEFAULT_SETTINGS.profiles[0].id);
     expect(view.container.querySelector<HTMLInputElement>('[aria-label="配置名称"]')?.value).toBe(
       '未保存的草稿',
     );
@@ -237,9 +304,14 @@ describe('settings workspace', () => {
     });
     expect(storageSet).not.toHaveBeenCalled();
     expect(testTranslatorConfiguration).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'SET_ACTIVE_PROFILE' }));
+    expect(send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'SET_ACTIVE_TRANSLATOR' }),
+    );
     await click(view.container, '设为当前使用');
-    expect(send).toHaveBeenCalledWith({ type: 'SET_ACTIVE_PROFILE', profileId: 'second' });
+    expect(send).toHaveBeenCalledWith({
+      type: 'SET_ACTIVE_TRANSLATOR',
+      translator: { kind: 'ai', profileId: 'second' },
+    });
   });
   it('does not let a late connection response overwrite edited values or duplicate tests', async () => {
     mockExtension();

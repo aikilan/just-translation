@@ -22,6 +22,15 @@ import {
   releaseLabelSource,
   setLabelTextHidden,
 } from './label-presentation';
+import {
+  CONTROL_SELECTOR,
+  createRenderedReadingSemanticsReader,
+  getRenderedReadingSemantics,
+  isRenderedReadingBoundary,
+  isSemanticTextFlow,
+  PROTECTED_SELECTOR,
+  type RenderedReadingSemanticsReader,
+} from './reading-structure';
 
 import {
   SOURCE_TEXT_ATTRIBUTE,
@@ -40,23 +49,27 @@ const READING_RUN_ATTRIBUTE = 'data-justranslate-reading-run';
 const TRANSLATION_STATE_ATTRIBUTE = 'data-justranslate-state';
 const TRANSLATION_UNIT_ID_ATTRIBUTE = 'data-justranslate-unit-id';
 const LABEL_ATTRIBUTE = 'data-justranslate-label';
-const CONTROL_SELECTOR =
-  'button,label,legend,summary,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],[role="option"],[role="tab"],[role="checkbox"],[role="radio"],[role="switch"],[role="combobox"]';
 const OVERLAY_SELECTOR = 'dialog,[role="dialog"],[role="listbox"],[role="menu"]';
 export type TranslationUnitKind = 'prose' | 'label';
 
 /** Compact interface leaves and control text use inline, translation-only presentation. */
 export function getTranslationUnitKind(element: HTMLElement): TranslationUnitKind {
+  return getTranslationUnitKindFromStructure(element, getRenderedReadingSemantics);
+}
+
+function getTranslationUnitKindFromStructure(
+  element: HTMLElement,
+  readSemantics: RenderedReadingSemanticsReader,
+): TranslationUnitKind {
   if (element.hasAttribute(LABEL_ATTRIBUTE) || element.closest(CONTROL_SELECTOR)) return 'label';
+  const semantics = readSemantics(element);
+  // A short independently rendered heading is still prose. Only icon/badge-bearing
+  // compact UI groups use the text-only label presentation outside explicit controls.
+  if (semantics.canOwnProse && !element.querySelector('svg,sup')) return 'prose';
   const compact =
     element.matches('div,span') &&
-    !element.closest(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
-    (element.tagName !== 'SPAN' ||
-      !hasInlineReadingOwner(element) ||
-      (element.parentElement?.textContent?.trim().length ?? 0) < 20) &&
-    !element.querySelector(
-      `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,${CONTROL_SELECTOR}`,
-    ) &&
+    !hasSemanticTextFlowAncestor(element) &&
+    !hasInlineReadingOwner(element, readSemantics) &&
     (element.textContent?.trim().length ?? 0) < 20;
   return compact ? 'label' : 'prose';
 }
@@ -86,44 +99,6 @@ const TRANSLATION_TYPOGRAPHY_PROPERTIES = [
 type TranslationTypographyProperty = (typeof TRANSLATION_TYPOGRAPHY_PROPERTIES)[number];
 type TranslationTypography = Readonly<Record<TranslationTypographyProperty, string>>;
 
-const READING_BLOCK_SELECTOR = [
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'p',
-  'li',
-  'blockquote',
-  'figcaption',
-  'dt',
-  'dd',
-  'td',
-  'th',
-  'a',
-  'article',
-  'section',
-  'div',
-].join(',');
-
-const SEMANTIC_READING_ANCESTOR_SELECTOR = [
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'p',
-  'li',
-  'blockquote',
-  'figcaption',
-  'dt',
-  'dd',
-  'td',
-  'th',
-].join(',');
-
 const SKIP_SELECTOR = [
   'script',
   'style',
@@ -150,20 +125,16 @@ const SKIP_SELECTOR = [
   '[role="banner"]',
   '[role="complementary"]',
   '[role="contentinfo"]',
+  // Class names are styling tokens, not ad semantics; never prune prose from a generic class.
   '[role="advertisement"]',
   '[id^="div-gpt-ad" i]',
   '[id^="google_ads" i]',
   '[data-ad-slot]',
-  '[class~="ad" i]',
-  '[class~="ads" i]',
-  '[class~="advert" i]',
-  '[class~="advertisement" i]',
   `[${TRANSLATION_ATTRIBUTE}]`,
 ].join(',');
 
 const MAIN_SCOPE_SELECTOR = 'main,[role="main"]';
 const ARTICLE_SCOPE_SELECTOR = 'article,[role="article"]';
-const PROTECTED_SELECTOR = 'code,kbd,samp,math,[translate="no" i],.notranslate';
 
 export interface CollectionOptions {
   isVisible?: (element: HTMLElement) => boolean;
@@ -172,6 +143,8 @@ export interface CollectionOptions {
   viewportOnly?: boolean;
   /** Already claimed reading leaves can be skipped before traversing their inline descendants. */
   knownElements?: ReadonlySet<HTMLElement>;
+  /** Recompute ownership from host structure rather than existing synthetic prose runs. */
+  repartition?: boolean;
 }
 
 interface DiscoveryOptions extends CollectionOptions {
@@ -265,6 +238,7 @@ function* iterateReadingElements(
   // Inspection is a fresh observation. Arbitrary host attributes/CSS may change fragment
   // eligibility without hitting the incremental cache's ordinary translation invalidators.
   const ownerDocument = root instanceof Document ? root : root.ownerDocument;
+  const readSemantics = createRenderedReadingSemanticsReader();
   if (readOnly && ownerDocument) getSourceAnalysisCache(ownerDocument).values = new WeakMap();
   // A page scan includes its tab title even though the normal reading root is body.
   // Scoped rescans include it only when the changed subtree actually owns the title.
@@ -289,6 +263,7 @@ function* iterateReadingElements(
     children: (Element | Node[])[];
     next: number;
     owned: boolean;
+    separated: boolean;
   }
   const frame = (element: HTMLElement): Frame => ({
     element,
@@ -296,6 +271,7 @@ function* iterateReadingElements(
     children: [],
     next: 0,
     owned: false,
+    separated: false,
   });
   for (const scopes of scopeGroups) {
     if (!scopes) {
@@ -346,8 +322,10 @@ function* iterateReadingElements(
               continue;
             }
             if (readOnly) {
-              const children = originalChildNodes(element);
-              const runs = siteRule ? [] : inlineReadingRuns(element, children);
+              const children = originalChildNodes(element, options.repartition);
+              const runs = siteRule
+                ? []
+                : yield* inspectInlineReadingRuns(element, children, readSemantics);
               const runNodes = new Set(runs.flat());
               const runStarts = new Map(runs.map((nodes) => [nodes[0], nodes]));
               current.children = [];
@@ -359,7 +337,14 @@ function* iterateReadingElements(
                   current.children.push(node);
               }
             } else {
-              if (!siteRule) wrapInlineReadingRuns(element);
+              if (!siteRule) {
+                const children = Array.from(element.childNodes);
+                wrapInlineReadingRuns(
+                  element,
+                  yield* inspectInlineReadingRuns(element, children, readSemantics),
+                  readSemantics,
+                );
+              }
               current.children = Array.from(element.children);
             }
             yield null;
@@ -378,51 +363,68 @@ function* iterateReadingElements(
             continue;
           }
           stack.pop();
+          const semantics = readSemantics(element);
+          const parentFrame = stack[stack.length - 1];
+          const propagateBoundary = (includeCurrent = true) => {
+            if (parentFrame && (current.separated || (includeCurrent && semantics.isBoundary)))
+              parentFrame.separated = true;
+          };
           if (current.owned) {
-            if (stack.length) stack[stack.length - 1].owned = true;
+            if (parentFrame) parentFrame.owned = true;
+            propagateBoundary();
             continue;
           }
-          const inlineLayoutChild =
-            !element.matches(READING_BLOCK_SELECTOR) &&
-            !!element.parentElement &&
-            hasLayoutRisk(element.parentElement);
+          const inlineLayoutChild = semantics.isLayoutItem && semantics.outer === 'inline';
           // A semantic sentence retains its inline emphasis/text; layout divs still own separate items.
           if (
             inlineLayoutChild &&
             !element.hasAttribute(READING_RUN_ATTRIBUTE) &&
-            element.parentElement?.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
-            !element.parentElement.querySelector(SEMANTIC_READING_ANCESTOR_SELECTOR)
-          )
+            element.parentElement &&
+            isSemanticTextFlow(element.parentElement) &&
+            !hasIndependentReadingDescendant(element.parentElement, readSemantics)
+          ) {
+            // The flex/grid item participates in one semantic sentence, so its layout-item
+            // boundary must not prevent the parent sentence from owning the combined text.
+            propagateBoundary(false);
             continue;
+          }
           const matches = siteRule
             ? element.matches(siteRule.includeSelectors.join(','))
-            : element.matches(READING_BLOCK_SELECTOR) ||
+            : semantics.canOwnProse ||
               element.hasAttribute(READING_RUN_ATTRIBUTE) ||
-              inlineLayoutChild ||
-              (element.matches('span') &&
-                getTranslationUnitKind(element) === 'label' &&
-                (!hasInlineReadingOwner(element) ||
-                  (element.parentElement?.textContent?.trim().length ?? 0) < 20));
-          if (!matches || !isVisible(element)) continue;
-          // Empty layout owners must not absorb controls or nested blocks rejected during discovery.
-          if (
-            hasLayoutRisk(element) &&
-            element.querySelector(`${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article`)
-          )
+              element.tagName === 'A' ||
+              (getTranslationUnitKindFromStructure(element, readSemantics) === 'label' &&
+                !hasInlineReadingOwner(element, readSemantics));
+          if (!matches || !isVisible(element)) {
+            propagateBoundary();
             continue;
-          if (!siteRule && element.tagName === 'A' && hasInlineReadingOwner(element)) continue;
+          }
+          // A rejected independent descendant must never be pulled into an aggregate parent unit.
+          if (!siteRule && current.separated) {
+            propagateBoundary();
+            continue;
+          }
+          if (
+            !siteRule &&
+            element.tagName === 'A' &&
+            hasInlineReadingOwner(element, readSemantics)
+          ) {
+            propagateBoundary(false);
+            continue;
+          }
           const analysis = yield* analyzeSourceFragments(element);
           if (!hasReadableText(analysis.text, !!element.closest(CONTROL_SELECTOR))) {
             if (!readOnly) unwrapReadingRun(element);
+            propagateBoundary();
             continue;
           }
           // Scope authority depends on readable text, even when it is outside this viewport pass.
           hasReadingUnit = true;
           if (options.viewportOnly && getElementTranslationPriority(element) !== 'visible') {
-            if (stack.length) stack[stack.length - 1].owned = true;
+            if (parentFrame) parentFrame.owned = true;
             continue;
           }
-          if (stack.length) stack[stack.length - 1].owned = true;
+          if (parentFrame) parentFrame.owned = true;
           yield element;
         }
       }
@@ -438,27 +440,75 @@ function shouldSkipElement(element: Element): boolean {
   );
 }
 
+function hasSemanticTextFlowAncestor(element: HTMLElement): boolean {
+  let current = element.parentElement;
+  while (current) {
+    if (isSemanticTextFlow(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
+/** Detects intrinsic reading structure without treating inline flex/grid items as blocks. */
+function hasIndependentReadingDescendant(
+  container: HTMLElement,
+  readSemantics: RenderedReadingSemanticsReader = getRenderedReadingSemantics,
+): boolean {
+  const stack = Array.from(container.children);
+  while (stack.length > 0) {
+    const element = stack.pop()!;
+    if (!(element instanceof HTMLElement)) continue;
+    const semantics = readSemantics(element);
+    if (
+      element.matches(CONTROL_SELECTOR) ||
+      semantics.isStructuralContainer ||
+      semantics.outer === 'block'
+    )
+      return true;
+    if (semantics.outer !== 'none') stack.push(...element.children);
+  }
+  return false;
+}
+
 /** Inline links belong to the surrounding sentence, not to an independent translation unit.
  * Do not absorb links into layout containers that also contain separate reading blocks.
  */
-function hasInlineReadingOwner(element: HTMLElement): boolean {
+function hasInlineReadingOwner(
+  element: HTMLElement,
+  readSemantics: RenderedReadingSemanticsReader = getRenderedReadingSemantics,
+): boolean {
   if (element.parentElement?.closest(`[${READING_RUN_ATTRIBUTE}]`)) return true;
-  const semantic = element.parentElement?.closest(SEMANTIC_READING_ANCESTOR_SELECTOR);
-  if (semantic) return true;
-  const owner = element.parentElement?.closest<HTMLElement>('div,section,article');
-  if (!owner || hasLayoutRisk(owner)) return false;
-  return !owner.querySelector(`${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article`);
+  let child = element;
+  let owner = element.parentElement;
+  while (owner) {
+    const semantics = readSemantics(owner);
+    if (
+      child.parentElement === owner &&
+      (semantics.layout === 'flex' || semantics.layout === 'grid')
+    )
+      return isSemanticTextFlow(owner) && !hasIndependentReadingDescendant(owner, readSemantics);
+    if (semantics.canOwnProse) return !boundarySnapshots.get(readSemantics)?.get(owner);
+    if (semantics.isStructuralContainer) return false;
+    child = owner;
+    owner = owner.parentElement;
+  }
+  return false;
 }
 
 /** Mixed containers need disjoint reading units: a nested paragraph must not swallow its
  * surrounding raw prose. Reversible anchors move the original nodes (never clone links/events). */
-function wrapInlineReadingRuns(container: HTMLElement): void {
-  for (const nodes of inlineReadingRuns(container, Array.from(container.childNodes))) {
+function wrapInlineReadingRuns(
+  container: HTMLElement,
+  runs: readonly Node[][],
+  readSemantics: RenderedReadingSemanticsReader,
+): void {
+  for (const nodes of runs) {
     const anchor = container.ownerDocument.createElement('span');
     anchor.setAttribute(READING_RUN_ATTRIBUTE, '');
-    if (getTranslationUnitKind(container) === 'label') anchor.setAttribute(LABEL_ATTRIBUTE, '');
+    if (getTranslationUnitKindFromStructure(container, readSemantics) === 'label')
+      anchor.setAttribute(LABEL_ATTRIBUTE, '');
     if (
-      getTranslationUnitKind(container) === 'label' &&
+      getTranslationUnitKindFromStructure(container, readSemantics) === 'label' &&
       nodes.length === 1 &&
       nodes[0].nodeType === Node.TEXT_NODE
     ) {
@@ -470,11 +520,20 @@ function wrapInlineReadingRuns(container: HTMLElement): void {
   }
 }
 
-/** Grouping is shared by materializing discovery and read-only inspection, including raw prose. */
-function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
+/** Grouping is shared by materializing discovery and read-only inspection, including raw prose.
+ * Element-boundary inspection yields so one large custom subtree cannot monopolize the page.
+ */
+function* inspectInlineReadingRuns(
+  container: HTMLElement,
+  children: Node[],
+  readSemantics: RenderedReadingSemanticsReader,
+): Generator<null, Node[][]> {
   if (container.hasAttribute(READING_RUN_ATTRIBUTE)) return [];
   // Anchor only text, never the button or its icons/input/badge children.
-  if (getTranslationUnitKind(container) === 'label')
+  if (
+    getTranslationUnitKindFromStructure(container, readSemantics) === 'label' &&
+    (!hasInlineReadingOwner(container, readSemantics) || container.closest(CONTROL_SELECTOR))
+  )
     return children
       .filter(
         (node) =>
@@ -483,17 +542,18 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
           /\p{L}/u.test(node.textContent ?? ''),
       )
       .map((node) => [node]);
+  const semantics = readSemantics(container);
+  // Inline layout boxes participate in their outer sentence; their inner layout
+  // does not turn anonymous text into a separate (and previously lost) item.
   if (
-    !container.matches(
-      `main,article,section,div,form,fieldset,${SEMANTIC_READING_ANCESTOR_SELECTOR}`,
-    )
+    semantics.outer === 'inline' &&
+    !semantics.isLayoutItem &&
+    hasInlineReadingOwner(container, readSemantics) &&
+    (semantics.layout === 'flex' || semantics.layout === 'grid')
   )
     return [];
-  if (hasLayoutRisk(container)) {
-    if (
-      container.matches(SEMANTIC_READING_ANCESTOR_SELECTOR) &&
-      !container.querySelector(`${SEMANTIC_READING_ANCESTOR_SELECTOR},${CONTROL_SELECTOR}`)
-    )
+  if (semantics.layout === 'flex' || semantics.layout === 'grid') {
+    if (isSemanticTextFlow(container) && !hasIndependentReadingDescendant(container, readSemantics))
       return [];
     // A text node is an anonymous flex/grid item. Anchor only text runs, never reparent element items.
     if (!children.some((node) => node instanceof Element)) return [];
@@ -501,15 +561,19 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
       .filter((node) => node.nodeType === 3 && /\p{L}/u.test(node.textContent ?? ''))
       .map((node) => [node]);
   }
-  const blockSelector = `${SEMANTIC_READING_ANCESTOR_SELECTOR},div,section,article,header,ul,ol,table,dl,details,summary,[${READING_RUN_ATTRIBUTE}]`;
-  const isBoundary = (node: Node) =>
-    node instanceof Element &&
-    (node.matches(blockSelector) ||
-      ((shouldSkipElement(node) || node.matches(CONTROL_SELECTOR) || node.matches('form')) &&
-        !node.matches(PROTECTED_SELECTOR)));
-  if (!children.some(isBoundary)) return [];
+  const isBoundary = function* (node: Node): Generator<null, boolean> {
+    if (!(node instanceof Element)) return false;
+    if (node.hasAttribute(READING_RUN_ATTRIBUTE)) return true;
+    const protectedInline = node.matches(PROTECTED_SELECTOR);
+    if (!protectedInline && (shouldSkipElement(node) || node.matches(CONTROL_SELECTOR)))
+      return true;
+    if (!(node instanceof HTMLElement)) return false;
+    if (isRenderedReadingBoundary(node, readSemantics)) return true;
+    return yield* containsReadingBoundary(node, readSemantics);
+  };
   const runs: Node[][] = [];
   let run: Node[] = [];
+  let foundBoundary = semantics.isStructuralContainer;
   const flush = () => {
     // A lone link remains its own reading node; only prose needs a synthetic anchor.
     const ownsProse = run.some(
@@ -524,22 +588,78 @@ function inlineReadingRuns(container: HTMLElement, children: Node[]): Node[][] {
     run = [];
   };
   for (const node of children) {
-    if (isBoundary(node)) flush();
-    else run.push(node);
+    const boundary = yield* isBoundary(node);
+    if (node instanceof Element) yield null;
+    if (boundary) {
+      foundBoundary = true;
+      flush();
+    } else run.push(node);
   }
   flush();
-  return runs;
+  let cache = boundarySnapshots.get(readSemantics);
+  if (!cache) {
+    cache = new WeakMap();
+    boundarySnapshots.set(readSemantics, cache);
+  }
+  cache.set(container, foundBoundary);
+  return foundBoundary ? runs : [];
+}
+
+// The cache belongs to one discovery reader, not to the document. Each inline
+// subtree is inspected once, with cooperative yields even before the first unit.
+const boundarySnapshots = new WeakMap<
+  RenderedReadingSemanticsReader,
+  WeakMap<HTMLElement, boolean>
+>();
+function* containsReadingBoundary(
+  element: HTMLElement,
+  read: RenderedReadingSemanticsReader,
+): Generator<null, boolean> {
+  let cache = boundarySnapshots.get(read);
+  if (!cache) {
+    cache = new WeakMap();
+    boundarySnapshots.set(read, cache);
+  }
+  const cached = cache.get(element);
+  if (cached !== undefined) return cached;
+  let result = false;
+  for (const child of element.children) {
+    yield null;
+    if (!(child instanceof HTMLElement)) continue;
+    if (isRenderedReadingBoundary(child, read) || (yield* containsReadingBoundary(child, read))) {
+      result = true;
+      break;
+    }
+  }
+  cache.set(element, result);
+  return result;
 }
 
 /** Preserve host nodes and ignore only extension-owned feedback/container indirection. */
-function originalChildNodes(element: HTMLElement): Node[] {
+function originalChildNodes(element: HTMLElement, repartition = false): Node[] {
   return Array.from(element.childNodes).flatMap((node) => {
     if (getLabelSource(node)) return [];
     if (node instanceof HTMLElement && node.hasAttribute(TRANSLATION_ATTRIBUTE)) return [];
-    if (node instanceof HTMLElement && node.hasAttribute(SOURCE_TEXT_ATTRIBUTE))
-      return originalChildNodes(node);
+    if (
+      node instanceof HTMLElement &&
+      (node.hasAttribute(SOURCE_TEXT_ATTRIBUTE) ||
+        (repartition &&
+          node.hasAttribute(READING_RUN_ATTRIBUTE) &&
+          !node.hasAttribute(LABEL_ATTRIBUTE)))
+    )
+      return originalChildNodes(node, repartition);
     return [node];
   });
+}
+
+/** Compare original node identity, not only text: equal strings can have different owners. */
+export function ownsOriginalReadingUnit(element: HTMLElement, unit: OriginalReadingUnit): boolean {
+  if (unit instanceof HTMLElement) return unit === element;
+  if (!element.hasAttribute(READING_RUN_ATTRIBUTE)) return false;
+  const nodes = originalChildNodes(element, true);
+  return (
+    nodes.length === unit.nodes.length && nodes.every((node, index) => node === unit.nodes[index])
+  );
 }
 
 function unwrapReadingRun(source: HTMLElement): void {
@@ -623,10 +743,6 @@ function findScopes(
     ),
   );
   return scopes;
-}
-
-function hasLayoutRisk(element: HTMLElement): boolean {
-  return ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(getComputedStyle(element).display);
 }
 
 export function getElementSourceText(element: HTMLElement): string {

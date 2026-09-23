@@ -33,7 +33,7 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendRespons
       break;
     case 'START_TRANSLATION':
       automaticStartup.abort();
-      void controller.start();
+      void controller.start(command.translator);
       break;
     case 'RESTART_TRANSLATION':
       automaticStartup.abort();

@@ -9,7 +9,7 @@ import {
   deleteTranslationProfile,
   readPublicSettings,
   saveTranslationProfile,
-  selectActiveProfile,
+  selectActiveTranslator,
   setSiteAutoTranslation,
   updateReadingPreferences,
   updateSiteRule,
@@ -42,6 +42,24 @@ describe('configuration service', () => {
     expect(stored.translationConcurrency).toBe(2);
     await expect(readPublicSettings()).resolves.toMatchObject({ translationConcurrency: 2 });
   });
+  it.each([2, 10, 60])(
+    'persists the full-document deadline %i',
+    async (fullDocumentTimeoutMinutes) => {
+      await expect(updateReadingPreferences({ fullDocumentTimeoutMinutes })).resolves.toMatchObject(
+        { fullDocumentTimeoutMinutes },
+      );
+      await expect(readPublicSettings()).resolves.toMatchObject({ fullDocumentTimeoutMinutes });
+    },
+  );
+  it.each([0, 1, 61, 2.5, NaN, Infinity])(
+    'rejects invalid full-document deadline %s',
+    async (fullDocumentTimeoutMinutes) => {
+      await expect(updateReadingPreferences({ fullDocumentTimeoutMinutes })).rejects.toThrow(
+        '全文最长等待',
+      );
+      expect(storageSet).not.toHaveBeenCalled();
+    },
+  );
   it('persists disabled thinking and rejects a malformed preference without writing', async () => {
     await saveTranslationProfile({
       ...stored.profiles[0],
@@ -91,14 +109,14 @@ describe('configuration service', () => {
       model: ' model ',
       apiKey: 'secret',
     });
-    expect(result.configured).toBe(true);
+    expect(result.ready).toBe(true);
     expect(stored.profiles[0].model).toBe('model');
     expect(JSON.stringify(result)).not.toContain('secret');
     await expect(readPublicSettings()).resolves.toEqual(result);
   });
   it('saves preferences and sites independently from incomplete AI configuration', async () => {
     await expect(updateReadingPreferences({ targetLanguage: ' Japanese ' })).resolves.toMatchObject(
-      { configured: false, targetLanguage: 'Japanese' },
+      { ready: true, targetLanguage: 'Japanese' },
     );
     await updateSiteRule({
       list: 'excludedSites',
@@ -141,13 +159,40 @@ describe('configuration service', () => {
       name: '第二个',
       model: 'model',
     });
-    expect(stored.activeProfileId).toBe(DEFAULT_SETTINGS.activeProfileId);
-    await expect(deleteTranslationProfile(DEFAULT_SETTINGS.activeProfileId)).rejects.toThrow();
-    await selectActiveProfile('second');
-    await expect(selectActiveProfile(DEFAULT_SETTINGS.activeProfileId)).rejects.toThrow('模型');
-    await deleteTranslationProfile(DEFAULT_SETTINGS.activeProfileId);
+    expect(stored.activeTranslator).toEqual({ kind: 'builtin', engine: 'google-free' });
+    await selectActiveTranslator({ kind: 'ai', profileId: 'second' });
+    await expect(deleteTranslationProfile('second')).rejects.toThrow();
+    await expect(
+      selectActiveTranslator({ kind: 'ai', profileId: DEFAULT_SETTINGS.profiles[0].id }),
+    ).rejects.toThrow('模型');
+    await selectActiveTranslator({ kind: 'builtin', engine: 'microsoft-free' });
+    await deleteTranslationProfile(DEFAULT_SETTINGS.profiles[0].id);
     expect(stored.profiles).toHaveLength(1);
     await expect(deleteTranslationProfile('second')).rejects.toThrow();
+  });
+
+  it('exposes built-in readiness independently from incomplete AI profiles', async () => {
+    await expect(readPublicSettings()).resolves.toMatchObject({
+      activeTranslator: { kind: 'builtin', engine: 'google-free' },
+      ready: true,
+      supportsFullDocument: false,
+    });
+    await expect(
+      selectActiveTranslator({ kind: 'builtin', engine: 'microsoft-free' }),
+    ).resolves.toMatchObject({
+      activeTranslator: { kind: 'builtin', engine: 'microsoft-free' },
+      ready: true,
+      supportsFullDocument: false,
+    });
+  });
+
+  it('keeps a custom target recoverable but not ready for a free engine', async () => {
+    await updateReadingPreferences({ targetLanguage: 'Portuguese' });
+    await expect(readPublicSettings()).resolves.toMatchObject({
+      ready: false,
+      supportsFullDocument: false,
+      configurationError: { key: '免费翻译通道不支持当前目标语言' },
+    });
   });
   it('rejects duplicate names and malformed rules', async () => {
     await expect(

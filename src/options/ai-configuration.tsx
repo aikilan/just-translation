@@ -33,8 +33,11 @@ const sameProfile = (a: TranslationProfile | undefined, b: TranslationProfile | 
 
 /** Keeps profile drafts independent from global activation, automatic preferences and connection tests. */
 export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: Props) {
+  const activeProfileId =
+    settings.activeTranslator.kind === 'ai' ? settings.activeTranslator.profileId : undefined;
+  const defaultProfileId = activeProfileId ?? settings.profiles[0]?.id ?? '';
   const [drafts, setDrafts] = useState(settings.profiles);
-  const [selectedId, setSelectedId] = useState(settings.activeProfileId);
+  const [selectedId, setSelectedId] = useState(defaultProfileId);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [touched, setTouched] = useState<Record<string, TranslationProfileValidationErrors>>({});
   const [showKey, setShowKey] = useState(false);
@@ -62,7 +65,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
   const state = tests[selectedId] ?? { status: 'untested' };
   const validation = profile ? validateTranslationProfile(profile) : {};
   const errors = touched[selectedId] ?? {};
-  const current = selectedId === settings.activeProfileId;
+  const current = selectedId === activeProfileId;
   const firstRun = settings.profiles.every(
     (item) => Object.keys(validateTranslationProfile(item)).length > 0,
   );
@@ -160,7 +163,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
       setDrafts((existing) => existing.map((item) => (item.id === selectedId ? persisted : item)));
     else {
       setDrafts((existing) => existing.filter((item) => item.id !== selectedId));
-      select(settings.activeProfileId);
+      select(defaultProfileId);
     }
     setTouched((existing) => ({ ...existing, [selectedId]: {} }));
     invalidate();
@@ -270,7 +273,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
               {drafts.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name || t('未命名配置')}
-                  {item.id === settings.activeProfileId ? t(' · 当前使用') : ''}
+                  {item.id === activeProfileId ? t(' · 当前使用') : ''}
                 </option>
               ))}
             </select>
@@ -299,7 +302,14 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
               className="text-button"
               disabled={dirty || busy || Object.keys(validation).length > 0}
               onClick={() => {
-                void save('ai', { type: 'SET_ACTIVE_PROFILE', profileId: selectedId }, onActivated);
+                void save(
+                  'ai',
+                  {
+                    type: 'SET_ACTIVE_TRANSLATOR',
+                    translator: { kind: 'ai', profileId: selectedId },
+                  },
+                  onActivated,
+                );
               }}
             >
               {t('设为当前使用')}
@@ -555,7 +565,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
                   (result) => {
                     onDeleted(selectedId, result);
                     setDrafts((existing) => existing.filter((item) => item.id !== selectedId));
-                    select(settings.activeProfileId);
+                    select(defaultProfileId);
                   },
                 );
               }}

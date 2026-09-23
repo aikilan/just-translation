@@ -203,6 +203,12 @@ textarea[aria-invalid='true'] {
 .field-error[role='alert'] {
   margin: 0;
 }
+.field-guidance {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .setting-row {
   padding: 16px 0;
   border-bottom: 1px solid var(--border);

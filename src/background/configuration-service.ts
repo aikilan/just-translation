@@ -8,6 +8,7 @@ import {
   getActiveProfile,
   isValidTranslationConcurrency,
   isValidTranslationRetryCount,
+  isValidFullDocumentTimeout,
   MAX_TRANSLATION_RETRY_COUNT,
   MAX_TRANSLATION_CONCURRENCY,
   normalizeTranslationProfile,
@@ -16,6 +17,11 @@ import {
   type TranslationProfile,
   type TranslatorSettings,
 } from '../shared/settings';
+import {
+  isActiveTranslator,
+  resolveBuiltinTargetLanguage,
+  type ActiveTranslator,
+} from '../shared/translation-engines';
 import { getSettings, updateStoredSettings } from '../shared/settings-store';
 
 export async function readPublicSettings(): Promise<PublicTranslatorSettings> {
@@ -59,21 +65,28 @@ export async function deleteTranslationProfile(
       if (!getActiveProfile(settings, profileId))
         throw new LocalizedError(message('翻译配置不存在'));
       if (settings.profiles.length <= 1) throw new LocalizedError(message('至少保留一个 AI 配置'));
-      if (settings.activeProfileId === profileId)
+      if (
+        settings.activeTranslator.kind === 'ai' &&
+        settings.activeTranslator.profileId === profileId
+      )
         throw new LocalizedError(message('请先启用其他配置，再删除当前配置'));
       return { ...settings, profiles: settings.profiles.filter((item) => item.id !== profileId) };
     }),
   );
 }
 
-export async function selectActiveProfile(profileId: string): Promise<PublicTranslatorSettings> {
+export async function selectActiveTranslator(
+  translator: ActiveTranslator,
+): Promise<PublicTranslatorSettings> {
+  if (!isActiveTranslator(translator)) throw new LocalizedError(message('翻译引擎无效'));
   return toPublicSettings(
     await updateStoredSettings((settings) => {
-      const profile = getActiveProfile(settings, profileId);
+      if (translator.kind === 'builtin') return { ...settings, activeTranslator: translator };
+      const profile = getActiveProfile(settings, translator.profileId);
       if (!profile) throw new LocalizedError(message('翻译配置不存在'));
       const error = Object.values(validateTranslationProfile(profile))[0];
       if (error) throw new LocalizedError(error);
-      return { ...settings, activeProfileId: profileId };
+      return { ...settings, activeTranslator: translator };
     }),
   );
 }
@@ -113,6 +126,11 @@ export async function updateReadingPreferences(
             message('翻译失败重试次数必须是 0–{{p0}} 的整数', { p0: MAX_TRANSLATION_RETRY_COUNT }),
           );
         next.translationRetryCount = patch.translationRetryCount;
+      }
+      if (patch.fullDocumentTimeoutMinutes !== undefined) {
+        if (!isValidFullDocumentTimeout(patch.fullDocumentTimeoutMinutes))
+          throw new LocalizedError(message('全文最长等待必须是 2–60 的整数'));
+        next.fullDocumentTimeoutMinutes = patch.fullDocumentTimeoutMinutes;
       }
       return next;
     }),
@@ -155,20 +173,35 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
       configurationError,
     };
   });
-  const activeProfile = profiles.find((profile) => profile.id === settings.activeProfileId);
+  const activeTranslator = settings.activeTranslator;
+  const activeProfile =
+    activeTranslator.kind === 'ai'
+      ? profiles.find((profile) => profile.id === activeTranslator.profileId)
+      : undefined;
+  const builtinTargetCode =
+    activeTranslator.kind === 'builtin'
+      ? resolveBuiltinTargetLanguage(activeTranslator.engine, settings.targetLanguage)
+      : undefined;
+  const configurationError =
+    activeTranslator.kind === 'builtin'
+      ? builtinTargetCode
+        ? undefined
+        : message('免费翻译通道不支持当前目标语言')
+      : (activeProfile?.configurationError ??
+        (activeProfile ? undefined : message('当前翻译配置不存在')));
   return {
     profiles,
     uiLanguage: settings.uiLanguage,
-    activeProfileId: settings.activeProfileId,
-    configured: activeProfile?.configured ?? false,
-    configurationError:
-      activeProfile?.configurationError ??
-      (activeProfile ? undefined : message('当前翻译配置不存在')),
+    activeTranslator,
+    ready: !configurationError,
+    supportsFullDocument: activeTranslator.kind === 'ai' && !configurationError,
+    configurationError,
     targetLanguage: settings.targetLanguage,
     displayMode: settings.displayMode,
     translateDynamicContent: settings.translateDynamicContent,
     translationConcurrency: settings.translationConcurrency,
     translationRetryCount: settings.translationRetryCount,
+    fullDocumentTimeoutMinutes: settings.fullDocumentTimeoutMinutes,
     excludedSites: settings.excludedSites,
     autoTranslateSites: settings.autoTranslateSites,
   };

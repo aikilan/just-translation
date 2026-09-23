@@ -98,11 +98,13 @@ export function LanguagePicker({
   onChange,
   disabled,
   label,
+  allowCustom,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
   label: string;
+  allowCustom: boolean;
 }) {
   const [custom, setCustom] = useState(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
   const [draft, setDraft] = useState(value);
@@ -110,7 +112,7 @@ export function LanguagePicker({
   const id = useId();
   useEffect(() => {
     setDraft(value);
-    if (!TRANSLATION_LANGUAGES.some(([id]) => id === value)) setCustom(true);
+    setCustom(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
   }, [value]);
   function commit() {
     if (!draft.trim()) {
@@ -138,14 +140,16 @@ export function LanguagePicker({
             {t(name)}
           </option>
         ))}
-        <option value="__custom__">{t('自定义语言…')}</option>
+        <option value="__custom__" disabled={!allowCustom}>
+          {t('自定义语言…')}
+        </option>
       </select>
       {custom ? (
         <input
           aria-label={t('自定义目标语言')}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? id : undefined}
-          disabled={disabled}
+          aria-describedby={error ? `${id}-error` : !allowCustom ? `${id}-guidance` : undefined}
+          disabled={disabled || !allowCustom}
           value={draft}
           placeholder={t('输入目标语言')}
           onChange={(event) => {
@@ -162,8 +166,13 @@ export function LanguagePicker({
         />
       ) : null}
       {error ? (
-        <small id={id} className="field-error" role="alert">
+        <small id={`${id}-error`} className="field-error" role="alert">
           {renderMessage(error)}
+        </small>
+      ) : null}
+      {!allowCustom ? (
+        <small id={`${id}-guidance`} className="field-guidance">
+          {t('自定义目标语言仅支持 AI 配置')}
         </small>
       ) : null}
     </div>

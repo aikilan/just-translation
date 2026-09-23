@@ -12,11 +12,18 @@ import { useEffect, useState } from 'react';
 import packageJson from '../../package.json' with { type: 'json' };
 import { getSettings } from '../shared/settings-store';
 import { getErrorMessage, type PublicTranslatorSettings } from '../shared/messages';
-import type { TranslationProfile, TranslatorSettings } from '../shared/settings';
+import {
+  validateTranslationProfile,
+  type TranslationProfile,
+  type TranslatorSettings,
+} from '../shared/settings';
 import { AIConfiguration } from './ai-configuration';
 import { TranslationConcurrencySetting } from './translation-concurrency-setting';
 import { TranslationRetrySetting } from './translation-retry-setting';
+import { FullDocumentTimeoutSetting } from './full-document-timeout-setting';
 import { ReadingPreferencesPanel, SiteRulesPanel } from './preference-panels';
+import { SettingRow, useSettingsMutation } from '../ui/controls';
+import { TranslatorDisclosure, TranslatorSelect } from '../ui/translator-select';
 
 type Section = 'api' | 'reading' | 'sites';
 const getSections = () =>
@@ -50,6 +57,7 @@ export function OptionsApp() {
   const [section, setSection] = useState<Section>(() =>
     location.hash === '#sites' ? 'sites' : location.hash === '#reading' ? 'reading' : 'api',
   );
+  const { feedback, save } = useSettingsMutation();
   useEffect(() => {
     let mounted = true;
     let revision = 0;
@@ -81,12 +89,13 @@ export function OptionsApp() {
         current && {
           ...current,
           uiLanguage: value.uiLanguage,
-          activeProfileId: value.activeProfileId,
+          activeTranslator: value.activeTranslator,
           targetLanguage: value.targetLanguage,
           displayMode: value.displayMode,
           translateDynamicContent: value.translateDynamicContent,
           translationConcurrency: value.translationConcurrency,
           translationRetryCount: value.translationRetryCount,
+          fullDocumentTimeoutMinutes: value.fullDocumentTimeoutMinutes,
           autoTranslateSites: value.autoTranslateSites,
           excludedSites: value.excludedSites,
         },
@@ -98,7 +107,7 @@ export function OptionsApp() {
         current && {
           ...current,
           uiLanguage: value.uiLanguage,
-          activeProfileId: value.activeProfileId,
+          activeTranslator: value.activeTranslator,
           profiles: current.profiles.some((item) => item.id === profile.id)
             ? current.profiles.map((item) => (item.id === profile.id ? profile : item))
             : [...current.profiles, profile],
@@ -111,7 +120,7 @@ export function OptionsApp() {
         current && {
           ...current,
           uiLanguage: value.uiLanguage,
-          activeProfileId: value.activeProfileId,
+          activeTranslator: value.activeTranslator,
           profiles: current.profiles.filter((item) => item.id !== id),
         },
     );
@@ -183,6 +192,31 @@ export function OptionsApp() {
           <>
             <section className="ai-workspace" hidden={section !== 'api'} aria-label={t('AI 配置')}>
               <div className="configuration-editor" role="region" aria-label={t('配置编辑器')}>
+                <div className="translation-engine-setting">
+                  <SettingRow label={t('翻译引擎')} feedback={feedback.engine}>
+                    <TranslatorSelect
+                      activeTranslator={settings.activeTranslator}
+                      profiles={settings.profiles.map((profile) => ({
+                        id: profile.id,
+                        name: profile.name,
+                        configured:
+                          Boolean(settings.targetLanguage.trim()) &&
+                          Object.keys(validateTranslationProfile(profile)).length === 0,
+                      }))}
+                      disabled={feedback.engine?.status === 'saving'}
+                      onChange={(translator) => {
+                        void save(
+                          'engine',
+                          { type: 'SET_ACTIVE_TRANSLATOR', translator },
+                          acceptPublic,
+                        );
+                      }}
+                    />
+                  </SettingRow>
+                  <p className="engine-disclosure">
+                    <TranslatorDisclosure translator={settings.activeTranslator} />
+                  </p>
+                </div>
                 <AIConfiguration
                   settings={settings}
                   onSaved={savedProfile}
@@ -217,6 +251,7 @@ export function OptionsApp() {
               aria-label={t('阅读偏好')}
             >
               <ReadingPreferencesPanel settings={settings} onSaved={acceptPublic} />
+              <FullDocumentTimeoutSetting settings={settings} onSaved={acceptPublic} />
             </section>
             <section
               className="preference-workspace"

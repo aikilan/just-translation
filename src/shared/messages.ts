@@ -1,12 +1,11 @@
-import {
-  isUiMessage,
-  toUiMessage,
-  type UiMessage,
-  type UiLanguage,
-  type UiLocale,
-} from './i18n';
+import { isUiMessage, toUiMessage, type UiMessage, type UiLanguage, type UiLocale } from './i18n';
 import type { TranslationSegment, TranslationUnit } from './batching';
 import type { DisplayMode, TranslationProfile, TranslatorSettings } from './settings';
+import {
+  isActiveTranslator,
+  type ActiveTranslator,
+  type TranslationBatchLimits,
+} from './translation-engines';
 import type { TranslationRequestStage } from './translation-metrics';
 
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
@@ -21,7 +20,7 @@ export interface PageTranslationStatus {
   total: number;
   error?: UiMessage;
   displayMode: DisplayMode;
-  context?: { profileId: string; targetLanguage: string };
+  context?: { translator: ActiveTranslator; targetLanguage: string };
   needsRestart?: boolean;
 }
 
@@ -55,8 +54,8 @@ export function isPageTranslationStatus(value: unknown): value is PageTranslatio
       (typeof context === 'object' &&
         context !== null &&
         !Array.isArray(context) &&
-        'profileId' in context &&
-        typeof context.profileId === 'string' &&
+        'translator' in context &&
+        isActiveTranslator(context.translator) &&
         'targetLanguage' in context &&
         typeof context.targetLanguage === 'string')) &&
     (status.needsRestart === undefined || typeof status.needsRestart === 'boolean')
@@ -78,12 +77,14 @@ export type PublicTranslatorSettings = Pick<
   | 'translateDynamicContent'
   | 'translationConcurrency'
   | 'translationRetryCount'
+  | 'fullDocumentTimeoutMinutes'
   | 'excludedSites'
-  | 'activeProfileId'
+  | 'activeTranslator'
   | 'autoTranslateSites'
 > & {
   profiles: PublicTranslationProfile[];
-  configured: boolean;
+  ready: boolean;
+  supportsFullDocument: boolean;
   configurationError?: UiMessage;
 };
 
@@ -104,13 +105,15 @@ export interface TranslationCacheWrite {
   translatedText: string;
 }
 
-/** Opaque snapshot identity: enables safe partial retry without exposing provider configuration. */
-export interface TranslationSessionInfo {
-  context: { profileId: string; targetLanguage: string };
-  configurationId: string;
-}
-
 export type TranslationPriority = 'visible' | 'readAhead' | 'background';
+
+/** Opaque snapshot identity and non-secret dispatch limits for one trusted session. */
+export interface TranslationSessionInfo {
+  context: { translator: ActiveTranslator; targetLanguage: string };
+  configurationId: string;
+  batchProfiles: Record<TranslationPriority, TranslationBatchLimits>;
+  maxConcurrency: number;
+}
 
 /** Keeps valid items usable when one provider response omits only part of a batch. */
 export interface TranslationBatchResult {
@@ -137,6 +140,7 @@ export type ReadingPreferences = Pick<
   | 'translateDynamicContent'
   | 'translationConcurrency'
   | 'translationRetryCount'
+  | 'fullDocumentTimeoutMinutes'
 >;
 export interface SiteRuleUpdate {
   list: 'autoTranslateSites' | 'excludedSites';
@@ -147,12 +151,17 @@ export interface SiteRuleUpdate {
 export type RuntimeRequest =
   | { type: 'UPDATE_UI_LANGUAGE'; uiLanguage: UiLanguage }
   | { type: 'PAGE_RETRY_STATE_CHANGED' }
-  | { type: 'TRANSLATE_SELECTION'; requestId: string; text: string }
+  | {
+      type: 'TRANSLATE_SELECTION';
+      requestId: string;
+      text: string;
+      translator: ActiveTranslator;
+    }
   | { type: 'CANCEL_SELECTION_TRANSLATION'; requestId: string }
   | { type: 'GET_PUBLIC_SETTINGS' }
   | {
       type: 'BEGIN_TRANSLATION_SESSION';
-      profileId: string;
+      translator: ActiveTranslator;
       sessionId: string;
       mode: TranslationMode;
     }
@@ -185,15 +194,15 @@ export type RuntimeRequest =
   | { type: 'DELETE_TRANSLATION_PROFILE'; profileId: string }
   | { type: 'UPDATE_READING_PREFERENCES'; patch: Partial<ReadingPreferences> }
   | { type: 'UPDATE_SITE_RULE'; rule: SiteRuleUpdate }
-  | { type: 'SET_ACTIVE_PROFILE'; profileId: string }
+  | { type: 'SET_ACTIVE_TRANSLATOR'; translator: ActiveTranslator }
   | { type: 'SET_SITE_AUTO_TRANSLATE'; hostname: string; enabled: boolean };
 
 export type PageCommand =
   | { type: 'UI_LANGUAGE_CHANGED'; locale: UiLocale }
-  | { type: 'START_SELECTION_TRANSLATION'; text: string }
+  | { type: 'START_SELECTION_TRANSLATION'; text: string; translator: ActiveTranslator }
   | TranslationBatchProgress
   | { type: 'GET_PAGE_DIAGNOSTICS' }
-  | { type: 'START_TRANSLATION' }
+  | { type: 'START_TRANSLATION'; translator?: ActiveTranslator }
   | { type: 'START_FULL_DOCUMENT_TRANSLATION' }
   | { type: 'RESTART_TRANSLATION' }
   | { type: 'RETRY_FAILED_TRANSLATIONS' }
@@ -209,6 +218,7 @@ export type Result<T> = { ok: true; data: T } | { ok: false; error: UiMessage };
 export interface SelectionTranslationResult {
   text: string;
   targetLanguage: string;
+  translatorName: string;
 }
 
 export function getErrorMessage(error: unknown): UiMessage {
