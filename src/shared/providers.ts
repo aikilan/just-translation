@@ -186,7 +186,7 @@ export const MODELS: readonly ModelCapability[] = [
   ),
   ...models('glm', ['glm-4.6', 'glm-4.7', 'glm-5', 'glm-5.1'], 'thinking', 'toggle', [], 131072),
   ...models('glm', ['glm-5.2'], 'thinking', 'toggle', ['high', 'max'], 131072, true, 'max'),
-  ...models('kimi', ['kimi-k2.5', 'kimi-k2.6'], 'thinking', 'toggle', [], 32768),
+  ...models('kimi', ['kimi-k2.6'], 'thinking', 'toggle', [], 32768),
   ...models('kimi', ['kimi-k2.7-code', 'kimi-k2.7-code-highspeed'], 'default', 'always', [], 32768),
   ...models(
     'kimi',

@@ -12,6 +12,7 @@ const SETTINGS: AiTranslationRuntimeConfig = {
   provider: 'custom',
   protocol: 'openai',
   thinkingEnabled: true,
+  supportsImageInput: false,
   translationRetryCount: 3,
   fullDocumentTimeoutMinutes: 10,
   apiUrl: 'https://gateway.example.com/v1',
@@ -66,6 +67,7 @@ describe('TranslationSessionStore', () => {
     mutableSettings.translationRetryCount = 0;
     mutableSettings.fullDocumentTimeoutMinutes = 60;
     mutableSettings.thinkingEnabled = false;
+    mutableSettings.supportsImageInput = true;
     mutableSettings.provider = 'mimo';
     mutableSettings.protocol = 'anthropic';
     mutableSettings.thinkingControl = 'anthropic-budget';

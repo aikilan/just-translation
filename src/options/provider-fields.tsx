@@ -13,6 +13,7 @@ import {
   type ReasoningEffort,
 } from '../shared/providers';
 import { SettingRow, Switch } from '../ui/controls';
+import { resolveImageInputCapability } from '../shared/image-capabilities';
 
 interface Props {
   profile: TranslationProfile;
@@ -106,6 +107,29 @@ export function ModelSuggestions({ provider }: { provider: ProviderId | null }) 
         <option value={m.id} key={m.id} />
       ))}
     </>
+  );
+}
+
+/** Official model capabilities are bundled; custom endpoints and aliases require an explicit choice. */
+export function ImageInputFields({ profile, disabled, onChange }: Props) {
+  const capability = resolveImageInputCapability(profile);
+  const automatic = capability.mode === 'catalog';
+  const description = automatic
+    ? capability.supported
+      ? t('已自动匹配：此模型支持图片输入，可在快捷翻译中上传图片。')
+      : capability.catalog?.support === 'unknown'
+        ? t('尚未确认此模型的图片输入能力，图片翻译入口已隐藏。')
+        : t('已自动匹配：此模型或协议不支持图片输入。')
+    : t('自定义模型或中转地址：确认模型及接口支持图片后开启。');
+  return (
+    <SettingRow label={t('支持图片输入')} description={description}>
+      <Switch
+        label={t('支持图片输入')}
+        checked={capability.supported}
+        disabled={disabled || automatic || !profile.provider || !profile.protocol}
+        onChange={(imageInputEnabled) => onChange({ imageInputEnabled })}
+      />
+    </SettingRow>
   );
 }
 const controlLabels = (): Record<ThinkingControl, string> => ({

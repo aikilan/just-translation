@@ -1,4 +1,5 @@
 import { InterfaceLanguage, useInterfaceLanguage } from '../ui/interface-language';
+import { resolveImageInputCapability } from '../shared/image-capabilities';
 import { t, renderMessage, type UiMessage } from '../shared/i18n';
 import {
   BookOpen,
@@ -199,6 +200,7 @@ export function OptionsApp() {
                       profiles={settings.profiles.map((profile) => ({
                         id: profile.id,
                         name: profile.name,
+                        supportsImageInput: resolveImageInputCapability(profile).supported,
                         configured:
                           Boolean(settings.targetLanguage.trim()) &&
                           Object.keys(validateTranslationProfile(profile)).length === 0,

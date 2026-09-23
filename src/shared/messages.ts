@@ -7,6 +7,8 @@ import {
   type TranslationBatchLimits,
 } from './translation-engines';
 import type { TranslationRequestStage } from './translation-metrics';
+import type { ImageInput } from './image-input';
+import type { ImageTranslationContent } from './image-translation-client';
 
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
 export type TranslationMode = 'segmented' | 'full-document';
@@ -66,6 +68,7 @@ export interface PublicTranslationProfile {
   id: string;
   name: string;
   configured: boolean;
+  supportsImageInput: boolean;
   configurationError?: UiMessage;
 }
 
@@ -167,6 +170,14 @@ export type RuntimeRequest =
       targetLanguage: string;
     }
   | { type: 'CANCEL_QUICK_TRANSLATION'; requestId: string }
+  | {
+      type: 'TRANSLATE_QUICK_IMAGE';
+      requestId: string;
+      text: string;
+      image: ImageInput;
+      translator: ActiveTranslator;
+      targetLanguage: string;
+    }
   | { type: 'GET_PUBLIC_SETTINGS' }
   | {
       type: 'BEGIN_TRANSLATION_SESSION';
@@ -228,6 +239,28 @@ export interface TextTranslationResult {
   text: string;
   targetLanguage: string;
   translatorName: string;
+}
+
+export type ImageTranslationResult = ImageTranslationContent &
+  Pick<TextTranslationResult, 'targetLanguage' | 'translatorName'>;
+
+/** Empty recognition is a valid outcome, separate from malformed text responses. */
+export function isImageTranslationResult(value: unknown): value is ImageTranslationResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'status' in value &&
+    ((value.status === 'translated' && isTextTranslationResult(value)) ||
+      (value.status === 'no-text' &&
+        'text' in value &&
+        value.text === '' &&
+        'targetLanguage' in value &&
+        typeof value.targetLanguage === 'string' &&
+        Boolean(value.targetLanguage.trim()) &&
+        'translatorName' in value &&
+        typeof value.translatorName === 'string' &&
+        Boolean(value.translatorName.trim())))
+  );
 }
 
 /** Validate display-only text results at the background/content-script boundary. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TextTranslationService } from './text-translation';
+import { TranslationTaskService } from './translation-task';
 import { DEFAULT_SETTINGS, type TranslatorSettings } from '../shared/settings';
 import { TEST_PROFILE } from '../test-utils/provider';
 import { translateRuntimeBatch } from './translation-engine';
@@ -24,7 +24,7 @@ const settings: TranslatorSettings = {
 };
 function setup(read = () => Promise.resolve(settings)) {
   const getFrame = vi.fn().mockResolvedValue({ documentId: 'document' });
-  const service = new TextTranslationService(read, getFrame);
+  const service = new TranslationTaskService(read, getFrame);
   vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
     Promise.resolve({
       translations: Object.fromEntries(

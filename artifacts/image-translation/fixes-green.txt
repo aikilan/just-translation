@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+
+ Test Files  3 passed (3)
+      Tests  33 passed (33)
+   Start at  16:18:29
+   Duration  1.12s (transform 299ms, setup 175ms, import 386ms, tests 688ms, environment 580ms)
+

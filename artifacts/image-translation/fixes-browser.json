@@ -1,0 +1,186 @@
+{
+  "date": "2026-09-23",
+  "environment": "Actual dist extension in a temporary Chrome for Testing profile, isolated content script, local fixture HTTP/SSE",
+  "note": "Only synthetic test image metadata. stats.bytes contains Base64 character counts. GPT alias checked for UI capability only; no official API request.",
+  "aliasProfile": {
+    "provider": "openai",
+    "model": "gpt-5.6",
+    "apiUrl": "https://api.openai.com/v1",
+    "protocol": "openai",
+    "imageInputEnabled": false
+  },
+  "before": {
+    "state": {
+      "buttonText": "翻译",
+      "imageType": "data:image/png",
+      "imageWidth": 600,
+      "mode": "open",
+      "open": true,
+      "pickerCount": 1,
+      "submitDisabled": false
+    },
+    "host": {
+      "rootExposed": true,
+      "imageCharacters": 12320,
+      "hostAttachCalls": 0,
+      "interceptedRoot": false,
+      "pathsExposeFileInput": true,
+      "privilegedDomApi": "undefined",
+      "isolatedEntry": "undefined"
+    }
+  },
+  "after": {
+    "state": {
+      "buttonText": "翻译",
+      "imageType": "data:image/png",
+      "imageWidth": 600,
+      "mode": "closed",
+      "open": true,
+      "pickerCount": 1,
+      "submitDisabled": false
+    },
+    "host": {
+      "rootExposed": false,
+      "imageCharacters": 0,
+      "hostAttachCalls": 0,
+      "interceptedRoot": false,
+      "pathsExposeFileInput": false,
+      "privilegedDomApi": "undefined",
+      "isolatedEntry": "undefined"
+    },
+    "stats": {
+      "calls": 0,
+      "openai": 0,
+      "anthropic": 0,
+      "aborted": 0,
+      "imageTypes": [],
+      "bytes": []
+    }
+  },
+  "nativeFilePicker": {
+    "state": {
+      "buttonText": "翻译",
+      "imageType": "data:image/png",
+      "imageWidth": 128,
+      "mode": "closed",
+      "open": true,
+      "pickerCount": 1,
+      "submitDisabled": false
+    },
+    "host": {
+      "rootExposed": false,
+      "imageCharacters": 0,
+      "hostAttachCalls": 0,
+      "interceptedRoot": false,
+      "pathsExposeFileInput": false,
+      "privilegedDomApi": "undefined",
+      "isolatedEntry": "undefined"
+    }
+  },
+  "pngOpenAI": {
+    "buttonText": "重新翻译",
+    "imageType": "data:image/png",
+    "imageWidth": 600,
+    "mode": "closed",
+    "open": true,
+    "pickerCount": 1,
+    "result": "欢迎光临\n营业时间：9:00–18:00",
+    "submitDisabled": false
+  },
+  "jpegAnthropic": {
+    "buttonText": "重新翻译",
+    "imageType": "data:image/jpeg",
+    "imageWidth": 600,
+    "mode": "closed",
+    "open": true,
+    "pickerCount": 1,
+    "result": "欢迎光临\n营业时间：9:00–18:00",
+    "submitDisabled": false
+  },
+  "webpConvertedToPng": {
+    "buttonText": "重新翻译",
+    "imageLoading": false,
+    "imageType": "data:image/png",
+    "imageWidth": 600,
+    "mode": "closed",
+    "open": true,
+    "pickerCount": 1,
+    "result": "欢迎光临\n营业时间：9:00–18:00",
+    "selected": "ai:image-fix",
+    "submitDisabled": false
+  },
+  "closed": {
+    "state": {
+      "buttonText": "翻译",
+      "imageLoading": false,
+      "imageType": "data:image/png",
+      "imageWidth": 600,
+      "mode": "closed",
+      "open": false,
+      "pickerCount": 1,
+      "selected": "ai:slow-fix",
+      "submitDisabled": true
+    },
+    "host": {
+      "rootExposed": false,
+      "imageCharacters": 0,
+      "hostAttachCalls": 0,
+      "interceptedRoot": false,
+      "pathsExposeFileInput": false,
+      "privilegedDomApi": "undefined",
+      "isolatedEntry": "undefined"
+    }
+  },
+  "textOnly": {
+    "buttonText": "翻译",
+    "error": "当前模型不支持图片，请移除图片或更换模型",
+    "imageLoading": false,
+    "imageType": "data:image/png",
+    "imageWidth": 600,
+    "mode": "closed",
+    "open": true,
+    "pickerCount": 0,
+    "selected": "ai:text-fix",
+    "submitDisabled": true
+  },
+  "officialGptAlias": {
+    "state": {
+      "buttonText": "翻译",
+      "imageLoading": false,
+      "imageType": "data:image/png",
+      "imageWidth": 600,
+      "mode": "closed",
+      "open": true,
+      "pickerCount": 1,
+      "selected": "ai:gpt-alias",
+      "submitDisabled": false
+    },
+    "host": {
+      "rootExposed": false,
+      "imageCharacters": 0,
+      "hostAttachCalls": 0,
+      "interceptedRoot": false,
+      "pathsExposeFileInput": false,
+      "privilegedDomApi": "undefined",
+      "isolatedEntry": "undefined"
+    }
+  },
+  "stats": {
+    "calls": 4,
+    "openai": 3,
+    "anthropic": 1,
+    "aborted": 1,
+    "imageTypes": [
+      "image/png",
+      "image/jpeg",
+      "image/png",
+      "image/png"
+    ],
+    "bytes": [
+      12320,
+      17872,
+      12320,
+      12320
+    ]
+  }
+}

@@ -5,6 +5,66 @@ import { OptionsApp } from './options-app';
 import { DEFAULT_SETTINGS } from '../shared/settings';
 import { mount, mockExtension, input, click, READY_SETTINGS } from '../test-utils/ui';
 let view: Awaited<ReturnType<typeof mount>>;
+it('automatically enables and locks image support for the official GPT-5.6 alias', async () => {
+  mockExtension();
+  view = await mount(<OptionsApp />);
+  await input(view.container, '供应商', 'openai');
+  await input(view.container, 'API 地址', 'https://api.openai.com/v1');
+  await input(view.container, '模型', 'gpt-5.6');
+  const toggle = view.container.querySelector<HTMLInputElement>('[aria-label="支持图片输入"]')!;
+  expect(toggle.checked).toBe(true);
+  expect(toggle.disabled).toBe(true);
+  await click(view.container, '保存配置');
+  view.unmount();
+  view = await mount(<OptionsApp />);
+  expect(
+    view.container.querySelector<HTMLInputElement>('[aria-label="支持图片输入"]')!.checked,
+  ).toBe(true);
+});
+it('saves custom image support, resets it for a different endpoint/model, and derives official capabilities', async () => {
+  const { send } = mockExtension();
+  view = await mount(<OptionsApp />);
+  const toggle = () =>
+    view.container.querySelector<HTMLInputElement>('[aria-label="支持图片输入"]')!;
+  expect(toggle().checked).toBe(false);
+  await act(async () => {
+    await Promise.resolve();
+    toggle().click();
+  });
+  await click(view.container, '保存配置');
+  expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+    type: 'SAVE_TRANSLATION_PROFILE',
+    profile: { imageInputEnabled: true },
+  });
+  view.unmount();
+  view = await mount(<OptionsApp />);
+  expect(toggle().checked).toBe(true);
+  await input(view.container, '接入协议', 'anthropic');
+  expect(toggle().checked).toBe(false);
+  await act(async () => {
+    await Promise.resolve();
+    toggle().click();
+  });
+  await input(view.container, '配置名称', 'Custom vision');
+  expect(toggle().checked).toBe(true);
+  await input(view.container, '接入协议', 'openai');
+  await input(view.container, '模型', 'other-alias');
+  expect(toggle().checked).toBe(false);
+  await act(async () => {
+    await Promise.resolve();
+    toggle().click();
+  });
+  await input(view.container, 'API 地址', 'https://other.test/v1');
+  expect(toggle().checked).toBe(false);
+  await input(view.container, '供应商', 'mimo');
+  await input(view.container, 'API 地址', 'https://api.xiaomimimo.com/v1');
+  await input(view.container, '模型', 'mimo-v2.5');
+  expect(toggle().checked).toBe(true);
+  expect(toggle().disabled).toBe(true);
+  await input(view.container, '模型', 'mimo-v2.5-pro');
+  expect(toggle().checked).toBe(false);
+  expect(toggle().disabled).toBe(true);
+});
 afterEach(() => {
   view?.unmount();
   vi.unstubAllGlobals();

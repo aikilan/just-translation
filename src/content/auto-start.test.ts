@@ -8,7 +8,7 @@ const SETTINGS: PublicTranslatorSettings = {
   ready: true,
   supportsFullDocument: false,
   activeTranslator: { kind: 'builtin', engine: 'google-free' },
-  profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
+  profiles: [{ id: 'profile-one', name: '默认配置', configured: true, supportsImageInput: false }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,

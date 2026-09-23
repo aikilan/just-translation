@@ -1,5 +1,36 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  支持图片输入: 'Prend en charge les images',
+  '已自动匹配：此模型支持图片输入，可在快捷翻译中上传图片。':
+    'Détecté automatiquement : ce modèle accepte les images dans la traduction rapide.',
+  '尚未确认此模型的图片输入能力，图片翻译入口已隐藏。':
+    'La prise en charge des images de ce modèle est inconnue. La traduction des images est masquée.',
+  '已自动匹配：此模型或协议不支持图片输入。':
+    'Détecté automatiquement : ce modèle ou protocole ne prend pas en charge les images.',
+  '自定义模型或中转地址：确认模型及接口支持图片后开启。':
+    'Modèle ou passerelle personnalisés : activez après avoir confirmé la prise en charge des images par le modèle et son API.',
+  图片输入开关必须为开启或关闭: 'La saisie d’images doit être activée ou désactivée',
+  图片翻译输入无效: 'Entrée de traduction d’image invalide',
+  '当前模型不支持图片，请移除图片或更换模型':
+    'Ce modèle ne prend pas en charge les images. Retirez l’image ou choisissez un autre modèle.',
+  待翻译图片预览: 'Aperçu de l’image à traduire',
+  移除图片: 'Retirer l’image',
+  选择图片: 'Choisir une image',
+  更换图片: 'Remplacer l’image',
+  上传图片: 'Ajouter une image',
+  '单张 PNG、JPEG 或 WebP，最大 4 MiB；点击翻译后发送。':
+    'Une image PNG, JPEG ou WebP, de 4 Mio maximum. Envoyée lorsque vous cliquez sur Traduire.',
+  '正在读取图片…': 'Lecture de l’image…',
+  未识别到可翻译文字: 'Aucun texte à traduire détecté',
+  '图片尺寸过大，请使用边长不超过 4096 像素、总像素不超过 1600 万的图片':
+    'Image trop grande. Chaque côté doit mesurer au plus 4096 pixels, pour un total maximal de 16 millions de pixels.',
+  '图片无法读取，请选择有效的 PNG、JPEG 或 WebP 图片':
+    'Impossible de lire cette image. Choisissez un fichier PNG, JPEG ou WebP valide.',
+  '图片大小不能超过 4 MiB（WebP 转换后的大小也计入）':
+    'Les images ne doivent pas dépasser 4 Mio, y compris après la conversion des fichiers WebP.',
+  '图片翻译请求失败（HTTP {{p0}}）': 'Échec de la requête de traduction d’image (HTTP {{p0}})',
+  '图片翻译返回格式无效，请重试': 'Réponse de traduction d’image invalide. Réessayez.',
+  '图片翻译失败，请稍后重试': 'Échec de la traduction d’image. Réessayez plus tard.',
   快捷翻译: 'Traduction rapide',
   关闭快捷翻译: 'Fermer la traduction rapide',
   原文: 'Texte source',

@@ -1,4 +1,5 @@
 import { TEST_PROFILE } from './provider';
+import { resolveImageInputCapability } from '../shared/image-capabilities';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { vi } from 'vitest';
@@ -46,10 +47,12 @@ export function mockExtension(
         : Boolean(stored.profiles.find((p) => p.id === translator.profileId)?.model);
     return {
       ...stored,
-      profiles: stored.profiles.map(({ id, name, model }) => ({
-        id,
-        name,
-        configured: Boolean(model),
+      profiles: stored.profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        configured: Boolean(profile.model),
+        supportsImageInput:
+          Boolean(profile.model) && resolveImageInputCapability(profile).supported,
       })),
       ready,
       supportsFullDocument: translator.kind === 'ai' && ready,

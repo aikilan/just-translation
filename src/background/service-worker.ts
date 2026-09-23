@@ -3,7 +3,7 @@ import { withFullDocumentLifetime } from './full-document-lifetime';
 import { message, LocalizedError } from '../shared/i18n';
 import { AbortableRequestRegistry } from './request-registry';
 import { ProviderRequestQueue } from './provider-request-queue';
-import { TextTranslationService } from './text-translation';
+import { TranslationTaskService } from './translation-task';
 import {
   ensurePageTranslationMenu,
   handlePageTranslationMenuClick,
@@ -61,7 +61,7 @@ const activeRequests = new AbortableRequestRegistry(60_000);
 const providerRequests = new ProviderRequestQueue();
 const builtinRequests = new ProviderRequestQueue({ concurrency: 2, intervalCap: 2 });
 const builtinTranslator = new BuiltinTranslationClient();
-const textTranslations = new TextTranslationService(
+const translationTasks = new TranslationTaskService(
   getSettings,
   (details) => chrome.webNavigation.getFrame(details),
   providerRequests,
@@ -137,7 +137,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   refreshRetryMenu();
-  textTranslations.removeTab(tabId);
+  translationTasks.removeTab(tabId);
   activeRequests.cancelForTab(tabId);
   void translationSessions.deleteForTab(tabId).catch((error: unknown) => {
     console.error('翻译会话清理失败', error);
@@ -145,7 +145,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.webNavigation.onCommitted.addListener(({ tabId, frameId, documentId }) => {
-  textTranslations.navigate(tabId, frameId, documentId);
+  translationTasks.navigate(tabId, frameId, documentId);
   if (frameId !== 0) return;
   refreshRetryMenu();
   activeRequests.cancelOtherDocuments(tabId, documentId);
@@ -198,7 +198,7 @@ async function handleRuntimeRequest(
       case 'TRANSLATE_SELECTION':
         return {
           ok: true,
-          data: await textTranslations.translateSelection(
+          data: await translationTasks.translateSelection(
             sender,
             request.requestId,
             request.text,
@@ -206,12 +206,12 @@ async function handleRuntimeRequest(
           ),
         };
       case 'CANCEL_SELECTION_TRANSLATION':
-        textTranslations.cancel(sender, request.requestId, 'selection');
+        translationTasks.cancel(sender, request.requestId, 'selection');
         return { ok: true, data: undefined };
       case 'TRANSLATE_QUICK_TEXT':
         return {
           ok: true,
-          data: await textTranslations.translateQuick(
+          data: await translationTasks.translateQuick(
             sender,
             request.requestId,
             request.text,
@@ -220,8 +220,22 @@ async function handleRuntimeRequest(
           ),
         };
       case 'CANCEL_QUICK_TRANSLATION':
-        textTranslations.cancel(sender, request.requestId, 'quick');
+        translationTasks.cancel(sender, request.requestId, 'quick');
         return { ok: true, data: undefined };
+      case 'TRANSLATE_QUICK_IMAGE':
+        return {
+          ok: true,
+          data: await withFullDocumentLifetime(() =>
+            translationTasks.translateQuickImage(
+              sender,
+              request.requestId,
+              request.text,
+              request.image,
+              request.translator,
+              request.targetLanguage,
+            ),
+          ),
+        };
       case 'GET_PUBLIC_SETTINGS': {
         return { ok: true, data: await readPublicSettings() };
       }

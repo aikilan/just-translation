@@ -1,6 +1,6 @@
 import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TextTranslationService } from './text-translation';
+import { TranslationTaskService } from './translation-task';
 import { DEFAULT_SETTINGS, type TranslatorSettings } from '../shared/settings';
 import type { ActiveTranslator } from '../shared/translation-engines';
 import { translateRuntimeBatch } from './translation-engine';
@@ -25,7 +25,7 @@ const settings: TranslatorSettings = {
 const AI_TRANSLATOR: ActiveTranslator = { kind: 'ai', profileId: TEST_PROFILE.id };
 function setup(readSettings = () => Promise.resolve(settings)) {
   const getFrame = vi.fn(() => Promise.resolve({ documentId: 'doc' }));
-  const service = new TextTranslationService(readSettings, getFrame);
+  const service = new TranslationTaskService(readSettings, getFrame);
   vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
     Promise.resolve({
       translations: Object.fromEntries(segments.map((segment) => [segment.requestId, '译文'])),

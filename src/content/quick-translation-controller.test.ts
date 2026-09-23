@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS } from '../shared/settings';
 const settings: PublicTranslatorSettings = {
   ...DEFAULT_SETTINGS,
   uiLanguage: 'zh-CN',
-  profiles: [{ id: 'ai', name: 'My AI', configured: true }],
+  profiles: [{ id: 'ai', name: 'My AI', configured: true, supportsImageInput: false }],
   ready: true,
   supportsFullDocument: false,
 };

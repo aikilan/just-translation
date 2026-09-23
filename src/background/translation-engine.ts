@@ -2,6 +2,7 @@ import type { TranslationSegment, TranslationUnit } from '../shared/batching';
 import { message, LocalizedError, toUiMessage } from '../shared/i18n';
 import type { TranslationBatchResult, TranslationPriority } from '../shared/messages';
 import { configuredProviderOptions } from '../shared/providers';
+import { resolveImageInputCapability } from '../shared/image-capabilities';
 import {
   getActiveProfile,
   validateTranslationProfile,
@@ -28,6 +29,7 @@ import type {
 } from './builtin-translation-client';
 
 export interface AiTranslationRuntimeConfig extends TranslationRequestConfig {
+  supportsImageInput: boolean;
   kind: 'ai';
   profileId: string;
   profileName: string;
@@ -119,6 +121,7 @@ export function resolveTranslationRuntimeConfig(
     profileName: profile.name,
     ...profile,
     ...configuredProviderOptions(profile),
+    supportsImageInput: resolveImageInputCapability(profile).supported,
     targetLanguage: settings.targetLanguage,
     translationRetryCount: settings.translationRetryCount,
     fullDocumentTimeoutMinutes: settings.fullDocumentTimeoutMinutes,

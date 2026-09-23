@@ -259,8 +259,40 @@ p {
 }
 .quick-input-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
+}
+.quick-image-input:empty {
+  display: none;
+}
+.quick-image-input {
+  margin: 10px 20px 0;
+  font-size: 12px;
+}
+.quick-image-hint {
+  display: block;
+  line-height: 1.6;
+}
+.quick-attachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.quick-attachment img {
+  width: 80px;
+  height: 60px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--soft);
+}
+.quick-attachment .icon-button {
+  margin-inline-start: auto;
+}
+.quick-image-input .quick-pending {
+  margin-top: 6px;
 }
 .quick-count {
   white-space: nowrap;

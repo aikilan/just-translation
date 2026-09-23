@@ -16,6 +16,7 @@ import { getUiLocale, renderMessage, subscribeUiLanguage, t } from '../shared/i1
 import { LanguagePicker } from '../ui/controls';
 import { TranslatorSelect } from '../ui/translator-select';
 import { QuickTranslationController } from './quick-translation-controller';
+import { QuickImageInput } from './quick-image-input';
 import styles from './quick-translation.css?inline';
 
 /** Browser-native modal and Shadow DOM own focus, stacking, and style isolation. */
@@ -29,7 +30,9 @@ export class QuickTranslationDialog {
     this.host.setAttribute('data-justranslate-quick', '');
     this.host.setAttribute('translate', 'no');
     this.host.className = 'notranslate';
-    const shadow = this.host.attachShadow({ mode: 'open' });
+    // The isolated content-script world retains this root; page scripts must not reach
+    // file inputs or image bytes through host.shadowRoot or composed event paths.
+    const shadow = this.host.attachShadow({ mode: 'closed' });
     const style = document.createElement('style');
     style.textContent = styles;
     this.dialog.setAttribute('aria-labelledby', 'quick-translation-title');
@@ -142,6 +145,7 @@ function QuickTranslationApp({
             readOnly={pending}
             onChange={(event) => model.setSource(event.target.value)}
           />
+          <QuickImageInput model={model} state={state} />
           <div className="quick-pane-footer">
             <div className="quick-input-actions">
               <button
@@ -214,6 +218,8 @@ function QuickTranslationApp({
                   {t('重试')}
                 </button>
               </div>
+            ) : state.result && 'status' in state.result && state.result.status === 'no-text' ? (
+              <span className="quick-placeholder">{t('未识别到可翻译文字')}</span>
             ) : state.result ? (
               <div className="quick-result" data-quick-result dir="auto" tabIndex={0}>
                 {state.result.text}
@@ -224,12 +230,12 @@ function QuickTranslationApp({
           </div>
           <div className="quick-pane-footer">
             <small className="quick-success">
-              {state.phase === 'success' ? t('翻译完成') : ''}
+              {state.phase === 'success' && state.result?.text ? t('翻译完成') : ''}
             </small>
             <button
               className="text-button"
               type="button"
-              disabled={!state.result || state.copying || state.pasting}
+              disabled={!state.result?.text || state.copying || state.pasting}
               onClick={() => void model.copy()}
             >
               <Copy aria-hidden="true" />

@@ -1,0 +1,83 @@
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/shared/image-capabilities.test.ts (8 tests | 2 failed) 9ms
+     × enables the documented GPT-5.6 Sol alias at https://api.openai.com/v1 without a manual override 5ms
+     × enables the documented GPT-5.6 Sol alias at https://api.openai.com/v1/chat/completions without a manual override 1ms
+ ❯ src/content/quick-translation-dialog.test.tsx (13 tests | 2 failed) 231ms
+   × keeps attachment nodes private while the dialog is closed=false 47ms
+   × keeps attachment nodes private while the dialog is closed=true 19ms
+ ❯ src/options/provider-configuration.test.tsx (12 tests | 1 failed) 457ms
+   × automatically enables and locks image support for the official GPT-5.6 alias 72ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/shared/image-capabilities.test.ts > image input capability ownership > enables the documented GPT-5.6 Sol alias at https://api.openai.com/v1 without a manual override
+ FAIL  src/shared/image-capabilities.test.ts > image input capability ownership > enables the documented GPT-5.6 Sol alias at https://api.openai.com/v1/chat/completions without a manual override
+AssertionError: expected { mode: 'catalog', …(2) } to match object { mode: 'catalog', supported: true }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "mode": "catalog",
+-   "supported": true,
++   "supported": false,
+  }
+
+ ❯ src/shared/image-capabilities.test.ts:29:51
+     27|       }));
+     28|       for (const item of profiles)
+     29|         expect(resolveImageInputCapability(item)).toMatchObject({ mode…
+       |                                                   ^
+     30|       expect(toPublicSettings({ ...DEFAULT_SETTINGS, profiles }).profi…
+     31|         .toEqual([true, true]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/content/quick-translation-dialog.test.tsx > keeps attachment nodes private while the dialog is closed=false
+ FAIL  src/content/quick-translation-dialog.test.tsx > keeps attachment nodes private while the dialog is closed=true
+AssertionError: expected ShadowRoot{ …(1) } to be null
+
+- Expected:
+null
+
++ Received:
+ShadowRoot {}
+
+ ❯ src/content/quick-translation-dialog.test.tsx:56:27
+     54|   if (closed) act(() => model.close());
+     55|
+     56|   expect(host.shadowRoot).toBeNull();
+       |                           ^
+     57|   expect(host.querySelector('input[type="file"], img')).toBeNull();
+     58|   expect(host.outerHTML).not.toContain(image.data);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/options/provider-configuration.test.tsx > automatically enables and locks image support for the official GPT-5.6 alias
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/options/provider-configuration.test.tsx:15:26
+     13|   await input(view.container, '模型', 'gpt-5.6');
+     14|   const toggle = view.container.querySelector<HTMLInputElement>('[aria…
+     15|   expect(toggle.checked).toBe(true);
+       |                          ^
+     16|   expect(toggle.disabled).toBe(true);
+     17|   await click(view.container, '保存配置');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 28 passed (33)
+   Start at  16:16:00
+   Duration  1.14s (transform 326ms, setup 185ms, import 409ms, tests 697ms, environment 611ms)
+

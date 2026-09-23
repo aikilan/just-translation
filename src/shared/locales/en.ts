@@ -1,5 +1,36 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  支持图片输入: 'Supports image input',
+  '已自动匹配：此模型支持图片输入，可在快捷翻译中上传图片。':
+    'Detected automatically: this model accepts images. Upload one in Quick translate.',
+  '尚未确认此模型的图片输入能力，图片翻译入口已隐藏。':
+    'Image support is unconfirmed for this model. Image translation is hidden.',
+  '已自动匹配：此模型或协议不支持图片输入。':
+    'Detected automatically: this model or protocol does not accept images.',
+  '自定义模型或中转地址：确认模型及接口支持图片后开启。':
+    'Custom model or gateway: enable after confirming image support for both the model and API.',
+  图片输入开关必须为开启或关闭: 'Image input must be either enabled or disabled',
+  图片翻译输入无效: 'Invalid image translation input',
+  '当前模型不支持图片，请移除图片或更换模型':
+    'This model does not support images. Remove the image or choose another model.',
+  待翻译图片预览: 'Preview of the image to translate',
+  移除图片: 'Remove image',
+  选择图片: 'Choose image',
+  更换图片: 'Replace image',
+  上传图片: 'Upload image',
+  '单张 PNG、JPEG 或 WebP，最大 4 MiB；点击翻译后发送。':
+    'One PNG, JPEG or WebP, up to 4 MiB. Sent only when you click Translate.',
+  '正在读取图片…': 'Reading image…',
+  未识别到可翻译文字: 'No translatable text found',
+  '图片尺寸过大，请使用边长不超过 4096 像素、总像素不超过 1600 万的图片':
+    'Image too large. Use an image with each side at most 4096 pixels and at most 16 million pixels in total.',
+  '图片无法读取，请选择有效的 PNG、JPEG 或 WebP 图片':
+    'Cannot read this image. Choose a valid PNG, JPEG or WebP file.',
+  '图片大小不能超过 4 MiB（WebP 转换后的大小也计入）':
+    'Images must not exceed 4 MiB, including the converted size of WebP files.',
+  '图片翻译请求失败（HTTP {{p0}}）': 'Image translation request failed (HTTP {{p0}})',
+  '图片翻译返回格式无效，请重试': 'Invalid image translation response. Please retry.',
+  '图片翻译失败，请稍后重试': 'Image translation failed. Try again later.',
   快捷翻译: 'Quick translate',
   关闭快捷翻译: 'Close quick translation',
   原文: 'Source',

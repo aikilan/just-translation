@@ -1,5 +1,36 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  支持图片输入: 'Bildeingabe unterstützen',
+  '已自动匹配：此模型支持图片输入，可在快捷翻译中上传图片。':
+    'Automatisch erkannt: Dieses Modell akzeptiert Bilder in der Schnellübersetzung.',
+  '尚未确认此模型的图片输入能力，图片翻译入口已隐藏。':
+    'Bildunterstützung für dieses Modell ist unbestätigt. Die Bildübersetzung ist ausgeblendet.',
+  '已自动匹配：此模型或协议不支持图片输入。':
+    'Automatisch erkannt: Dieses Modell oder Protokoll unterstützt keine Bildeingabe.',
+  '自定义模型或中转地址：确认模型及接口支持图片后开启。':
+    'Eigenes Modell oder Gateway: Nur aktivieren, wenn Modell und API Bilder unterstützen.',
+  图片输入开关必须为开启或关闭: 'Bildeingabe muss aktiviert oder deaktiviert sein',
+  图片翻译输入无效: 'Ungültige Eingabe für die Bildübersetzung',
+  '当前模型不支持图片，请移除图片或更换模型':
+    'Dieses Modell unterstützt keine Bilder. Entfernen Sie das Bild oder wählen Sie ein anderes Modell.',
+  待翻译图片预览: 'Vorschau des zu übersetzenden Bildes',
+  移除图片: 'Bild entfernen',
+  选择图片: 'Bild auswählen',
+  更换图片: 'Bild ersetzen',
+  上传图片: 'Bild hochladen',
+  '单张 PNG、JPEG 或 WebP，最大 4 MiB；点击翻译后发送。':
+    'Ein PNG-, JPEG- oder WebP-Bild, maximal 4 MiB. Versand erst beim Klick auf Übersetzen.',
+  '正在读取图片…': 'Bild wird eingelesen…',
+  未识别到可翻译文字: 'Kein übersetzbarer Text erkannt',
+  '图片尺寸过大，请使用边长不超过 4096 像素、总像素不超过 1600 万的图片':
+    'Das Bild ist zu groß. Jede Seite darf höchstens 4096 Pixel lang sein, mit insgesamt maximal 16 Millionen Pixeln.',
+  '图片无法读取，请选择有效的 PNG、JPEG 或 WebP 图片':
+    'Das Bild kann nicht gelesen werden. Wählen Sie eine gültige PNG-, JPEG- oder WebP-Datei.',
+  '图片大小不能超过 4 MiB（WebP 转换后的大小也计入）':
+    'Bilder dürfen 4 MiB nicht überschreiten, auch nach der WebP-Konvertierung.',
+  '图片翻译请求失败（HTTP {{p0}}）': 'Bildübersetzungsanfrage fehlgeschlagen (HTTP {{p0}})',
+  '图片翻译返回格式无效，请重试': 'Ungültige Antwort der Bildübersetzung. Versuchen Sie es erneut.',
+  '图片翻译失败，请稍后重试': 'Bildübersetzung fehlgeschlagen. Versuchen Sie es später erneut.',
   快捷翻译: 'Schnellübersetzung',
   关闭快捷翻译: 'Schnellübersetzung schließen',
   原文: 'Ausgangstext',

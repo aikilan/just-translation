@@ -10,7 +10,7 @@ const settings = {
   ready: true,
   supportsFullDocument: true,
   activeTranslator: { kind: 'ai' as const, profileId: 'test-profile' },
-  profiles: [{ id: 'test-profile', name: 'Test', configured: true }],
+  profiles: [{ id: 'test-profile', name: 'Test', configured: true, supportsImageInput: false }],
   translationConcurrency: 2,
   translateDynamicContent: false,
 };

@@ -1,0 +1,38 @@
+
+> just-translate@0.3.34 check /Users/jintao.xu/Documents/只是翻译
+> eslint . && vitest run && tsc --noEmit && vite build && node scripts/verify-build.mjs
+
+
+ RUN  v4.1.11 /Users/jintao.xu/Documents/只是翻译
+
+ ❯ src/content/controller-optimizations.test.ts (52 tests | 1 failed) 21913ms
+     × continues old-order dispatch if another scroll invalidates a slow viewport lookup 178ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/content/controller-optimizations.test.ts > translation pipeline regressions > continues old-order dispatch if another scroll invalidates a slow viewport lookup
+AssertionError: expected [ …(6) ] to have a length of 7 but got 6
+
+- Expected
++ Received
+
+- 7
++ 6
+
+ ❯ src/content/controller-optimizations.test.ts:753:23
+    751|       releases.shift()!();
+    752|       await vi.advanceTimersByTimeAsync(0);
+    753|       expect(batches).toHaveLength(7);
+       |                       ^
+    754|       expect(batches[6].segments.map((segment) => segment.text)).not.t…
+    755|         'Late viewport paragraph.',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 80 passed (81)
+      Tests  1 failed | 972 passed (973)
+   Start at  16:18:45
+   Duration  22.71s (transform 2.56s, setup 2.92s, import 3.80s, tests 72.92s, environment 7.95s)
+
+ ELIFECYCLE  Command failed with exit code 1.

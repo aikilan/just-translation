@@ -138,6 +138,33 @@ describe('background document lifecycle', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('routes a supported image through trusted storage and the shared quick cancellation scope', async () => {
+    activeProfile.imageInputEnabled = true;
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn().mockResolvedValue({ width: 10, height: 10, close: vi.fn() }),
+    );
+    fetchMock.mockResolvedValueOnce(completionResponse([{ id: 'image', text: '图片译文' }]));
+    const request: RuntimeRequest = {
+      type: 'TRANSLATE_QUICK_IMAGE',
+      requestId: 'image-1',
+      text: '',
+      image: { mediaType: 'image/png', data: 'iVBORw0KGgo=', width: 10, height: 10 },
+      translator: activeTranslator,
+      targetLanguage: 'Japanese',
+    };
+    expect(await send(request)).toMatchObject({
+      ok: true,
+      data: { status: 'translated', text: '图片译文', targetLanguage: 'Japanese' },
+    });
+    expect(fetchMock.mock.calls[0][1].body).toContain('image_url');
+    const work = send({ ...request, requestId: 'image-2' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await send({ type: 'CANCEL_QUICK_TRANSLATION', requestId: 'image-2' });
+    expect(fetchMock.mock.calls[1][1].signal?.aborted).toBe(true);
+    expect(await work).toMatchObject({ ok: false });
+  });
+
   it('routes quick text through the requested engine and language without persisting preferences', async () => {
     activeTranslator = { kind: 'builtin', engine: 'google-free' };
     fetchMock.mockResolvedValue(completionResponse([{ id: 'quick', text: 'quick result' }]));

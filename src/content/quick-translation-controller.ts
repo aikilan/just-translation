@@ -3,11 +3,14 @@ import { LocalizedError, message, type UiMessage } from '../shared/i18n';
 import {
   getErrorMessage,
   isTextTranslationResult,
+  isImageTranslationResult,
   type PublicTranslatorSettings,
   type Result,
   type RuntimeRequest,
   type TextTranslationResult,
+  type ImageTranslationResult,
 } from '../shared/messages';
+import { prepareImageInput, type ImageInput } from '../shared/image-input';
 import {
   activeTranslatorEquals,
   isActiveTranslator,
@@ -32,7 +35,10 @@ export interface QuickTranslationState {
   settingsLoading: boolean;
   settingsError?: UiMessage;
   phase: 'idle' | 'loading' | 'success' | 'error';
-  result?: TextTranslationResult;
+  result?: TextTranslationResult | ImageTranslationResult;
+  image?: ImageInput;
+  imageLoading: boolean;
+  imageError?: UiMessage;
   error?: UiMessage;
   pasting: boolean;
   copying: boolean;
@@ -47,6 +53,7 @@ export class QuickTranslationController {
     targetLanguage: '',
     settingsLoading: false,
     phase: 'idle',
+    imageLoading: false,
     pasting: false,
     copying: false,
   };
@@ -54,6 +61,7 @@ export class QuickTranslationController {
   private active?: { requestId: string };
   private settingsRevision = 0;
   private clipboardRevision = 0;
+  private imageRevision = 0;
 
   constructor(
     private readonly send: Sender = sendRuntimeMessage,
@@ -61,6 +69,7 @@ export class QuickTranslationController {
       readText: () => navigator.clipboard.readText(),
       writeText: (text) => navigator.clipboard.writeText(text),
     },
+    private readonly prepareImage: (file: Blob) => Promise<ImageInput> = prepareImageInput,
   ) {}
 
   getSnapshot = (): QuickTranslationState => this.state;
@@ -72,9 +81,27 @@ export class QuickTranslationController {
   };
 
   get canTranslate(): boolean {
-    const { source, translator, targetLanguage, settings, settingsLoading, pasting, open } =
-      this.state;
-    if (!open || !source.trim() || !translator || !settings || settingsLoading || pasting)
+    const {
+      source,
+      image,
+      imageLoading,
+      translator,
+      targetLanguage,
+      settings,
+      settingsLoading,
+      pasting,
+      open,
+    } = this.state;
+    if (
+      !open ||
+      (!source.trim() && !image) ||
+      imageLoading ||
+      !translator ||
+      !settings ||
+      settingsLoading ||
+      pasting ||
+      (image && !this.supportsImageInput)
+    )
       return false;
     return translator.kind === 'builtin'
       ? Boolean(resolveBuiltinTargetLanguage(translator.engine, targetLanguage))
@@ -84,6 +111,19 @@ export class QuickTranslationController {
             (profile) => profile.id === translator.profileId && profile.configured,
           ),
         );
+  }
+
+  get supportsImageInput(): boolean {
+    const { translator, settings } = this.state;
+    return (
+      translator?.kind === 'ai' &&
+      Boolean(
+        settings?.profiles.some(
+          (profile) =>
+            profile.id === translator.profileId && profile.configured && profile.supportsImageInput,
+        ),
+      )
+    );
   }
 
   async open(): Promise<void> {
@@ -123,12 +163,14 @@ export class QuickTranslationController {
   close(): void {
     this.settingsRevision += 1;
     this.clipboardRevision += 1;
+    this.imageRevision += 1;
     this.stop();
     this.update({
       open: false,
       settingsLoading: false,
       pasting: false,
       copying: false,
+      imageLoading: false,
       feedback: undefined,
     });
   }
@@ -146,14 +188,38 @@ export class QuickTranslationController {
   setTranslator(translator: ActiveTranslator): void {
     if (this.state.translator && activeTranslatorEquals(translator, this.state.translator)) return;
     this.invalidateResult();
-    this.update({ translator });
+    this.imageRevision += 1;
+    this.update({ translator, imageLoading: false });
+  }
+
+  /** Decode and preview locally. Only translate() can send the prepared bytes to the background. */
+  async setImage(file: Blob): Promise<void> {
+    if (!this.state.open || !this.supportsImageInput || this.active) return;
+    this.invalidateResult();
+    const revision = ++this.imageRevision;
+    this.update({ image: undefined, imageLoading: true, imageError: undefined });
+    try {
+      const image = await this.prepareImage(file);
+      if (revision === this.imageRevision && this.state.open) this.update({ image });
+    } catch (error) {
+      if (revision === this.imageRevision && this.state.open)
+        this.update({ imageError: getErrorMessage(error) });
+    } finally {
+      if (revision === this.imageRevision && this.state.open) this.update({ imageLoading: false });
+    }
+  }
+
+  removeImage(): void {
+    this.imageRevision += 1;
+    this.invalidateResult();
+    this.update({ image: undefined, imageLoading: false, imageError: undefined });
   }
 
   /** Lock before the first await; this task never starts or stops a page-translation session. */
   async translate(): Promise<void> {
     if (this.active || !this.canTranslate) return;
     const task = { requestId: String(++requestSequence) };
-    const { source, translator, targetLanguage } = this.state;
+    const { source, image, translator, targetLanguage } = this.state;
     this.active = task;
     this.clipboardRevision += 1;
     this.update({
@@ -165,7 +231,9 @@ export class QuickTranslationController {
     });
     try {
       const result = await this.send({
-        type: 'TRANSLATE_QUICK_TEXT',
+        ...(image
+          ? ({ type: 'TRANSLATE_QUICK_IMAGE', image } as const)
+          : ({ type: 'TRANSLATE_QUICK_TEXT' } as const)),
         requestId: task.requestId,
         text: source,
         translator: translator!,
@@ -173,9 +241,14 @@ export class QuickTranslationController {
       });
       if (this.active !== task || !this.state.open) return;
       if (!result.ok) throw new LocalizedError(result.error);
-      if (!isTextTranslationResult(result.data))
+      const data = result.data;
+      if (image) {
+        if (!isImageTranslationResult(data))
+          throw new LocalizedError(message('后台未返回有效译文，请重试'));
+      } else if (!isTextTranslationResult(data)) {
         throw new LocalizedError(message('后台未返回有效译文，请重试'));
-      this.update({ phase: 'success', result: result.data });
+      }
+      this.update({ phase: 'success', result: data });
     } catch (error) {
       if (this.active === task && this.state.open)
         this.update({ phase: 'error', error: getErrorMessage(error) });
@@ -211,7 +284,7 @@ export class QuickTranslationController {
 
   async copy(): Promise<void> {
     const result = this.state.result;
-    if (!this.state.open || !result || this.state.copying || this.state.pasting) return;
+    if (!this.state.open || !result?.text || this.state.copying || this.state.pasting) return;
     const revision = ++this.clipboardRevision;
     this.update({ copying: true, feedback: undefined });
     try {
@@ -263,7 +336,9 @@ function isQuickSettings(value: unknown): value is QuickSettings {
         'name' in profile &&
         typeof profile.name === 'string' &&
         'configured' in profile &&
-        typeof profile.configured === 'boolean',
+        typeof profile.configured === 'boolean' &&
+        'supportsImageInput' in profile &&
+        typeof profile.supportsImageInput === 'boolean',
     )
   );
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 import { QuickTranslationDialog } from './quick-translation-dialog';
 import { QuickTranslationController } from './quick-translation-controller';
 import { setUiLanguage } from '../shared/i18n';
@@ -10,6 +10,7 @@ import type { PublicTranslatorSettings, Result, RuntimeRequest } from '../shared
 let dialog: QuickTranslationDialog;
 let model: QuickTranslationController;
 let send: ReturnType<typeof vi.fn<(request: RuntimeRequest) => Promise<Result<unknown>>>>;
+let attached: MockInstance<Element['attachShadow']>;
 const settings: PublicTranslatorSettings = {
   ...DEFAULT_SETTINGS,
   uiLanguage: 'zh-CN',
@@ -17,7 +18,127 @@ const settings: PublicTranslatorSettings = {
   ready: true,
   supportsFullDocument: false,
 };
-const shadow = () => document.querySelector('[data-justranslate-quick]')!.shadowRoot!;
+// Only the test harness retains the root; production must not expose it for inspecting the UI.
+const shadow = (): ShadowRoot => {
+  const host = document.querySelector('[data-justranslate-quick]');
+  const result = attached.mock.results[attached.mock.contexts.indexOf(host)];
+  if (result?.type !== 'return') throw new Error('Quick translation root was not created');
+  return result.value;
+};
+it.each([false, true])(
+  'keeps attachment nodes private while the dialog is closed=%s',
+  async (closed) => {
+    const image = { mediaType: 'image/png' as const, data: 'iVBORw0KGgo=', width: 10, height: 10 };
+    act(() => {
+      dialog.destroy();
+      model = new QuickTranslationController(send, undefined, () => Promise.resolve(image));
+      dialog = new QuickTranslationDialog(model);
+    });
+    send.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...settings,
+        activeTranslator: { kind: 'ai', profileId: 'vision' },
+        profiles: [{ id: 'vision', name: 'Vision', configured: true, supportsImageInput: true }],
+      },
+    });
+    await act(async () => {
+      await model.open();
+      await model.setImage(new Blob());
+    });
+    const host = document.querySelector('[data-justranslate-quick]')!;
+    const picker = shadow().querySelector('input[type="file"]')!;
+    let path: EventTarget[] = [];
+    const observe = (event: Event) => {
+      path = event.composedPath();
+    };
+    window.addEventListener('input', observe, true);
+    picker.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    window.removeEventListener('input', observe, true);
+    if (closed) act(() => model.close());
+
+    expect(host.shadowRoot).toBeNull();
+    expect(host.querySelector('input[type="file"], img')).toBeNull();
+    expect(host.outerHTML).not.toContain(image.data);
+    expect(path).toContain(host);
+    expect(path).not.toContain(picker);
+    expect(path).not.toContain(shadow());
+    expect(model.getSnapshot().image).toEqual(image);
+    expect(send).toHaveBeenCalledTimes(1);
+  },
+);
+it('previews an image locally, blocks a text-only engine, removes it, and renders no-text results', async () => {
+  const image = { mediaType: 'image/png' as const, data: 'iVBORw0KGgo=', width: 10, height: 10 };
+  act(() => {
+    dialog.destroy();
+    model = new QuickTranslationController(send, undefined, () => Promise.resolve(image));
+    dialog = new QuickTranslationDialog(model);
+  });
+  send.mockResolvedValueOnce({
+    ok: true,
+    data: {
+      ...settings,
+      activeTranslator: { kind: 'ai', profileId: 'vision' },
+      profiles: [{ id: 'vision', name: 'Vision', configured: true, supportsImageInput: true }],
+    },
+  });
+  await act(async () => {
+    await model.open();
+    await model.setImage(new Blob());
+  });
+  expect(shadow().querySelector('img')?.getAttribute('src')).toContain('data:image/png;base64,');
+  expect(send).toHaveBeenCalledTimes(1);
+  send.mockResolvedValueOnce({
+    ok: true,
+    data: { status: 'no-text', text: '', targetLanguage: 'Chinese', translatorName: 'Vision' },
+  });
+  await act(async () => {
+    await Promise.resolve();
+    button('翻译').click();
+  });
+  expect(shadow().textContent).toContain('未识别到可翻译文字');
+  expect(button('复制译文').disabled).toBe(true);
+  await act(async () => {
+    await Promise.resolve();
+    model.setTranslator({ kind: 'builtin', engine: 'google-free' });
+  });
+  expect(shadow().textContent).toContain('当前模型不支持图片，请移除图片或更换模型');
+  expect(button('翻译').disabled).toBe(true);
+  await act(async () => {
+    await Promise.resolve();
+    button('移除图片').click();
+  });
+  expect(shadow().querySelector('img')).toBeNull();
+});
+it('shows the image upload control only for the selected vision-capable profile', async () => {
+  send.mockResolvedValueOnce({
+    ok: true,
+    data: {
+      ...settings,
+      profiles: [
+        { id: 'vision', name: 'Vision', configured: true, supportsImageInput: true },
+        { id: 'text', name: 'Text', configured: true, supportsImageInput: false },
+      ],
+    },
+  });
+  await act(async () => {
+    await model.open();
+  });
+  expect(button('上传图片')).toBeUndefined();
+  await act(async () => {
+    await Promise.resolve();
+    model.setTranslator({ kind: 'ai', profileId: 'vision' });
+  });
+  expect(button('上传图片')).toBeDefined();
+  expect(shadow().querySelector<HTMLInputElement>('input[type="file"]')?.accept).toBe(
+    'image/png,image/jpeg,image/webp',
+  );
+  await act(async () => {
+    await Promise.resolve();
+    model.setTranslator({ kind: 'ai', profileId: 'text' });
+  });
+  expect(button('上传图片')).toBeUndefined();
+});
 const button = (name: string) =>
   [...shadow().querySelectorAll('button')].find(
     (node) => node.getAttribute('aria-label') === name || node.textContent?.trim() === name,
@@ -40,7 +161,7 @@ async function openWithCustomLanguage(): Promise<void> {
       ...settings,
       targetLanguage: 'Klingon',
       activeTranslator: { kind: 'ai', profileId: 'test-ai' },
-      profiles: [{ id: 'test-ai', name: 'Test AI', configured: true }],
+      profiles: [{ id: 'test-ai', name: 'Test AI', configured: true, supportsImageInput: false }],
     },
   });
   await act(async () => {
@@ -49,6 +170,7 @@ async function openWithCustomLanguage(): Promise<void> {
   });
 }
 beforeEach(() => {
+  attached = vi.spyOn(Element.prototype, 'attachShadow');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   document.documentElement.lang = 'es';
   document.documentElement.dir = 'ltr';
@@ -182,7 +304,10 @@ it('handles native Escape cancellation without discarding the input', async () =
 it('keeps a deleted draft translator explicit until the user chooses an available engine', async () => {
   send.mockResolvedValueOnce({
     ok: true,
-    data: { ...settings, profiles: [{ id: 'removed', name: 'My AI', configured: true }] },
+    data: {
+      ...settings,
+      profiles: [{ id: 'removed', name: 'My AI', configured: true, supportsImageInput: false }],
+    },
   });
   await act(async () => {
     await model.open();

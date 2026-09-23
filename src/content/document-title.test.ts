@@ -21,7 +21,7 @@ beforeEach(() => {
     uiLanguage: 'system',
     ready: true,
     supportsFullDocument: true,
-    profiles: [{ id: 'p', name: 'AI', configured: true }],
+    profiles: [{ id: 'p', name: 'AI', configured: true, supportsImageInput: false }],
     activeTranslator: { kind: 'ai', profileId: 'p' },
     targetLanguage: 'Chinese',
     displayMode: 'bilingual',

@@ -140,11 +140,13 @@ function parseStoredContext(value: unknown): TranslationSessionContext | undefin
   const providerOptions = parseConfiguredProviderOptions(settings);
   const translationRetryCount = settings.translationRetryCount;
   const thinkingEnabled = settings.thinkingEnabled;
+  const supportsImageInput = settings.supportsImageInput;
   const fullDocumentTimeoutMinutes = settings.fullDocumentTimeoutMinutes;
   if (
     !providerOptions ||
     !isValidFullDocumentTimeout(fullDocumentTimeoutMinutes) ||
     typeof thinkingEnabled !== 'boolean' ||
+    typeof supportsImageInput !== 'boolean' ||
     !hasStringFields(settings, [
       'profileId',
       'profileName',
@@ -171,6 +173,7 @@ function parseStoredContext(value: unknown): TranslationSessionContext | undefin
       ...providerOptions,
       translationRetryCount,
       thinkingEnabled,
+      supportsImageInput,
       apiUrl: settings.apiUrl,
       apiKey: settings.apiKey,
       model: settings.model,

@@ -28,7 +28,12 @@ const publicSettings = (
   return {
     ...settings,
     uiLanguage,
-    profiles: profiles.map(({ id, name, model }) => ({ id, name, configured: Boolean(model) })),
+    profiles: profiles.map(({ id, name, model }) => ({
+      id,
+      name,
+      configured: Boolean(model),
+      supportsImageInput: false,
+    })),
     ready: true,
     supportsFullDocument: true,
   };

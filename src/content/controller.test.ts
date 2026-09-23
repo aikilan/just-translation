@@ -15,7 +15,7 @@ const PUBLIC_SETTINGS = {
   ready: true,
   supportsFullDocument: true,
   activeTranslator: { kind: 'ai' as const, profileId: 'profile-one' },
-  profiles: [{ id: 'profile-one', name: '默认配置', configured: true }],
+  profiles: [{ id: 'profile-one', name: '默认配置', configured: true, supportsImageInput: false }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual' as const,
   translationConcurrency: 6,

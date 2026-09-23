@@ -35,6 +35,8 @@ export interface TranslationProfile extends ProviderOptions {
   model: string;
   /** Per-profile reasoning preference, resolved using the selected provider and protocol. */
   thinkingEnabled: boolean;
+  /** Explicit choice for custom endpoints/models; official presets use the capability catalog. */
+  imageInputEnabled: boolean;
   translationPrompt: string;
 }
 
@@ -64,6 +66,7 @@ export type TranslationProfileValidationErrors = Partial<
     | 'model'
     | 'translationPrompt'
     | 'thinkingEnabled'
+    | 'imageInputEnabled'
     | 'provider'
     | 'protocol'
     | 'thinkingControl',
@@ -110,6 +113,7 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
       apiKey: '',
       model: '',
       thinkingEnabled: false,
+      imageInputEnabled: false,
       translationPrompt: DEFAULT_TRANSLATION_PROMPT,
     },
   ],
@@ -165,6 +169,8 @@ export function validateTranslationProfile(
   if (!profile.model.trim()) errors.model = message('请填写模型名称');
   if (typeof profile.thinkingEnabled !== 'boolean')
     errors.thinkingEnabled = message('思考开关必须为开启或关闭');
+  if (typeof profile.imageInputEnabled !== 'boolean')
+    errors.imageInputEnabled = message('图片输入开关必须为开启或关闭');
   if (!profile.translationPrompt.trim()) errors.translationPrompt = message('请填写翻译 Prompt');
   else if (profile.translationPrompt.length > MAX_TRANSLATION_PROMPT_CHARACTERS) {
     errors.translationPrompt = message('翻译 Prompt 不能超过 {{p0}} 个字符', {
@@ -227,7 +233,8 @@ export function getSettingsValidationMessage(
       profileErrors.apiUrl ??
       profileErrors.model ??
       profileErrors.translationPrompt ??
-      profileErrors.thinkingEnabled;
+      profileErrors.thinkingEnabled ??
+      profileErrors.imageInputEnabled;
     if (message) return message;
   }
   return undefined;
@@ -277,6 +284,7 @@ export function mergeSettings(value: unknown): TranslatorSettings {
         model: readString(profile.model, ''),
         thinkingEnabled:
           typeof profile.thinkingEnabled === 'boolean' ? profile.thinkingEnabled : false,
+        imageInputEnabled: profile.imageInputEnabled === true,
         // A blank Prompt is never a valid saved state; initialize it from the product default.
         translationPrompt: readTranslationPrompt(profile.translationPrompt),
       }))

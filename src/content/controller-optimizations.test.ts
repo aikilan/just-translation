@@ -11,7 +11,7 @@ const SETTINGS = {
   ready: true,
   supportsFullDocument: true,
   activeTranslator: { kind: 'ai' as const, profileId: 'one' },
-  profiles: [{ id: 'one', name: 'Test', configured: true }],
+  profiles: [{ id: 'one', name: 'Test', configured: true, supportsImageInput: false }],
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,

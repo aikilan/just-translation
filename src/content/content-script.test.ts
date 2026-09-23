@@ -43,7 +43,7 @@ const settings: PublicTranslatorSettings = {
   ready: true,
   supportsFullDocument: true,
   activeTranslator: { kind: 'ai', profileId: 'p' },
-  profiles: [{ id: 'p', name: 'AI', configured: true }],
+  profiles: [{ id: 'p', name: 'AI', configured: true, supportsImageInput: false }],
   targetLanguage: 'Chinese',
   displayMode: 'bilingual',
   translationConcurrency: 6,

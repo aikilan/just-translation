@@ -1,6 +1,11 @@
 import { t, renderMessage, type UiMessage } from '../shared/i18n';
 import { DEFAULT_PROVIDER_OPTIONS, getModelCapability } from '../shared/providers';
-import { ProviderFields, ThinkingFields, ModelSuggestions } from './provider-fields';
+import {
+  ProviderFields,
+  ThinkingFields,
+  ModelSuggestions,
+  ImageInputFields,
+} from './provider-fields';
 import { Check, Eye, EyeOff, LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -126,7 +131,14 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
   }
   function edit(patch: Partial<TranslationProfile>) {
     setDrafts((existing) =>
-      existing.map((item) => (item.id === selectedId ? { ...item, ...patch } : item)),
+      existing.map((item) => {
+        if (item.id !== selectedId) return item;
+        // A manual capability belongs to this endpoint/model/protocol, never the next draft.
+        const identityChanged = (['provider', 'protocol', 'apiUrl', 'model'] as const).some(
+          (key) => patch[key] !== undefined && patch[key] !== item[key],
+        );
+        return { ...item, ...patch, ...(identityChanged ? { imageInputEnabled: false } : {}) };
+      }),
     );
     setTouched((existing) => ({ ...existing, [selectedId]: {} }));
     invalidate();
@@ -151,6 +163,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
         apiKey: '',
         model: '',
         thinkingEnabled: false,
+        imageInputEnabled: false,
         translationPrompt: DEFAULT_TRANSLATION_PROMPT,
       },
     ]);
@@ -423,6 +436,7 @@ export function AIConfiguration({ settings, onSaved, onDeleted, onActivated }: P
         </fieldset>
         <fieldset className="editor-section behavior-section" aria-label={t('模型行为')}>
           <legend>{t('模型行为')}</legend>
+          <ImageInputFields profile={profile} disabled={busy} onChange={edit} />
           <ThinkingFields profile={profile} disabled={busy} onChange={edit} />
           {fieldError('thinkingControl')}
           <details className="prompt-details">

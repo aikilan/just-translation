@@ -4,6 +4,11 @@ import {
   type ModelOptions,
   type ConfiguredProviderOptions,
 } from './providers';
+import { imageDataUrl, type ImageInput } from './image-input';
+
+/** Application-owned content parts; the adapter owns each provider's wire representation. */
+export type ProtocolContent =
+  string | readonly ({ type: 'text'; text: string } | { type: 'image'; image: ImageInput })[];
 
 type RequestSettings = ModelOptions &
   ConfiguredProviderOptions & { apiUrl: string; apiKey: string };
@@ -17,7 +22,7 @@ export interface ProtocolRequest {
 export function buildProtocolRequest(
   settings: RequestSettings,
   system: string,
-  content: string,
+  content: ProtocolContent,
   fullDocument = false,
 ): ProtocolRequest {
   const resolved = resolveProviderOptions(settings, fullDocument);
@@ -33,7 +38,17 @@ export function buildProtocolRequest(
     if (key) headers.Authorization = `Bearer ${key}`;
     body.messages = [
       { role: 'system', content: system },
-      { role: 'user', content },
+      {
+        role: 'user',
+        content:
+          typeof content === 'string'
+            ? content
+            : content.map((part) =>
+                part.type === 'text'
+                  ? part
+                  : { type: 'image_url', image_url: { url: imageDataUrl(part.image) } },
+              ),
+      },
     ];
     // OpenAI's reasoning models use max_completion_tokens; compatible vendors document max_tokens.
     // An active thinking budget must be validated against the output limit sent on the wire.
@@ -58,7 +73,26 @@ export function buildProtocolRequest(
         : key;
     if (host === 'api.anthropic.com') headers['anthropic-dangerous-direct-browser-access'] = 'true';
     body.system = system;
-    body.messages = [{ role: 'user', content }];
+    body.messages = [
+      {
+        role: 'user',
+        content:
+          typeof content === 'string'
+            ? content
+            : content.map((part) =>
+                part.type === 'text'
+                  ? part
+                  : {
+                      type: 'image',
+                      source: {
+                        type: 'base64',
+                        media_type: part.image.mediaType,
+                        data: part.image.data,
+                      },
+                    },
+              ),
+      },
+    ];
     body.max_tokens = resolved.maxOutputTokens;
   }
   return { url, headers, body };

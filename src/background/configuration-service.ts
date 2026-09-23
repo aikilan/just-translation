@@ -23,6 +23,7 @@ import {
   type ActiveTranslator,
 } from '../shared/translation-engines';
 import { getSettings, updateStoredSettings } from '../shared/settings-store';
+import { resolveImageInputCapability } from '../shared/image-capabilities';
 
 export async function readPublicSettings(): Promise<PublicTranslatorSettings> {
   return toPublicSettings(await getSettings());
@@ -170,6 +171,7 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
       id: profile.id,
       name: profile.name,
       configured: !configurationError,
+      supportsImageInput: !configurationError && resolveImageInputCapability(profile).supported,
       configurationError,
     };
   });
