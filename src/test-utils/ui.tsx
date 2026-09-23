@@ -106,6 +106,13 @@ export function mockExtension(
     .mockResolvedValue(status);
   const openOptionsPage = vi.fn(async () => {});
   const storageSet = vi.fn(async () => {});
+  const executeScript = vi
+    .fn<
+      (
+        injection: chrome.scripting.ScriptInjection<[string], unknown>,
+      ) => Promise<chrome.scripting.InjectionResult<unknown>[]>
+    >()
+    .mockResolvedValue([{ frameId: 0, documentId: 'page', result: { ok: true } }]);
   type StorageChangedListener = (
     changes: Record<string, chrome.storage.StorageChange>,
     areaName: string,
@@ -131,8 +138,9 @@ export function mockExtension(
       sendMessage: tabSend,
       create: vi.fn(async () => {}),
     },
+    scripting: { executeScript },
   });
-  return { send, tabSend, openOptionsPage, storageSet, storageAddListener };
+  return { send, tabSend, openOptionsPage, storageSet, storageAddListener, executeScript };
 }
 export async function mount(node: ReactNode) {
   Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);

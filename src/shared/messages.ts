@@ -158,6 +158,15 @@ export type RuntimeRequest =
       translator: ActiveTranslator;
     }
   | { type: 'CANCEL_SELECTION_TRANSLATION'; requestId: string }
+  | {
+      type: 'TRANSLATE_QUICK_TEXT';
+      requestId: string;
+      text: string;
+      translator: ActiveTranslator;
+      /** Per-request choice; never persisted into webpage translation preferences. */
+      targetLanguage: string;
+    }
+  | { type: 'CANCEL_QUICK_TRANSLATION'; requestId: string }
   | { type: 'GET_PUBLIC_SETTINGS' }
   | {
       type: 'BEGIN_TRANSLATION_SESSION';
@@ -215,10 +224,27 @@ export type PageCommand =
 export type Result<T> = { ok: true; data: T } | { ok: false; error: UiMessage };
 
 /** Only display data crosses back to the selected document; provider credentials stay trusted. */
-export interface SelectionTranslationResult {
+export interface TextTranslationResult {
   text: string;
   targetLanguage: string;
   translatorName: string;
+}
+
+/** Validate display-only text results at the background/content-script boundary. */
+export function isTextTranslationResult(value: unknown): value is TextTranslationResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'text' in value &&
+    typeof value.text === 'string' &&
+    Boolean(value.text.trim()) &&
+    'targetLanguage' in value &&
+    typeof value.targetLanguage === 'string' &&
+    Boolean(value.targetLanguage.trim()) &&
+    'translatorName' in value &&
+    typeof value.translatorName === 'string' &&
+    Boolean(value.translatorName.trim())
+  );
 }
 
 export function getErrorMessage(error: unknown): UiMessage {

@@ -138,6 +138,50 @@ describe('background document lifecycle', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('routes quick text through the requested engine and language without persisting preferences', async () => {
+    activeTranslator = { kind: 'builtin', engine: 'google-free' };
+    fetchMock.mockResolvedValue(completionResponse([{ id: 'quick', text: 'quick result' }]));
+    const storageWrite = vi.spyOn(chrome.storage.local, 'set');
+    const writes = storageWrite.mock.calls.length;
+    const response = await send({
+      type: 'TRANSLATE_QUICK_TEXT',
+      requestId: 'quick-1',
+      text: 'Typed text',
+      translator: { kind: 'ai', profileId: activeProfile.id },
+      targetLanguage: 'Japanese',
+    });
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        text: 'quick result',
+        targetLanguage: 'Japanese',
+        translatorName: activeProfile.name,
+      },
+    });
+    expect(fetchMock.mock.calls[0][1].body).toContain('Japanese');
+    expect(Object.keys(session)).toHaveLength(0);
+    expect(storageWrite).toHaveBeenCalledTimes(writes);
+    expect(await send({ type: 'GET_PUBLIC_SETTINGS' })).toMatchObject({
+      ok: true,
+      data: { activeTranslator, targetLanguage: DEFAULT_SETTINGS.targetLanguage },
+    });
+  });
+
+  it('cancels a quick request using its own message route', async () => {
+    const work = send({
+      type: 'TRANSLATE_QUICK_TEXT',
+      requestId: 'cancel-quick',
+      text: 'Typed text',
+      translator: activeTranslator,
+      targetLanguage: 'English',
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const signal = fetchMock.mock.calls[0][1].signal!;
+    await send({ type: 'CANCEL_QUICK_TRANSLATION', requestId: 'cancel-quick' });
+    expect(signal.aborted).toBe(true);
+    expect(await work).toMatchObject({ ok: false });
+  });
+
   it('requeues only never-sent offscreen batches and preserves admitted HTTP', async () => {
     await send({
       type: 'BEGIN_TRANSLATION_SESSION',

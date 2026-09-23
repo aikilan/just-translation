@@ -2,9 +2,9 @@ import { message, LocalizedError } from '../shared/i18n';
 import { sendRuntimeMessage } from '../shared/chrome-api';
 import {
   getErrorMessage,
+  isTextTranslationResult,
   type Result,
   type RuntimeRequest,
-  type SelectionTranslationResult,
 } from '../shared/messages';
 import type { ActiveTranslator } from '../shared/translation-engines';
 import { SelectionTranslationView, type SelectionAnchor } from './selection-translation-view';
@@ -59,27 +59,13 @@ export class SelectionTranslationController {
       });
       if (this.active !== task) return;
       if (!result.ok) throw new LocalizedError(result.error);
-      if (!isTranslationResult(result.data))
+      if (!isTextTranslationResult(result.data))
         throw new LocalizedError(message('后台未返回有效译文，请重试'));
       task.view.success(result.data);
     } catch (error) {
       if (this.active === task) task.view.error(getErrorMessage(error));
     }
   }
-}
-
-function isTranslationResult(value: unknown): value is SelectionTranslationResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'text' in value &&
-    typeof value.text === 'string' &&
-    'targetLanguage' in value &&
-    typeof value.targetLanguage === 'string' &&
-    'translatorName' in value &&
-    typeof value.translatorName === 'string' &&
-    Boolean(value.translatorName.trim())
-  );
 }
 
 /** Snapshot geometry before the native menu/focus changes; Chrome supplies the actual request text. */

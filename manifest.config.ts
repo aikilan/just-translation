@@ -9,7 +9,7 @@ export default defineManifest({
   description: '__MSG_extensionDescription__',
   version: packageJson.version,
   minimum_chrome_version: '120',
-  permissions: ['storage', 'activeTab', 'contextMenus', 'alarms', 'webNavigation'],
+  permissions: ['storage', 'activeTab', 'scripting', 'contextMenus', 'alarms', 'webNavigation'],
   host_permissions: ['http://*/*', 'https://*/*'],
   background: {
     service_worker: 'src/background/service-worker.ts',

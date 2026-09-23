@@ -1,6 +1,6 @@
 import { TEST_PROFILE } from '../test-utils/provider';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SelectionTranslationService } from './selection-translation';
+import { TextTranslationService } from './text-translation';
 import { DEFAULT_SETTINGS, type TranslatorSettings } from '../shared/settings';
 import type { ActiveTranslator } from '../shared/translation-engines';
 import { translateRuntimeBatch } from './translation-engine';
@@ -25,7 +25,7 @@ const settings: TranslatorSettings = {
 const AI_TRANSLATOR: ActiveTranslator = { kind: 'ai', profileId: TEST_PROFILE.id };
 function setup(readSettings = () => Promise.resolve(settings)) {
   const getFrame = vi.fn(() => Promise.resolve({ documentId: 'doc' }));
-  const service = new SelectionTranslationService(readSettings, getFrame);
+  const service = new TextTranslationService(readSettings, getFrame);
   vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
     Promise.resolve({
       translations: Object.fromEntries(segments.map((segment) => [segment.requestId, '译文'])),
@@ -44,7 +44,7 @@ describe('selection translation isolation', () => {
         profiles: [{ ...settings.profiles[0], thinkingEnabled: false }],
       }),
     );
-    await service.translate(sender(), 'thinking-off', 'Hello', AI_TRANSLATOR);
+    await service.translateSelection(sender(), 'thinking-off', 'Hello', AI_TRANSLATOR);
     expect(translateRuntimeBatch).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'ai', thinkingEnabled: false }),
       expect.any(Array),
@@ -55,7 +55,9 @@ describe('selection translation isolation', () => {
   });
   it('translates exactly the selection, including on excluded sites and inside frames', async () => {
     const { service, getFrame } = setup();
-    expect(await service.translate(sender(3), 'one', '  First\nSecond  ', AI_TRANSLATOR)).toEqual({
+    expect(
+      await service.translateSelection(sender(3), 'one', '  First\nSecond  ', AI_TRANSLATOR),
+    ).toEqual({
       text: '译文',
       targetLanguage: settings.targetLanguage,
       translatorName: TEST_PROFILE.name,
@@ -75,18 +77,22 @@ describe('selection translation isolation', () => {
   });
   it('rejects empty text, missing configuration and stale documents before HTTP', async () => {
     const { service, getFrame } = setup();
-    await expect(service.translate(sender(), 'one', ' \n ', AI_TRANSLATOR)).rejects.toThrow();
+    await expect(
+      service.translateSelection(sender(), 'one', ' \n ', AI_TRANSLATOR),
+    ).rejects.toThrow();
     getFrame.mockResolvedValue({ documentId: 'new-doc' });
-    await expect(service.translate(sender(), 'two', 'text', AI_TRANSLATOR)).rejects.toThrow();
+    await expect(
+      service.translateSelection(sender(), 'two', 'text', AI_TRANSLATOR),
+    ).rejects.toThrow();
     const unconfigured = setup(() =>
       Promise.resolve({
         ...DEFAULT_SETTINGS,
         activeTranslator: { kind: 'ai', profileId: DEFAULT_SETTINGS.profiles[0].id },
       }),
     ).service;
-    await expect(unconfigured.translate(sender(), 'three', 'text', AI_TRANSLATOR)).rejects.toThrow(
-      /配置/,
-    );
+    await expect(
+      unconfigured.translateSelection(sender(), 'three', 'text', AI_TRANSLATOR),
+    ).rejects.toThrow(/配置/);
     expect(translateRuntimeBatch).not.toHaveBeenCalled();
   });
   it('splits long free-engine selections into 1000-character requests and preserves order', async () => {
@@ -105,7 +111,12 @@ describe('selection translation isolation', () => {
       }),
     );
     await expect(
-      service.translate(sender(), 'long', 'x'.repeat(2_100), freeSettings.activeTranslator),
+      service.translateSelection(
+        sender(),
+        'long',
+        'x'.repeat(2_100),
+        freeSettings.activeTranslator,
+      ),
     ).resolves.toEqual({
       text: '[0][1][2]',
       targetLanguage: 'English',
@@ -124,7 +135,7 @@ describe('selection translation isolation', () => {
     const { service } = setup();
     const text = 'x'.repeat(2_100);
 
-    await service.translate(sender(), 'long-ai', text, AI_TRANSLATOR);
+    await service.translateSelection(sender(), 'long-ai', text, AI_TRANSLATOR);
 
     expect(translateRuntimeBatch).toHaveBeenCalledOnce();
     expect(translateRuntimeBatch).toHaveBeenCalledWith(
@@ -159,7 +170,12 @@ describe('selection translation isolation', () => {
     );
 
     await expect(
-      service.translate(sender(), 'fanout', 'x'.repeat(2_100), freeSettings.activeTranslator),
+      service.translateSelection(
+        sender(),
+        'fanout',
+        'x'.repeat(2_100),
+        freeSettings.activeTranslator,
+      ),
     ).rejects.toThrow('first batch failed');
     expect(siblingSignal?.aborted).toBe(true);
   });
@@ -173,7 +189,7 @@ describe('selection translation isolation', () => {
     );
 
     await expect(
-      service.translate(sender(), 'stale', 'text', {
+      service.translateSelection(sender(), 'stale', 'text', {
         kind: 'builtin',
         engine: 'microsoft-free',
       }),
@@ -188,8 +204,8 @@ describe('selection translation isolation', () => {
           release = resolve;
         }),
     );
-    const pending = service.translate(sender(), 'one', 'text', AI_TRANSLATOR);
-    service.cancel(sender(), 'one');
+    const pending = service.translateSelection(sender(), 'one', 'text', AI_TRANSLATOR);
+    service.cancel(sender(), 'one', 'selection');
     release(settings);
     await expect(pending).rejects.toThrow(/取消/);
     expect(translateRuntimeBatch).not.toHaveBeenCalled();
@@ -208,9 +224,11 @@ describe('selection translation isolation', () => {
         );
       },
     );
-    const top = service.translate(sender(), 'same', 'top', AI_TRANSLATOR).catch(() => undefined);
+    const top = service
+      .translateSelection(sender(), 'same', 'top', AI_TRANSLATOR)
+      .catch(() => undefined);
     const frame = service
-      .translate(sender(3, 'child'), 'same', 'child', AI_TRANSLATOR)
+      .translateSelection(sender(3, 'child'), 'same', 'child', AI_TRANSLATOR)
       .catch(() => undefined);
     await vi.waitFor(() => expect(signals.length).toBe(2));
     service.navigate(12, 3, 'next');

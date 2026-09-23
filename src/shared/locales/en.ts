@@ -1,5 +1,20 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  快捷翻译: 'Quick translate',
+  关闭快捷翻译: 'Close quick translation',
+  原文: 'Source',
+  译文: 'Translation',
+  自动检测语言: 'Detect language automatically',
+  '输入或粘贴需要翻译的内容…': 'Type or paste text to translate…',
+  译文将显示在这里: 'The translation will appear here',
+  粘贴: 'Paste',
+  清空: 'Clear',
+  翻译: 'Translate',
+  '{{p0}} 字符': '{{p0}} characters',
+  剪贴板中没有文字: 'There is no text on the clipboard',
+  '无法读取剪贴板，请在输入框中手动粘贴。':
+    'Cannot read the clipboard. Paste into the input field manually.',
+  '输入内容会发送到所选翻译服务。': 'Your input will be sent to the selected translation service.',
   '全文最长等待（分钟）': 'Full-page timeout (minutes)',
   '全文最长等待必须是 2–60 的整数': 'Full-page timeout must be an integer from 2 to 60',
   '仅用于 AI 全文翻译。默认 10 分钟；首次输出 120 秒、输出停滞 60 秒保护仍然有效。下次翻译生效。':
@@ -53,8 +68,6 @@ export default {
     'Custom target languages are available only with an AI configuration',
   '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
     'Translate webpages with free Google or Microsoft channels, or connect your own AI.',
-  '请选择受支持的预设目标语言，或切换到有效的 AI 配置。':
-    'Choose a supported preset target language below, or switch to a valid AI configuration.',
   请填写目标语言: 'Enter a target language',
   展示方式无效: 'Invalid display mode',
   动态翻译设置无效: 'Invalid dynamic translation setting',
@@ -69,13 +82,13 @@ export default {
   'API 请求超时': 'API request timed out',
   'API 请求已取消': 'API request cancelled',
   请选择需要翻译的文字: 'Select text to translate',
-  划选翻译请求重复: 'Duplicate selection translation request',
+  文本翻译请求重复: 'Duplicate text translation request',
   '请先在扩展设置页完成 API 配置，再重试':
     'Complete the API configuration in extension settings, then retry',
-  '当前网页已变化，请重新划选翻译': 'The page changed. Select the text again to translate',
+  '当前网页已变化，请重新打开翻译': 'The page has changed. Open translation again.',
   'AI 未返回译文，请重试': 'AI returned no translation. Please retry',
-  无法确定划选文字所属网页: 'Cannot identify the page containing the selection',
-  '划选翻译请求 ID 无效': 'Invalid selection translation request ID',
+  无法确定文本所属网页: 'Cannot identify the page for this text',
+  '文本翻译请求 ID 无效': 'Invalid text translation request ID',
   设置只能由扩展页面修改: 'Settings can only be changed from extension pages',
   翻译模式无效: 'Invalid translation mode',
   '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面':
@@ -324,12 +337,8 @@ export default {
   '配置仅保存在本地，请求直接发送到你的 API。':
     'Configuration stays local. Requests go directly to your API.',
   此站已排除: 'Website excluded',
-  此页面无法翻译: 'This page cannot be translated',
-  尚未连接到当前网页: 'Not connected to this page',
-  '此站符合不翻译规则，自动翻译也不会启动。':
-    'This website matches an exclusion rule. Auto-translation will not start.',
-  '浏览器内置页、扩展商店等页面不允许读取内容。':
-    'Browser pages and extension stores do not allow content access.',
+  '此页面无法翻译，请切换到普通网页': 'This page cannot be translated. Open a regular webpage.',
+  请刷新页面重新连接插件: 'Refresh the page to reconnect the extension',
   '请刷新网页后重新打开插件。': 'Refresh the page and reopen the extension.',
   管理站点规则: 'Manage site rules',
   网页翻译状态: 'Page translation status',

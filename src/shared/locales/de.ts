@@ -1,5 +1,21 @@
 /** Bundled UI messages. User-owned content is never translated through this catalog. */
 export default {
+  快捷翻译: 'Schnellübersetzung',
+  关闭快捷翻译: 'Schnellübersetzung schließen',
+  原文: 'Ausgangstext',
+  译文: 'Übersetzung',
+  自动检测语言: 'Sprache automatisch erkennen',
+  '输入或粘贴需要翻译的内容…': 'Text zum Übersetzen eingeben oder einfügen…',
+  译文将显示在这里: 'Die Übersetzung erscheint hier',
+  粘贴: 'Einfügen',
+  清空: 'Leeren',
+  翻译: 'Übersetzen',
+  '{{p0}} 字符': '{{p0}} Zeichen',
+  剪贴板中没有文字: 'Die Zwischenablage enthält keinen Text',
+  '无法读取剪贴板，请在输入框中手动粘贴。':
+    'Die Zwischenablage kann nicht gelesen werden. Fügen Sie den Text manuell ein.',
+  '输入内容会发送到所选翻译服务。':
+    'Ihre Eingabe wird an den ausgewählten Übersetzungsdienst gesendet.',
   '全文最长等待（分钟）': 'Zeitlimit der Seitenübersetzung (Minuten)',
   '全文最长等待必须是 2–60 的整数': 'Das Zeitlimit muss eine ganze Zahl von 2 bis 60 sein',
   '仅用于 AI 全文翻译。默认 10 分钟；首次输出 120 秒、输出停滞 60 秒保护仍然有效。下次翻译生效。':
@@ -56,8 +72,6 @@ export default {
     'Benutzerdefinierte Zielsprachen sind nur mit einer KI-Konfiguration verfügbar',
   '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
     'Übersetzen Sie Webseiten kostenlos mit Google oder Microsoft oder verbinden Sie Ihre eigene KI.',
-  '请选择受支持的预设目标语言，或切换到有效的 AI 配置。':
-    'Wählen Sie unten eine unterstützte Zielsprache oder wechseln Sie zu einer gültigen KI-Konfiguration.',
   请填写目标语言: 'Geben Sie eine Zielsprache ein',
   展示方式无效: 'Ungültiger Anzeigemodus',
   动态翻译设置无效: 'Ungültige Einstellung für dynamische Übersetzung',
@@ -74,13 +88,14 @@ export default {
   'API 请求超时': 'Zeitüberschreitung der API-Anfrage',
   'API 请求已取消': 'API-Anfrage abgebrochen',
   请选择需要翻译的文字: 'Wählen Sie Text zum Übersetzen aus',
-  划选翻译请求重复: 'Doppelte Anfrage zur Auswahlübersetzung',
+  文本翻译请求重复: 'Doppelte Textübersetzungsanfrage',
   '请先在扩展设置页完成 API 配置，再重试':
     'Vervollständigen Sie die API-Konfiguration in den Erweiterungseinstellungen und versuchen Sie es erneut',
-  '当前网页已变化，请重新划选翻译': 'Die Seite hat sich geändert. Wählen Sie den Text erneut aus',
+  '当前网页已变化，请重新打开翻译':
+    'Die Seite hat sich geändert. Öffnen Sie die Übersetzung erneut.',
   'AI 未返回译文，请重试': 'Die KI hat keine Übersetzung geliefert. Versuchen Sie es erneut',
-  无法确定划选文字所属网页: 'Die Seite mit der Auswahl konnte nicht ermittelt werden',
-  '划选翻译请求 ID 无效': 'Ungültige Anfrage-ID für die Auswahlübersetzung',
+  无法确定文本所属网页: 'Die Seite dieses Textes konnte nicht ermittelt werden',
+  '文本翻译请求 ID 无效': 'Ungültige Textübersetzungs-Anfrage-ID',
   设置只能由扩展页面修改: 'Einstellungen können nur auf Erweiterungsseiten geändert werden',
   翻译模式无效: 'Ungültiger Übersetzungsmodus',
   '扩展页面与后台消息不一致，请重新加载扩展并重新打开页面':
@@ -341,12 +356,9 @@ export default {
   '配置仅保存在本地，请求直接发送到你的 API。':
     'Die Konfiguration bleibt lokal. Anfragen gehen direkt an Ihre API.',
   此站已排除: 'Website ausgeschlossen',
-  此页面无法翻译: 'Diese Seite kann nicht übersetzt werden',
-  尚未连接到当前网页: 'Keine Verbindung zu dieser Seite',
-  '此站符合不翻译规则，自动翻译也不会启动。':
-    'Diese Website entspricht einer Ausschlussregel. Automatische Übersetzung startet nicht.',
-  '浏览器内置页、扩展商店等页面不允许读取内容。':
-    'Browserseiten und Erweiterungs-Stores erlauben keinen Inhaltszugriff.',
+  '此页面无法翻译，请切换到普通网页':
+    'Diese Seite kann nicht übersetzt werden. Öffnen Sie eine normale Webseite.',
+  请刷新页面重新连接插件: 'Aktualisieren Sie die Seite, um die Erweiterung erneut zu verbinden',
   '请刷新网页后重新打开插件。':
     'Aktualisieren Sie die Seite und öffnen Sie die Erweiterung erneut.',
   管理站点规则: 'Website-Regeln verwalten',

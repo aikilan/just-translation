@@ -26,6 +26,13 @@ export function TranslatorSelect({ activeTranslator, profiles, disabled, onChang
         if (translator) onChange(translator);
       }}
     >
+      {activeTranslator.kind === 'ai' &&
+      !profiles.some((profile) => profile.id === activeTranslator.profileId) ? (
+        // A retained draft must not visually select a different recipient after profile deletion.
+        <option value={activeTranslatorKey(activeTranslator)} disabled>
+          {t('当前翻译配置不存在')}
+        </option>
+      ) : null}
       <option value="builtin:google-free">{builtinTranslatorLabel('google-free')}</option>
       <option value="builtin:microsoft-free">{builtinTranslatorLabel('microsoft-free')}</option>
       {profiles.map((profile) => (

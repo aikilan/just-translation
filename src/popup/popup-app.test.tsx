@@ -14,6 +14,12 @@ import {
   READY_SETTINGS,
 } from '../test-utils/ui';
 let view: Awaited<ReturnType<typeof mount>>;
+vi.mock('../content/quick-translation-loader.iife.ts?script&iife', () => ({
+  default: 'quick-loader.js',
+}));
+vi.mock('../content/quick-translation-entry.ts?script&module', () => ({
+  default: 'assets/quick-translation-entry.js',
+}));
 const MAIN_FRAME = { frameId: 0 };
 const publicSettings = (
   uiLanguage: PublicTranslatorSettings['uiLanguage'],
@@ -41,6 +47,212 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('popup status summary', () => {
+  it.each(['bilingual', 'translation'] as const)(
+    'shows translation actions without idle guidance in %s mode',
+    async (displayMode) => {
+      mockExtension({ ...READY_SETTINGS, displayMode }, { ...IDLE_STATUS, displayMode });
+      view = await mount(<PopupApp />);
+
+      expect(view.container.textContent).not.toContain('准备翻译');
+      expect(view.container.textContent).not.toContain('译文将显示在原文下方。');
+      const region = view.container.querySelector('[aria-label="网页翻译状态"]')!;
+      expect(region.querySelector('h1, [role="status"]')).toBeNull();
+      expect(button(view.container, '翻译此网页').disabled).toBe(false);
+      expect(button(view.container, '全文完整翻译').disabled).toBe(false);
+      expect(button(view.container, '快捷翻译').disabled).toBe(false);
+    },
+  );
+
+  it('shows translation progress and removes the summary after restoring the page', async () => {
+    const { tabSend } = mockExtension();
+    view = await mount(<PopupApp />);
+    tabSend.mockResolvedValueOnce({
+      ...IDLE_STATUS,
+      phase: 'translating',
+      total: 2,
+      translated: 1,
+    });
+
+    await click(view.container, '翻译此网页');
+    expect(view.container.querySelector('h1')?.textContent).toBe('正在翻译');
+    expect(view.container.querySelector('[role="status"]')?.textContent).toContain('1 / 2');
+    expect(
+      view.container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'),
+    ).toBe('1');
+
+    await click(view.container, '恢复原文');
+    expect(tabSend).toHaveBeenCalledWith(7, { type: 'RESTORE_PAGE' }, MAIN_FRAME);
+    expect(view.container.querySelector('h1, [role="status"], [role="progressbar"]')).toBeNull();
+    expect(button(view.container, '翻译此网页').disabled).toBe(false);
+  });
+
+  it('keeps actionable restart guidance even when the page phase is idle', async () => {
+    mockExtension(READY_SETTINGS, { ...IDLE_STATUS, needsRestart: true });
+    view = await mount(<PopupApp />);
+
+    expect(view.container.querySelector('h1')?.textContent).toBe('新设置已就绪');
+    expect(view.container.querySelector('[role="status"]')?.textContent).toContain(
+      '重新翻译后应用新设置',
+    );
+    expect(button(view.container, '用新设置重新翻译').disabled).toBe(false);
+  });
+});
+
+describe('quick translation entry', () => {
+  it('opens in the main page once and closes the popup only after acknowledgement', async () => {
+    const { executeScript } = mockExtension();
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    const loading = deferred<chrome.scripting.InjectionResult<unknown>[]>();
+    const opening = deferred<chrome.scripting.InjectionResult<unknown>[]>();
+    executeScript.mockReturnValueOnce(loading.promise).mockReturnValueOnce(opening.promise);
+    act(() => {
+      button(view.container, '快捷翻译').click();
+      button(view.container, '快捷翻译').click();
+    });
+    expect(executeScript).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        target: { tabId: 7, frameIds: [0] },
+        world: 'ISOLATED',
+      }),
+    );
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => {
+      await Promise.resolve();
+      loading.resolve([{ frameId: 0, documentId: 'page', result: undefined }]);
+    });
+    expect(executeScript).toHaveBeenCalledTimes(2);
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => {
+      await Promise.resolve();
+      opening.resolve([{ frameId: 0, documentId: 'page', result: { ok: true } }]);
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+  it('leaves the popup open and reports a failed open', async () => {
+    const { executeScript } = mockExtension();
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    executeScript.mockResolvedValueOnce([{ frameId: 0, documentId: 'page', result: undefined }]);
+    executeScript.mockResolvedValueOnce([
+      {
+        frameId: 0,
+        documentId: 'page',
+        result: {
+          ok: false,
+          error: { text: 'Cannot open dialog' },
+        },
+      },
+    ]);
+    await click(view.container, '快捷翻译');
+    expect(view.container.textContent).toContain('Cannot open dialog');
+    expect(view.container.querySelector('.popup-notice [role="alert"]')?.textContent).toContain(
+      'Cannot open dialog',
+    );
+    expect(close).not.toHaveBeenCalled();
+    expect(button(view.container, '快捷翻译').disabled).toBe(false);
+  });
+  it.each(['no receiver', 'invalid status'])(
+    'opens independently when the page has %s',
+    async (reason) => {
+      const { tabSend, executeScript } = mockExtension();
+      if (reason === 'no receiver')
+        tabSend.mockRejectedValue(new Error('Receiving end does not exist'));
+      else tabSend.mockResolvedValue(undefined);
+      const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+      view = await mount(<PopupApp />);
+      expect(view.container.textContent).toContain('请刷新页面重新连接插件');
+      expect(button(view.container, '快捷翻译').disabled).toBe(false);
+      expect(executeScript).not.toHaveBeenCalled();
+      await click(view.container, '快捷翻译');
+      expect(executeScript).toHaveBeenCalledTimes(2);
+      expect(
+        tabSend.mock.calls.every(
+          ([, command]) => (command as { type: string }).type === 'GET_PAGE_STATUS',
+        ),
+      ).toBe(true);
+      expect(close).toHaveBeenCalledOnce();
+    },
+  );
+  it('keeps injection errors retryable while the page remains disconnected', async () => {
+    const { tabSend, executeScript } = mockExtension();
+    tabSend.mockRejectedValue(new Error('No page listener'));
+    executeScript.mockRejectedValueOnce(new Error('Cannot access this page'));
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    await click(view.container, '快捷翻译');
+    expect(view.container.textContent).toContain('Cannot access this page');
+    expect(close).not.toHaveBeenCalled();
+    expect(button(view.container, '快捷翻译').disabled).toBe(false);
+    await click(view.container, '快捷翻译');
+    expect(executeScript).toHaveBeenCalledTimes(3);
+    expect(close).toHaveBeenCalledOnce();
+  });
+  it('remains available on an excluded site even when the selected AI is unconfigured', async () => {
+    mockExtension({
+      ...READY_SETTINGS,
+      excludedSites: ['news.example.com'],
+      profiles: READY_SETTINGS.profiles.map((p) => ({ ...p, model: '' })),
+    });
+    view = await mount(<PopupApp />);
+    expect(button(view.container, '快捷翻译').disabled).toBe(false);
+  });
+  it('shows a disabled entry on a browser page that cannot host the dialog', async () => {
+    const { executeScript } = mockExtension(READY_SETTINGS, IDLE_STATUS, 'chrome://extensions/');
+    view = await mount(<PopupApp />);
+    expect(button(view.container, '快捷翻译').disabled).toBe(true);
+    await click(view.container, '快捷翻译');
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+});
+
+describe('popup notices', () => {
+  it.each<[string, typeof READY_SETTINGS, string, string]>([
+    ['restricted page', READY_SETTINGS, 'chrome://extensions/', '此页面无法翻译，请切换到普通网页'],
+    [
+      'excluded site',
+      { ...READY_SETTINGS, excludedSites: ['news.example.com'] },
+      'https://news.example.com/article',
+      '此站已排除',
+    ],
+    [
+      'unconfigured AI',
+      { ...READY_SETTINGS, profiles: READY_SETTINGS.profiles.map((p) => ({ ...p, model: '' })) },
+      'https://news.example.com/article',
+      '当前翻译配置不存在',
+    ],
+    [
+      'unsupported free-channel language',
+      { ...DEFAULT_SETTINGS, targetLanguage: 'Klingon' },
+      'https://news.example.com/article',
+      '免费翻译通道不支持当前目标语言',
+    ],
+  ])('shows one compact message for %s', async (_name, settings, url, text) => {
+    mockExtension(settings, IDLE_STATUS, url);
+    view = await mount(<PopupApp />);
+
+    const notice = view.container.querySelector('.popup-notice')!;
+    expect(notice.querySelectorAll('p')).toHaveLength(1);
+    expect(notice.querySelector('p')?.textContent).toBe(text);
+    expect(notice.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(notice.querySelector('h1, h2')).toBeNull();
+    expect(view.container.textContent).not.toContain('请切换到普通网页后使用快捷翻译。');
+  });
+
+  it('keeps the settings error and reload action without a separate heading', async () => {
+    const { send } = mockExtension();
+    send.mockRejectedValueOnce(new Error('设置读取失败'));
+    view = await mount(<PopupApp />);
+
+    const notice = view.container.querySelector('.popup-notice')!;
+    expect(notice.querySelectorAll('p')).toHaveLength(1);
+    expect(notice.querySelector('[role="alert"]')?.textContent).toBe('设置读取失败');
+    expect(notice.querySelector('h1, h2')).toBeNull();
+    expect(button(view.container, '重新加载').disabled).toBe(false);
+  });
 });
 
 describe('popup settings synchronization', () => {
@@ -206,9 +418,23 @@ describe('popup reading controls', () => {
     const { tabSend } = mockExtension();
     tabSend.mockRejectedValueOnce(new Error('Receiving end does not exist'));
     view = await mount(<PopupApp />);
-    expect(view.container.textContent).toContain('尚未连接到当前网页');
-    expect(view.container.textContent).toContain('请刷新网页后重新打开插件。');
+    const notice = view.container.querySelector('[role="status"]');
+    expect(notice?.textContent).toBe('请刷新页面重新连接插件');
+    expect(notice?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(view.container.querySelector('h1')).toBeNull();
+    expect(view.container.textContent).not.toContain('请刷新网页后重新打开插件。');
     expect(view.container.textContent).not.toContain('全文完整翻译');
+  });
+
+  it('localizes the compact page reconnection guidance', async () => {
+    const { tabSend } = mockExtension({ ...READY_SETTINGS, uiLanguage: 'en' });
+    tabSend.mockResolvedValueOnce(undefined);
+    view = await mount(<PopupApp />);
+
+    expect(view.container.querySelector('[role="status"]')?.textContent).toBe(
+      'Refresh the page to reconnect the extension',
+    );
+    expect(view.container.querySelector('h1')).toBeNull();
   });
 
   it('queries only the main frame before exposing page controls', async () => {
@@ -231,8 +457,8 @@ describe('popup reading controls', () => {
     tabSend.mockResolvedValueOnce(response);
     view = await mount(<PopupApp />);
 
-    expect(view.container.textContent).toContain('尚未连接到当前网页');
-    expect(view.container.textContent).toContain('请刷新网页后重新打开插件。');
+    expect(view.container.textContent).toContain('请刷新页面重新连接插件');
+    expect(view.container.textContent).not.toContain('尚未连接到当前网页');
     expect(view.container.textContent).not.toContain('翻译此网页');
   });
 
@@ -241,7 +467,7 @@ describe('popup reading controls', () => {
     tabSend.mockResolvedValueOnce(undefined);
     view = await mount(<PopupApp />);
 
-    expect(view.container.textContent).toContain('尚未连接到当前网页');
+    expect(view.container.textContent).toContain('请刷新页面重新连接插件');
     expect(view.container.textContent).not.toContain('连接你的 AI');
   });
 
@@ -255,7 +481,7 @@ describe('popup reading controls', () => {
       await vi.advanceTimersByTimeAsync(500);
     });
 
-    expect(view.container.textContent).toContain('尚未连接到当前网页');
+    expect(view.container.textContent).toContain('请刷新页面重新连接插件');
     expect(view.container.textContent).not.toContain('翻译此网页');
   });
 
@@ -338,9 +564,7 @@ describe('popup reading controls', () => {
   it('keeps engine and language controls available when a free channel has a custom target', async () => {
     mockExtension({ ...DEFAULT_SETTINGS, targetLanguage: 'Klingon' });
     view = await mount(<PopupApp />);
-    expect(view.container.textContent).toContain('当前翻译引擎不可用');
     expect(view.container.textContent).toContain('免费翻译通道不支持当前目标语言');
-    expect(view.container.textContent).toContain('请选择受支持的预设目标语言');
     expect(view.container.querySelector('[aria-label="翻译引擎"]')).not.toBeNull();
     expect(view.container.querySelector('[aria-label="翻译为"]')).not.toBeNull();
     expect(

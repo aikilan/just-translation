@@ -5,6 +5,7 @@ import {
   CircleAlert,
   FileText,
   LoaderCircle,
+  Languages,
   Play,
   RotateCcw,
   Settings,
@@ -30,6 +31,7 @@ import {
   useSettingsMutation,
 } from '../ui/controls';
 import { TranslatorDisclosure, TranslatorSelect } from '../ui/translator-select';
+import { openQuickTranslationInTab } from './open-quick-translation';
 
 type TranslationCommand = Extract<
   PageCommand['type'],
@@ -185,6 +187,22 @@ export function PopupApp() {
       setBusy(false);
     }
   }
+  /** Keep the popup available for errors; close only after the top document opened its editor. */
+  async function openQuickTranslation() {
+    if (page?.tabId === undefined || page.restricted || commandLock.current) return;
+    commandLock.current = true;
+    setBusy(true);
+    setCommandError('');
+    try {
+      await openQuickTranslationInTab(page.tabId);
+      window.close();
+    } catch (error) {
+      setCommandError(message('操作未完成：{{p0}}', { p0: getErrorMessage(error) }));
+    } finally {
+      commandLock.current = false;
+      setBusy(false);
+    }
+  }
   function accept(value: PublicTranslatorSettings) {
     // A confirmed mutation is newer than every settings read already in flight.
     settingsRevision.current += 1;
@@ -209,6 +227,8 @@ export function PopupApp() {
   const canTranslate = Boolean(page?.available && settings?.ready && !excluded);
   const fullDocument = status.mode === 'full-document';
   const incremental = fullDocument && status.stage === 'incremental';
+  // Idle pages only need actions; keep progress, failures, and restart guidance visible.
+  const showStatusSummary = status.phase !== 'idle' || needsRestart || status.failed > 0;
   const action = needsRestart
     ? t('用新设置重新翻译')
     : status.phase === 'translating'
@@ -251,6 +271,18 @@ export function PopupApp() {
                 ? t('暂时无法翻译')
                 : t('准备翻译');
 
+  const quickTranslationEntry = (
+    <button
+      className="text-button quick-translation-entry"
+      type="button"
+      disabled={page?.tabId === undefined || page.restricted || busy || saving}
+      onClick={() => void openQuickTranslation()}
+    >
+      <Languages aria-hidden="true" />
+      {t('快捷翻译')}
+    </button>
+  );
+  const showFullDocumentAction = !fullDocument || (incremental && status.failed > 0);
   return (
     <main className="popup-shell">
       <header className="popup-header">
@@ -272,56 +304,40 @@ export function PopupApp() {
         {loadError ? (
           <section className="popup-notice">
             <CircleAlert aria-hidden="true" />
-            <h1>{t('无法读取插件状态')}</h1>
             <p role="alert">{renderMessage(loadError)}</p>
             <button className="button" onClick={() => window.location.reload()}>
               {t('重新加载')}
             </button>
           </section>
         ) : !page || !settings ? (
-          <section className="popup-notice" role="status">
+          <section className="popup-notice popup-notice-loading" role="status">
             <LoaderCircle className="spin" aria-hidden="true" />
             <p>{t('正在读取插件状态…')}</p>
           </section>
         ) : !page.available && !page.restricted && !excluded ? (
-          <section className="popup-notice">
+          <section className="popup-notice" role="status">
             <CircleAlert aria-hidden="true" />
-            <h1>{t('尚未连接到当前网页')}</h1>
-            <p>{t('请刷新网页后重新打开插件。')}</p>
+            <p>{t('请刷新页面重新连接插件')}</p>
           </section>
         ) : !settings.ready ? (
           <section className="popup-notice">
             <CircleAlert aria-hidden="true" />
-            <h1>{t('当前翻译引擎不可用')}</h1>
-            {settings.configurationError ? (
-              <p>{renderMessage(settings.configurationError)}</p>
-            ) : null}
-            {settings.activeTranslator.kind === 'builtin' ? (
-              <p>{t('请选择受支持的预设目标语言，或切换到有效的 AI 配置。')}</p>
-            ) : (
+            <p>
+              {settings.configurationError
+                ? renderMessage(settings.configurationError)
+                : t('当前翻译引擎不可用')}
+            </p>
+            {settings.activeTranslator.kind === 'ai' ? (
               <button className="button button-primary button-block" onClick={() => openSettings()}>
                 {t('检查 AI 配置')}
                 <ArrowUpRight aria-hidden="true" />
               </button>
-            )}
+            ) : null}
           </section>
         ) : !page.available || excluded ? (
           <section className="popup-notice">
             <CircleAlert aria-hidden="true" />
-            <h1>
-              {excluded
-                ? t('此站已排除')
-                : page.restricted
-                  ? t('此页面无法翻译')
-                  : t('尚未连接到当前网页')}
-            </h1>
-            <p>
-              {excluded
-                ? t('此站符合不翻译规则，自动翻译也不会启动。')
-                : page.restricted
-                  ? t('浏览器内置页、扩展商店等页面不允许读取内容。')
-                  : t('请刷新网页后重新打开插件。')}
-            </p>
+            <p>{excluded ? t('此站已排除') : t('此页面无法翻译，请切换到普通网页')}</p>
             {excluded ? (
               <button className="button" onClick={() => openSettings('sites')}>
                 {t('管理站点规则')}
@@ -330,46 +346,52 @@ export function PopupApp() {
           </section>
         ) : (
           <section className="translation-status" aria-label={t('网页翻译状态')}>
-            <div className="status-heading">
-              <span className={`status-dot phase-${status.phase}`} />
-              <h1>{title}</h1>
-              {needsRestart && status.phase === 'translating' ? (
-                <button
-                  className="text-button"
-                  onClick={() => void run('STOP_TRANSLATION')}
-                  disabled={busy}
-                >
-                  {t('停止翻译')}
-                </button>
-              ) : null}
-            </div>
-            <p className="status-description" role="status">
-              {needsRestart
-                ? t('当前译文保留{{p0}}，重新翻译后应用新设置。', {
-                    p0: status.context
-                      ? `（${translationLanguageLabel(status.context.targetLanguage)}）`
-                      : '',
-                  })
-                : fullDocument && !incremental && status.phase === 'translating'
-                  ? status.total
-                    ? t('totalCount', { count: status.total })
-                    : t('全文完成后统一显示译文。')
-                  : fullDocument && !incremental && status.phase === 'error'
-                    ? t('全文请求失败，未应用译文；共 {{count}} 个阅读单元。', {
-                        count: status.total,
+            {showStatusSummary ? (
+              <>
+                <div className="status-heading">
+                  <span className={`status-dot phase-${status.phase}`} />
+                  <h1>{title}</h1>
+                  {needsRestart && status.phase === 'translating' ? (
+                    <button
+                      className="text-button"
+                      onClick={() => void run('STOP_TRANSLATION')}
+                      disabled={busy}
+                    >
+                      {t('停止翻译')}
+                    </button>
+                  ) : null}
+                </div>
+                <p className="status-description" role="status">
+                  {needsRestart
+                    ? t('当前译文保留{{p0}}，重新翻译后应用新设置。', {
+                        p0: status.context
+                          ? `（${translationLanguageLabel(status.context.targetLanguage)}）`
+                          : '',
                       })
-                    : status.total > 0
-                      ? [
-                          t('translatedCount', {
-                            translated: status.translated,
+                    : fullDocument && !incremental && status.phase === 'translating'
+                      ? status.total
+                        ? t('totalCount', { count: status.total })
+                        : t('全文完成后统一显示译文。')
+                      : fullDocument && !incremental && status.phase === 'error'
+                        ? t('全文请求失败，未应用译文；共 {{count}} 个阅读单元。', {
                             count: status.total,
-                          }),
-                          ...(status.failed ? [t('failedCount', { count: status.failed })] : []),
-                        ].join(' · ')
-                      : status.phase === 'translating'
-                        ? t('正在查找需要翻译的内容…')
-                        : t('译文将显示在原文下方。')}
-            </p>
+                          })
+                        : status.total > 0
+                          ? [
+                              t('translatedCount', {
+                                translated: status.translated,
+                                count: status.total,
+                              }),
+                              ...(status.failed
+                                ? [t('failedCount', { count: status.failed })]
+                                : []),
+                            ].join(' · ')
+                          : status.phase === 'translating'
+                            ? t('正在查找需要翻译的内容…')
+                            : t('译文将显示在原文下方。')}
+                </p>
+              </>
+            ) : null}
             {!fullDocument && !incremental && status.phase === 'translating' && status.total > 0 ? (
               <div
                 className="progress-track"
@@ -407,32 +429,37 @@ export function PopupApp() {
               )}
               {action}
             </button>
-            {!fullDocument || (incremental && status.failed > 0) ? (
-              <>
-                <button
-                  type="button"
-                  className="text-button full-document-action"
-                  title={
-                    settings.supportsFullDocument
-                      ? t('让 AI 一次理解全文，保留跨段上下文；会重新翻译当前已加载的正文。')
-                      : t('仅支持 AI 配置')
-                  }
-                  aria-describedby={
-                    settings.supportsFullDocument ? undefined : 'full-document-ai-only'
-                  }
-                  disabled={busy || saving || !settings.supportsFullDocument}
-                  onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
-                >
-                  <FileText aria-hidden="true" />
-                  {fullDocument ? t('重新全文翻译') : t('全文完整翻译')}
-                </button>
-                {!settings.supportsFullDocument ? (
-                  <p id="full-document-ai-only" className="full-document-note">
-                    {t('仅支持 AI 配置')}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
+            <div
+              className={`translation-shortcuts${showFullDocumentAction ? '' : ' single-action'}`}
+            >
+              {showFullDocumentAction ? (
+                <div className="full-document-entry">
+                  <button
+                    type="button"
+                    className="text-button full-document-action"
+                    title={
+                      settings.supportsFullDocument
+                        ? t('让 AI 一次理解全文，保留跨段上下文；会重新翻译当前已加载的正文。')
+                        : t('仅支持 AI 配置')
+                    }
+                    aria-describedby={
+                      settings.supportsFullDocument ? undefined : 'full-document-ai-only'
+                    }
+                    disabled={busy || saving || !settings.supportsFullDocument}
+                    onClick={() => void run('START_FULL_DOCUMENT_TRANSLATION')}
+                  >
+                    <FileText aria-hidden="true" />
+                    {fullDocument ? t('重新全文翻译') : t('全文完整翻译')}
+                  </button>
+                  {!settings.supportsFullDocument ? (
+                    <p id="full-document-ai-only" className="full-document-note">
+                      {t('仅支持 AI 配置')}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {quickTranslationEntry}
+            </div>
             {status.failed ? (
               <p className="retry-guidance">
                 {fullDocument && !incremental
@@ -454,10 +481,14 @@ export function PopupApp() {
             ) : null}
           </section>
         )}
+        {settings && (!page?.available || excluded || !settings.ready || loadError) ? (
+          <div className="quick-translation-standalone">{quickTranslationEntry}</div>
+        ) : null}
         {commandError ? (
-          <p className="field-error" role="alert">
-            {renderMessage(commandError)}
-          </p>
+          <section className="popup-notice">
+            <CircleAlert aria-hidden="true" />
+            <p role="alert">{renderMessage(commandError)}</p>
+          </section>
         ) : null}
         {settings ? (
           <div className="popup-preferences">

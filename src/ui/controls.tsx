@@ -96,12 +96,15 @@ export function SaveFeedback({ state }: { state?: SaveState }) {
 export function LanguagePicker({
   value,
   onChange,
+  onDraftChange,
   disabled,
   label,
   allowCustom,
 }: {
   value: string;
   onChange: (value: string) => void;
+  /** Live custom input, including invalid drafts; onChange commits only valid values. */
+  onDraftChange?: (value: string) => void;
   disabled?: boolean;
   label: string;
   allowCustom: boolean;
@@ -109,11 +112,16 @@ export function LanguagePicker({
   const [custom, setCustom] = useState(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<UiMessage | ''>('');
+  const previousValue = useRef(value);
   const id = useId();
   useEffect(() => {
+    if (previousValue.current === value) return;
+    previousValue.current = value;
+    // A parent reflecting the current draft must not hide the custom input mid-edit.
+    if (value === draft) return;
     setDraft(value);
     setCustom(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
-  }, [value]);
+  }, [value, draft]);
   function commit() {
     if (!draft.trim()) {
       setError(message('请填写目标语言'));
@@ -132,7 +140,10 @@ export function LanguagePicker({
           const next = event.target.value;
           setCustom(next === '__custom__');
           setError('');
-          if (next !== '__custom__') onChange(next);
+          if (next !== '__custom__') {
+            setDraft(next);
+            onChange(next);
+          }
         }}
       >
         {TRANSLATION_LANGUAGES.map(([id, name]) => (
@@ -155,6 +166,7 @@ export function LanguagePicker({
           onChange={(event) => {
             setDraft(event.target.value);
             setError('');
+            onDraftChange?.(event.target.value);
           }}
           onBlur={commit}
           onKeyDown={(event) => {

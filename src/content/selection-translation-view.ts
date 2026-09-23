@@ -6,7 +6,7 @@ import {
   getUiLocale,
   subscribeUiLanguage,
 } from '../shared/i18n';
-import type { SelectionTranslationResult } from '../shared/messages';
+import type { TextTranslationResult } from '../shared/messages';
 import { translationLanguageLabel } from '../shared/translation-languages';
 import styles from './selection-translation.css?inline';
 
@@ -157,7 +157,7 @@ export class SelectionTranslationView {
     this.position();
   }
 
-  success(result: SelectionTranslationResult): void {
+  success(result: TextTranslationResult): void {
     this.translated = result.text;
     this.targetLanguage = result.targetLanguage;
     this.translatorName = result.translatorName;
