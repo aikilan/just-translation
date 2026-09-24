@@ -74,8 +74,8 @@ export function activeTranslatorEquals(left: ActiveTranslator, right: ActiveTran
 
 export function builtinTranslatorLabel(engine: BuiltinTranslatorId): string {
   return engine === 'google-free'
-    ? t('Google 翻译（非官方免费通道）')
-    : t('Microsoft 翻译（非官方免费通道）');
+    ? t('Google 翻译（免费）')
+    : t('Microsoft 翻译（免费）');
 }
 
 /** Stable service name for compact recipient disclosures and translated selection metadata. */

@@ -88,8 +88,8 @@ export default {
   '翻译通道未返回译文，请重试': 'Le canal n’a renvoyé aucune traduction. Réessayez',
   当前翻译引擎不可用: 'Le moteur de traduction actuel est indisponible',
   翻译引擎: 'Moteur de traduction',
-  'Google 翻译（非官方免费通道）': 'Google Traduction (canal gratuit non officiel)',
-  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (canal gratuit non officiel)',
+  'Google 翻译（免费）': 'Google Traduction (gratuit)',
+  'Microsoft 翻译（免费）': 'Microsoft Translator (gratuit)',
   '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
     'Le texte de la page est envoyé à {{p0}} via un canal gratuit non officiel dont la disponibilité n’est pas garantie.',
   '网页文本会发送到你配置的 AI 服务。':

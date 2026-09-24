@@ -540,8 +540,8 @@ describe('popup reading controls', () => {
     view = await mount(<PopupApp />);
     const engine = view.container.querySelector<HTMLSelectElement>('[aria-label="翻译引擎"]')!;
     expect(Array.from(engine.options, (option) => option.textContent)).toEqual([
-      'Google 翻译（非官方免费通道）',
-      'Microsoft 翻译（非官方免费通道）',
+      'Google 翻译（免费）',
+      'Microsoft 翻译（免费）',
       '默认配置（待配置）',
     ]);
     expect(view.container.textContent).toContain('网页文本会发送给 Google');

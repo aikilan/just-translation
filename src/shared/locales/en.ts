@@ -89,8 +89,8 @@ export default {
   '翻译通道未返回译文，请重试': 'The translation channel returned no translation. Please retry',
   当前翻译引擎不可用: 'The current translation engine is unavailable',
   翻译引擎: 'Translation engine',
-  'Google 翻译（非官方免费通道）': 'Google Translate (unofficial free channel)',
-  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (unofficial free channel)',
+  'Google 翻译（免费）': 'Google Translate (free)',
+  'Microsoft 翻译（免费）': 'Microsoft Translator (free)',
   '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
     'Webpage text is sent to {{p0}} through an unofficial free channel whose availability is not guaranteed.',
   '网页文本会发送到你配置的 AI 服务。': 'Webpage text is sent to your configured AI service.',

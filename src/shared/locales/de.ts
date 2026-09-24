@@ -92,8 +92,8 @@ export default {
     'Der Übersetzungskanal lieferte kein Ergebnis. Versuchen Sie es erneut',
   当前翻译引擎不可用: 'Die aktuelle Übersetzungs-Engine ist nicht verfügbar',
   翻译引擎: 'Übersetzungs-Engine',
-  'Google 翻译（非官方免费通道）': 'Google Übersetzer (inoffizieller kostenloser Kanal)',
-  'Microsoft 翻译（非官方免费通道）': 'Microsoft Translator (inoffizieller kostenloser Kanal)',
+  'Google 翻译（免费）': 'Google Übersetzer (kostenlos)',
+  'Microsoft 翻译（免费）': 'Microsoft Translator (kostenlos)',
   '网页文本会发送给 {{p0}}；这是非官方免费通道，可用性不受保证。':
     'Webseitentext wird über einen inoffiziellen kostenlosen Kanal ohne Verfügbarkeitsgarantie an {{p0}} gesendet.',
   '网页文本会发送到你配置的 AI 服务。':
