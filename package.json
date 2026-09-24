@@ -1,6 +1,6 @@
 {
   "name": "just-translate",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "private": true,
   "description": "A local-first bilingual webpage translator with free Google/Microsoft channels and optional custom AI.",
   "type": "module",
