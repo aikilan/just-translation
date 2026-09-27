@@ -165,8 +165,7 @@ export function OptionsApp() {
           {settings && <InterfaceLanguage value={settings.uiLanguage} onSaved={acceptPublic} />}
           <span>{t('你的 API，你的阅读方式。')}</span>
           <small>
-            {t('版本')}
-            {packageJson.version}
+            {t('版本')} {packageJson.version}
           </small>
         </div>
       </aside>
