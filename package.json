@@ -1,6 +1,6 @@
 {
   "name": "just-translate",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "A local-first bilingual webpage translator with free Google/Microsoft channels and optional custom AI.",
