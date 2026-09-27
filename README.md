@@ -1,5 +1,7 @@
 # 只是翻译
 
+中文 | [English](README.en.md)
+
 一个本地优先的 Chrome / Edge 网页双语翻译扩展。无需 API 配置即可使用 Google 或 Microsoft 免费翻译通道，也支持你自己配置的 OpenAI Chat Completions 或 Anthropic Messages API。扩展不经过开发者中转翻译服务。
 
 ## 翻译引擎
@@ -261,3 +263,9 @@ src/
 
 扩展只在网页 `lang` 声明匹配，或较长文本的本地语言判定同时满足高置信度和明显领先幅度时，
 才跳过已属于目标语言的内容。短文本、混合语言和不确定结果仍会发送给当前翻译引擎，优先避免漏翻。
+
+## 许可证
+
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) 发布。
+
+你可以在 AGPL-3.0 条款下使用、修改和分发本项目；衍生作品（包括以网络服务形式提供的）须以相同协议开源。如需在闭源或商业产品中使用而不承担上述义务，可申请单独的商业授权，请通过 [GitHub Issues](https://github.com/aikilan/just-translation/issues) 联系。
