@@ -101,8 +101,8 @@ export default {
   '仅支持 AI 配置': 'Nur mit einer KI-Konfiguration verfügbar',
   '自定义目标语言仅支持 AI 配置':
     'Benutzerdefinierte Zielsprachen sind nur mit einer KI-Konfiguration verfügbar',
-  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
-    'Übersetzen Sie Webseiten kostenlos mit Google oder Microsoft oder verbinden Sie Ihre eigene KI.',
+  '双语对照翻译网页，无需注册登录。可用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Zweisprachige Webseiten-Übersetzung ohne Konto oder Anmeldung. Kostenlos mit Google oder Microsoft oder eigener KI.',
   请填写目标语言: 'Geben Sie eine Zielsprache ein',
   展示方式无效: 'Ungültiger Anzeigemodus',
   动态翻译设置无效: 'Ungültige Einstellung für dynamische Übersetzung',

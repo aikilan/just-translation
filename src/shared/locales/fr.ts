@@ -97,8 +97,8 @@ export default {
   '仅支持 AI 配置': 'Disponible uniquement avec une configuration IA',
   '自定义目标语言仅支持 AI 配置':
     'Les langues cibles personnalisées sont disponibles uniquement avec une configuration IA',
-  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
-    'Traduisez des pages via les canaux gratuits Google ou Microsoft, ou connectez votre propre IA.',
+  '双语对照翻译网页，无需注册登录。可用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Traduction bilingue des pages web, sans compte ni connexion. Google ou Microsoft gratuits, ou votre propre IA.',
   请填写目标语言: 'Saisissez une langue cible',
   展示方式无效: 'Mode d’affichage invalide',
   动态翻译设置无效: 'Paramètre de traduction dynamique invalide',

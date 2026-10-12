@@ -97,8 +97,8 @@ export default {
   '仅支持 AI 配置': 'Available only with an AI configuration',
   '自定义目标语言仅支持 AI 配置':
     'Custom target languages are available only with an AI configuration',
-  '无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
-    'Translate webpages with free Google or Microsoft channels, or connect your own AI.',
+  '双语对照翻译网页，无需注册登录。可用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。':
+    'Bilingual web page translation with no account or login. Use free Google or Microsoft translation, or connect your own AI.',
   请填写目标语言: 'Enter a target language',
   展示方式无效: 'Invalid display mode',
   动态翻译设置无效: 'Invalid dynamic translation setting',

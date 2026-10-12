@@ -16,7 +16,9 @@ export function nativeLocaleMessages(): Record<string, Record<string, { message:
         extensionName: { message: catalog['只是翻译'] },
         extensionDescription: {
           message:
-            catalog['无需 API 配置即可使用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。'],
+            catalog[
+              '双语对照翻译网页，无需注册登录。可用 Google 或 Microsoft 免费翻译，也可连接自己的 AI。'
+            ],
         },
         translateCommand: { message: catalog['翻译或恢复当前网页'] },
       },
