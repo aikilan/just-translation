@@ -25,10 +25,10 @@ FEATURES
 • Viewport first: what you see is translated first, then the rest of the page. New content is translated as it loads.
 • Selection translation: select text, right-click, and the result appears next to it.
 • Quick translate: paste text and translate it in a popup.
-• Bring your own AI: OpenAI, Anthropic, Gemini, Grok, Kimi, GLM, Xiaomi MiMo, DeepSeek, Qwen or any compatible endpoint, including local servers.
+• Bring your own AI: connect any AI service with your own API key, or a model running on your computer.
 • Full-document translation with your AI keeps terminology consistent across the whole article.
 • Site rules: auto-translate the sites you choose, or exclude sites you never want translated.
-• Alt + T shortcut, light and dark themes. Interface in English, Arabic, Simplified Chinese, French and German.
+• Alt + T shortcut, light and dark themes, and a localized interface with right-to-left support for Arabic.
 
 PRIVACY
 Your API keys and settings stay in your browser. Page text is only sent to the translation service you selected, and never silently resent to another one if it fails. The free Google and Microsoft options use consumer web endpoints rather than the official cloud APIs, so they may be rate-limited or change. Avoid translating sensitive pages, or add them to the exclusion list.
@@ -42,7 +42,7 @@ Source code: https://github.com/aikilan/just-translation
 2. `2-popup.png`: Translate, stop or restore from the toolbar popup.
 3. `3-selection.png`: Translate selected text with a right-click.
 4. `4-quick-translate.png`: Quick translate for pasted text.
-5. `5-settings.png`: Connect your own AI, such as Xiaomi MiMo.
+5. `5-settings.png`: Connect your own AI with your API key.
 
 ## Privacy practices tab
 

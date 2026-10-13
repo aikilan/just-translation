@@ -18,6 +18,10 @@ Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrom
 | 阿拉伯语文案                  | `listing.ar.md`                                                       |
 | 隐私政策 URL                  | `https://github.com/aikilan/just-translation/blob/main/PRIVACY.en.md` |
 
+## 文案注意事项
+
+描述中不要罗列服务商、品牌或语言名称。2026-10-13 的 0.3.39 草稿因描述中列出 OpenAI、Anthropic、Gemini 等 AI 服务商，被以「垃圾内容和商店中的排名：说明中有过多关键字」拒绝（参考 ID：Yellow Argon）。
+
 ## 操作步骤
 
 1. **首次使用**需注册开发者账号并支付一次性注册费，验证联系邮箱。
