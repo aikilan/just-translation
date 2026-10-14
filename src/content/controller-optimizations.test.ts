@@ -1774,3 +1774,154 @@ describe('page changes while a dynamic pass prepares', () => {
     );
   });
 });
+
+describe('host rewrites of translated text', () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Frameworks keep editing their own Text node, even after we moved it into a source wrapper. */
+  function rewriteHostText(paragraph: Element, text: string): void {
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.parentElement?.closest('[data-justranslate-translation]')
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    (walker.nextNode() as Text).data = text;
+  }
+
+  it('retranslates a paragraph rewritten after its result was shown in the running pass', async () => {
+    document.body.innerHTML =
+      '<main><p id="first">First visible paragraph.</p><p id="later">Later offscreen paragraph.</p></main>';
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return new DOMRect(0, this.id === 'later' ? 3000 : 10, 300, 20);
+    });
+    let releaseLater: (() => void) | undefined;
+    const sent: string[] = [];
+    installRuntime((request) => {
+      if (request.type !== 'TRANSLATE_BATCH') return;
+      sent.push(...request.segments.map((segment) => segment.text));
+      if (!request.segments.some((segment) => segment.text.startsWith('Later'))) return;
+      // Holds the pass open while the host edits a paragraph that is already translated.
+      return new Promise((resolve) => (releaseLater = () => resolve(successful(request))));
+    });
+    vi.useFakeTimers();
+    const instance = controller();
+    const work = instance.start();
+    await vi.advanceTimersByTimeAsync(100);
+    const first = document.querySelector('#first')!;
+    expect(first.textContent).toBe('First visible paragraph.译文 First visible paragraph.');
+    expect(releaseLater).toBeDefined();
+
+    rewriteHostText(first, 'Rewritten visible paragraph.');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent).toContain('Rewritten visible paragraph.');
+    expect(first.querySelector('[data-justranslate-translation]')?.textContent).toBe(
+      '译文 Rewritten visible paragraph.',
+    );
+    releaseLater!();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await work;
+    expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 2, total: 2 });
+  });
+
+  it('renders a rediscovered source whose earlier slot was skipped while the queue was blocked', async () => {
+    document.body.innerHTML = `<main>${Array.from({ length: 5 }, (_, i) => `<p id="p${i}">Queued paragraph number ${i}.</p>`).join('')}</main>`;
+    const edited = document.querySelector('#p4')!;
+    let releaseFirstBatch: (() => void) | undefined;
+    let releaseLookup: (() => void) | undefined;
+    installRuntime((request) => {
+      if (
+        request.type === 'RESOLVE_TRANSLATION_CANDIDATES' &&
+        request.candidates.some((candidate) => candidate.text === 'Queued paragraph number 4.')
+      ) {
+        // The page edits the fifth paragraph while its first lookup is in flight.
+        return new Promise((resolve) => {
+          releaseLookup = () =>
+            resolve({
+              ok: true,
+              data: {
+                skippedIds: [],
+                cachedTranslations: {},
+                missIds: request.candidates.map((candidate) => candidate.id),
+              },
+            });
+        });
+      }
+      if (
+        request.type === 'TRANSLATE_BATCH' &&
+        request.segments.some((segment) => segment.text === 'Queued paragraph number 0.')
+      ) {
+        // The first batch keeps every later slot of the lane uncommitted.
+        return new Promise((resolve) => (releaseFirstBatch = () => resolve(successful(request))));
+      }
+    });
+    vi.useFakeTimers();
+    const instance = controller();
+    const work = instance.start();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(releaseFirstBatch).toBeDefined();
+    expect(releaseLookup).toBeDefined();
+
+    rewriteHostText(edited, 'Edited paragraph number 4.');
+    releaseLookup!();
+    // The stale lookup skips the old slot; the dynamic rescan then finds the edited text.
+    await vi.advanceTimersByTimeAsync(1_000);
+    releaseFirstBatch!();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await work;
+    expect(edited.querySelector('[data-justranslate-translation]')?.textContent).toBe(
+      '译文 Edited paragraph number 4.',
+    );
+    expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 5, total: 5 });
+  });
+
+  it('keeps later results flowing when a queued source is rewritten before its request', async () => {
+    document.body.innerHTML = `<main><p id="long">${'Long first paragraph. '.repeat(54)}</p><p id="rewritten">Queued paragraph to rewrite.</p><p id="after">Queued paragraph after it.</p></main>`;
+    let releaseLong: (() => void) | undefined;
+    installRuntime((request) => {
+      if (request.type === 'BEGIN_TRANSLATION_SESSION')
+        return Promise.resolve({
+          ok: true,
+          data: {
+            configurationId: 'config-one',
+            context: {
+              translator: SETTINGS.activeTranslator,
+              targetLanguage: SETTINGS.targetLanguage,
+            },
+            batchProfiles: {
+              visible: { maxCharacters: 1_200, maxItems: 4 },
+              readAhead: { maxCharacters: 1_800, maxItems: 4 },
+              background: { maxCharacters: 2_400, maxItems: 4 },
+            },
+            // One request at a time keeps the short paragraphs queued behind the long one.
+            maxConcurrency: 1,
+          },
+        });
+      if (
+        request.type === 'TRANSLATE_BATCH' &&
+        request.segments.some((segment) => segment.text.startsWith('Long'))
+      )
+        return new Promise((resolve) => (releaseLong = () => resolve(successful(request))));
+    });
+    vi.useFakeTimers();
+    const instance = controller();
+    const work = instance.start();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(releaseLong).toBeDefined();
+
+    rewriteHostText(document.querySelector('#rewritten')!, 'Rewritten queued paragraph.');
+    await vi.advanceTimersByTimeAsync(0);
+    releaseLong!();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await work;
+    expect(document.querySelector('#after [data-justranslate-translation]')?.textContent).toBe(
+      '译文 Queued paragraph after it.',
+    );
+    expect(document.querySelector('#rewritten [data-justranslate-translation]')?.textContent).toBe(
+      '译文 Rewritten queued paragraph.',
+    );
+    expect(instance.getStatus()).toMatchObject({ phase: 'complete', translated: 3, total: 3 });
+  });
+});

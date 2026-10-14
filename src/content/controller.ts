@@ -142,6 +142,8 @@ interface OrderedRenderSlot {
   element: HTMLElement;
   record?: TranslationRecord;
   skipped: boolean;
+  /** The flush has moved past this slot; a later record for its element needs a new one. */
+  committed?: boolean;
 }
 
 interface OrderedRenderQueue {
@@ -1179,22 +1181,18 @@ export class TranslationController {
   private flushOrderedRenderLane(queue: OrderedRenderQueue, tasks: RenderTasks): void {
     while (queue.nextIndex < queue.slots.length) {
       const slot = queue.slots[queue.nextIndex];
-      if (slot.skipped) {
-        queue.nextIndex += 1;
-        continue;
-      }
       const record = slot.record;
-      if (!record) break;
-      if (this.records.get(record.element) !== record) {
-        queue.nextIndex += 1;
-        continue;
+      if (!slot.skipped) {
+        if (!record) break;
+        if (this.records.get(record.element) === record) {
+          if (!record.outcome) break;
+          const outcome = record.outcome;
+          record.outcome = undefined;
+          this.enqueueRecordRender(record, outcome, tasks);
+        }
       }
-      if (!record.outcome) break;
-
-      const outcome = record.outcome;
-      record.outcome = undefined;
+      slot.committed = true;
       queue.nextIndex += 1;
-      this.enqueueRecordRender(record, outcome, tasks);
     }
   }
 
@@ -1278,13 +1276,14 @@ export class TranslationController {
     return queue;
   }
 
-  /** Inserts dynamic nodes into the uncommitted suffix without reordering already shown content. */
+  /** Inserts dynamic nodes into the uncommitted suffix without reordering already shown content.
+   * A source the page rewrote after its slot was committed gets a new slot in that suffix. */
   private ensureOrderedRenderSlot(
     queue: ReadingWindowRenderCoordinator,
     element: HTMLElement,
   ): OrderedRenderSlot {
     const existing = queue.slotByElement.get(element);
-    if (existing) return existing;
+    if (existing && !existing.committed) return existing;
     const lane = queue.lanes[getElementTranslationPriority(element)];
     const slot: OrderedRenderSlot = {
       element,
@@ -1381,6 +1380,7 @@ export class TranslationController {
         }
         const record = this.createRecord(element, group.sourceText);
         slot.record = record;
+        slot.skipped = false;
       }
     }
     this.consumeObservedMutations();
@@ -1544,6 +1544,7 @@ export class TranslationController {
         }
         const record = this.records.get(element) ?? this.createRecord(element, group.sourceText);
         slot.record = record;
+        slot.skipped = false;
         records.push(record);
         if (cached !== undefined) {
           // Cache hits are already complete: bypass network ordering, but retain guarded rendering.
@@ -1681,6 +1682,7 @@ export class TranslationController {
       if (translatedText === undefined && failedError === undefined && !activeGroup) continue;
       const record = this.createRecord(member, group.sourceText);
       slot.record = record;
+      slot.skipped = false;
       // A late duplicate shares settled parts, but keeps its own DOM retry lifecycle.
       if (translatedText === undefined) record.checkpoint = activeGroup?.checkpoint;
       if (translatedText !== undefined) {
@@ -2216,6 +2218,9 @@ export class TranslationController {
       )
         continue;
       if (group.records.some((record) => record.element.isConnected)) pass.markStale();
+      // Without its group no outcome can reach these records, and their ordered render slots
+      // would hold every later result. The rescan scheduled for the edit creates fresh ones.
+      for (const record of group.records) this.discardRecord(record);
       pass.activeGroups.delete(id);
       pass.groupsBySourceText.delete(group.sourceText);
       pass.expectedSegmentsByGroup.delete(id);
