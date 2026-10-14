@@ -1702,3 +1702,75 @@ it('tracks host edits and removal of a label Text node without changing its pare
   expect(instance.getStatus().total).toBe(0);
   expect(button.querySelector('svg')).not.toBeNull();
 });
+
+describe('page changes while a dynamic pass prepares', () => {
+  /** Starts a translated page, then runs `edit` as page code while the next dynamic pass waits
+   * for its settings, i.e. before that pass has reconnected its page observer. */
+  async function editDuringDynamicPreparation(edit: () => void) {
+    let pending: (() => void) | undefined;
+    installRuntime((request) => {
+      if (request.type !== 'GET_PUBLIC_SETTINGS' || !pending) return;
+      const run = pending;
+      pending = undefined;
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          run();
+          resolve({ ok: true, data: SETTINGS });
+        }, 0),
+      );
+    });
+    vi.useFakeTimers();
+    const instance = controller();
+    const work = instance.start();
+    await vi.advanceTimersByTimeAsync(50);
+    await work;
+    pending = edit;
+    // A host update elsewhere schedules the dynamic pass.
+    document.querySelector('#news')!.textContent = 'Updated news paragraph.';
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(pending).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector('#news')!.textContent).toBe(
+      'Updated news paragraph.译文 Updated news paragraph.',
+    );
+    return instance;
+  }
+  afterEach(() => {
+    document.head.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('applies a label removal made before the observer reconnects', async () => {
+    document.body.innerHTML =
+      '<main><p id="news">First news paragraph.</p><div><button>创建班级<svg></svg></button></div></main>';
+    const button = document.querySelector('button')!;
+    const label = button.firstChild as Text;
+    const instance = await editDuringDynamicPreparation(() => {
+      expect(button.textContent).toBe('译文 创建班级');
+      button.removeChild(label);
+    });
+    expect(button.querySelector('[data-justranslate-translation]')).toBeNull();
+    expect(button.textContent).toBe('');
+    expect(instance.getStatus()).toMatchObject({ translated: 1, total: 1 });
+  });
+
+  it('discovers content revealed by a presentation event before the listener returns', async () => {
+    document.head.innerHTML = '<style>[data-state="closed"] {display:none}</style>';
+    document.body.innerHTML =
+      '<main><p id="news">First news paragraph.</p><section data-state="closed"><p id="late">Revealed section paragraph.</p></section></main>';
+    await editDuringDynamicPreparation(() => {
+      (document.querySelector('style')!.sheet!.cssRules[0] as CSSStyleRule).style.display = 'block';
+      // jsdom refreshes computed styles only after a DOM change; see the style-driven tests.
+      const marker = document.createComment('');
+      document.append(marker);
+      marker.remove();
+      document
+        .querySelector('section')!
+        .dispatchEvent(new Event('transitionend', { bubbles: true }));
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(document.querySelector('#late [data-justranslate-translation]')?.textContent).toBe(
+      '译文 Revealed section paragraph.',
+    );
+  });
+});

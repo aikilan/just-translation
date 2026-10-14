@@ -39,6 +39,7 @@ import {
   discoverTranslatableElements,
   getOriginalSourceText,
   getElementDeclaredLanguage,
+  isReadingRunMutation,
   getElementSourceText,
   renderTranslation,
   prepareTranslationRender,
@@ -64,6 +65,14 @@ const PREFLIGHT_MESSAGE_TIMEOUT_MS = 5_000;
 const CANDIDATE_CHUNK_MAX_ITEMS = 24;
 const CANDIDATE_CHUNK_MAX_CHARACTERS = 12_000;
 const MAX_PENDING_DISCOVERY_SLICES = 3;
+const PAGE_OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  characterDataOldValue: true,
+  attributes: true,
+};
+const PRESENTATION_EVENTS = ['transitionend', 'animationend', 'toggle'];
 const TRANSLATION_PRIORITIES: readonly TranslationPriority[] = [
   'visible',
   'readAhead',
@@ -205,14 +214,8 @@ export class TranslationController {
   private readonly sessionInfos = new Map<string, TranslationSessionInfo>();
   private readonly sessionCacheWrites = new Map<string, Set<Promise<void>>>();
   private observer: MutationObserver | null = null;
-  /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
-  private readonly onPresentationChanged = (event: Event): void => {
-    const element = event.target;
-    if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
-      return;
-    this.addNearestDynamicRoot(element);
-    this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
-  };
+  private readonly onPresentationChanged = (event: Event): void =>
+    this.notePresentationChange(event.target);
   private observerTimer: number | undefined;
   private readonly dynamicRoots = new Map<
     HTMLElement,
@@ -355,6 +358,11 @@ export class TranslationController {
     expectedTranslator?: ActiveTranslator,
   ): Promise<void> {
     if (this.hasActiveOperation()) return;
+    // disconnect() would drop records not yet delivered.
+    this.consumeObservedMutations();
+    // Our own anchor writes while preparing must not look like page changes, so the page observer
+    // stays off until preflight ends. Record that window instead and replay what the page changed.
+    const missedChanges = this.recordMissedPageChanges();
     this.disconnectObserver(scopeRoots === undefined);
     this.purgeDisconnectedRecords();
     const sessionId = crypto.randomUUID();
@@ -444,7 +452,10 @@ export class TranslationController {
       this.dynamicContentEnabled = settings.translateDynamicContent;
       this.status.displayMode = settings.displayMode;
       setDocumentDisplayMode(settings.displayMode);
-      if (this.dynamicContentEnabled) this.observeDynamicContent();
+      if (this.dynamicContentEnabled) {
+        this.observeDynamicContent();
+        missedChanges.replay();
+      }
       let hasStaleSource = false;
       let lastError: UiMessage | undefined;
       for (let pass = 0; pass < MAX_STALE_RETRANSLATION_PASSES; pass += 1) {
@@ -481,6 +492,7 @@ export class TranslationController {
       this.status.phase = 'error';
       this.status.error = message;
     } finally {
+      missedChanges.stop();
       preflightObserver.disconnect();
       if (sessionStarted) void this.closeSessionAfterCacheWrites(sessionId);
       if (!this.hasActiveOperation()) this.metrics.finish();
@@ -2019,15 +2031,47 @@ export class TranslationController {
   private observeDynamicContent(): void {
     this.observer?.disconnect();
     this.observer = new MutationObserver((mutations) => this.handlePageMutations(mutations));
-    this.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      characterDataOldValue: true,
-      attributes: true,
-    });
-    for (const event of ['transitionend', 'animationend', 'toggle'])
+    this.observer.observe(document.documentElement, PAGE_OBSERVER_OPTIONS);
+    for (const event of PRESENTATION_EVENTS)
       document.addEventListener(event, this.onPresentationChanged, true);
+  }
+
+  /** Collects page changes while the page observer is off; replay hands them to the live path. */
+  private recordMissedPageChanges(): { replay: () => void; stop: () => void } {
+    const mutations: MutationRecord[] = [];
+    const presentationTargets: EventTarget[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(document.documentElement, PAGE_OBSERVER_OPTIONS);
+    const onPresentationChanged = (event: Event) => {
+      if (event.target) presentationTargets.push(event.target);
+    };
+    for (const event of PRESENTATION_EVENTS)
+      document.addEventListener(event, onPresentationChanged, true);
+    const stop = () => {
+      mutations.push(...observer.takeRecords());
+      observer.disconnect();
+      for (const event of PRESENTATION_EVENTS)
+        document.removeEventListener(event, onPresentationChanged, true);
+    };
+    return {
+      stop,
+      replay: () => {
+        stop();
+        const pageMutations = mutations.filter((mutation) => !isReadingRunMutation(mutation));
+        if (pageMutations.length > 0) this.handlePageMutations(pageMutations);
+        for (const target of presentationTargets) this.notePresentationChange(target);
+        mutations.length = 0;
+        presentationTargets.length = 0;
+      },
+    };
+  }
+
+  /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
+  private notePresentationChange(element: EventTarget | null): void {
+    if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
+      return;
+    this.addNearestDynamicRoot(element);
+    this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
   }
 
   /** Drain without dropping page-authored changes sharing a task with our rendering. */
@@ -2237,7 +2281,7 @@ export class TranslationController {
   private disconnectObserver(clearPending = true): void {
     this.observer?.disconnect();
     this.observer = null;
-    for (const event of ['transitionend', 'animationend', 'toggle'])
+    for (const event of PRESENTATION_EVENTS)
       document.removeEventListener(event, this.onPresentationChanged, true);
     window.clearTimeout(this.observerTimer);
     if (clearPending) this.dynamicRoots.clear();

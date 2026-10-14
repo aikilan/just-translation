@@ -7,6 +7,7 @@ import {
   collectOriginalReadingUnits,
   discoverTranslatableElements,
   getElementSourceText,
+  isReadingRunMutation,
   renderTranslationError,
   renderTranslationPending,
   renderTranslation,
@@ -140,6 +141,41 @@ describe('DOM translation rendering', () => {
     restoreDocument();
     expect(document.body.innerHTML).toBe(original);
     expect(document.querySelector('a')).toBe(link);
+  });
+
+  it('tells reading-run anchor bookkeeping apart from page edits in mutation records', () => {
+    document.body.innerHTML =
+      '<main><div id="mixed">Opening readable prose.<p>Nested independent paragraph.</p>Closing readable prose.</div><button>保存<svg></svg></button></main>';
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const take = () => [...records.splice(0), ...observer.takeRecords()];
+    try {
+      collectTranslatableElements(document.body, { isVisible: () => true });
+      const wrapping = take();
+      expect(wrapping.length).toBeGreaterThan(0);
+      expect(wrapping.every(isReadingRunMutation)).toBe(true);
+
+      const mixed = document.querySelector('#mixed')!;
+      mixed.append('Appended host prose.');
+      mixed.querySelector('p')!.remove();
+      // A host removing a filled anchor is a page change, unlike our unwrap of an emptied one.
+      mixed.querySelector('[data-justranslate-reading-run]')!.remove();
+      // Label anchors sit beside the host's Text node instead of wrapping it.
+      [...document.querySelector('button')!.childNodes]
+        .find((node) => node.nodeType === 3)!
+        .remove();
+      const edits = take();
+      expect(edits).toHaveLength(4);
+      expect(edits.some(isReadingRunMutation)).toBe(false);
+
+      restoreDocument();
+      const unwrapping = take();
+      expect(unwrapping.length).toBeGreaterThan(0);
+      expect(unwrapping.every(isReadingRunMutation)).toBe(true);
+    } finally {
+      observer.disconnect();
+    }
   });
 
   it('never chooses hidden or protected fragments as the dominant visible typography', () => {
