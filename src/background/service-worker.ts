@@ -228,7 +228,7 @@ async function handleRuntimeRequest(
           data: await translationTasks.translateQuick(
             sender,
             request.requestId,
-            request.text,
+            request.slices,
             request.translator,
             request.targetLanguage,
           ),

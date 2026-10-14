@@ -203,20 +203,21 @@ describe('background document lifecycle', () => {
 
   it('routes quick text through the requested engine and language without persisting preferences', async () => {
     activeTranslator = { kind: 'builtin', engine: 'google-free' };
-    fetchMock.mockResolvedValue(completionResponse([{ id: 'quick', text: 'quick result' }]));
+    fetchMock.mockResolvedValue(completionResponse([{ id: 's0:0', text: 'quick result' }]));
     const storageWrite = vi.spyOn(chrome.storage.local, 'set');
     const writes = storageWrite.mock.calls.length;
     const response = await send({
       type: 'TRANSLATE_QUICK_TEXT',
       requestId: 'quick-1',
-      text: 'Typed text',
+      slices: [{ id: 's0', text: 'Typed text' }],
       translator: { kind: 'ai', profileId: activeProfile.id },
       targetLanguage: 'Japanese',
     });
     expect(response).toMatchObject({
       ok: true,
       data: {
-        text: 'quick result',
+        translations: { s0: 'quick result' },
+        failures: {},
         targetLanguage: 'Japanese',
         translatorName: activeProfile.name,
       },
@@ -234,7 +235,7 @@ describe('background document lifecycle', () => {
     const work = send({
       type: 'TRANSLATE_QUICK_TEXT',
       requestId: 'cancel-quick',
-      text: 'Typed text',
+      slices: [{ id: 's0', text: 'Typed text' }],
       translator: activeTranslator,
       targetLanguage: 'English',
     });
@@ -382,7 +383,7 @@ describe('background document lifecycle', () => {
   });
 
   it('executes selection requests through the real queue without creating page sessions', async () => {
-    fetchMock.mockResolvedValue(completionResponse([{ id: 'selection', text: '选区译文' }]));
+    fetchMock.mockResolvedValue(completionResponse([{ id: 's0:0', text: '选区译文' }]));
     const response = await send({
       type: 'TRANSLATE_SELECTION',
       requestId: 'selected',
@@ -403,7 +404,7 @@ describe('background document lifecycle', () => {
       messages: { content: string }[];
     };
     expect(JSON.parse(body.messages[1].content)).toEqual({
-      segments: [{ id: 'selection', group: 'selection', part: 0, text: 'Only this paragraph' }],
+      segments: [{ id: 's0:0', group: 's0', part: 0, text: 'Only this paragraph' }],
     });
   });
 

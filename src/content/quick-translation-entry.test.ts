@@ -6,6 +6,7 @@ const actions = vi.hoisted(() => ({
   close: vi.fn(),
   create: vi.fn(),
   language: vi.fn(),
+  progress: vi.fn(),
 }));
 vi.mock('./quick-translation-dialog', () => ({
   QuickTranslationDialog: class {
@@ -14,16 +15,29 @@ vi.mock('./quick-translation-dialog', () => ({
     }
     open = actions.open;
     close = actions.close;
+    receiveProgress = actions.progress;
   },
 }));
 vi.mock('./ui-language', () => ({ initializeContentLanguage: actions.language }));
 let listeners: MockInstance<typeof window.addEventListener>;
+let onMessage: (event: unknown, sender: chrome.runtime.MessageSender) => void;
 beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
   listeners = vi.spyOn(window, 'addEventListener');
+  vi.stubGlobal('chrome', {
+    runtime: {
+      id: 'extension',
+      onMessage: {
+        addListener: (listener: typeof onMessage) => {
+          onMessage = listener;
+        },
+      },
+    },
+  });
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const [type, listener, options] of listeners.mock.calls)
     window.removeEventListener(type, listener, options);
   vi.restoreAllMocks();
@@ -49,4 +63,17 @@ it('returns opening failures to the popup and allows another attempt', async () 
   expect(openQuickTranslation()).toEqual({ ok: false, error: { text: 'Inactive document' } });
   expect(openQuickTranslation()).toEqual({ ok: true, data: undefined });
   expect(actions.create).toHaveBeenCalledOnce();
+});
+
+it('forwards progress only from the extension background to the dialog', async () => {
+  const { openQuickTranslation } = await import('./quick-translation-entry');
+  openQuickTranslation();
+  const event = { type: 'QUICK_TRANSLATION_PROGRESS', requestId: '1', translations: { s0: '译' } };
+  onMessage(event, { id: 'extension' });
+  expect(actions.progress).toHaveBeenCalledWith(event);
+  // Another content script shares the extension ID but always has a sender tab.
+  onMessage(event, { id: 'extension', tab: { id: 3 } as chrome.tabs.Tab });
+  onMessage({ ...event, translations: 'bad' }, { id: 'extension' });
+  onMessage({ type: 'GET_PAGE_STATUS' }, { id: 'extension' });
+  expect(actions.progress).toHaveBeenCalledOnce();
 });

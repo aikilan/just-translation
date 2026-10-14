@@ -591,6 +591,11 @@ export default {
   '翻译本地 PDF': 'Traduire un PDF local',
   '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
     '{{p0}} pages sur {{p1}} traduites ; les pages atteintes en faisant défiler seront traduites ensuite',
+  快捷翻译输入无效: 'Saisie de traduction rapide non valide',
+  '翻译中… {{p0}} / {{p1}}': 'Traduction… {{p0}} / {{p1}}',
+  '{{p0}} 段未能翻译，已保留原文。':
+    '{{p0}} partie(s) n’ont pas pu être traduites ; le texte d’origine est conservé.',
+  重试失败部分: 'Réessayer les parties en échec',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} tentatives',
   translatedCount: '{{translated}} / {{count}} paragraphes traduits',

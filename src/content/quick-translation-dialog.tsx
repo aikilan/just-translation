@@ -15,6 +15,7 @@ import {
 import { getUiLocale, renderMessage, subscribeUiLanguage, t } from '../shared/i18n';
 import { LanguagePicker } from '../ui/controls';
 import { TranslatorSelect } from '../ui/translator-select';
+import type { QuickTranslationProgress } from '../shared/messages';
 import { QuickTranslationController } from './quick-translation-controller';
 import { QuickImageInput } from './quick-image-input';
 import styles from './quick-translation.css?inline';
@@ -65,6 +66,9 @@ export class QuickTranslationDialog {
   }
   close(): void {
     this.model.close();
+  }
+  receiveProgress(event: QuickTranslationProgress): void {
+    this.model.receiveProgress(event);
   }
   destroy(): void {
     this.model.close();
@@ -197,7 +201,12 @@ function QuickTranslationApp({
             ) : null}
           </div>
           <div className="quick-output" aria-live="polite" aria-busy={pending}>
-            {pending ? (
+            {pending && state.partial ? (
+              // Finished slices are readable while the rest of the text is still in flight.
+              <div className="quick-result" data-quick-result dir="auto" tabIndex={0}>
+                {state.partial}
+              </div>
+            ) : pending ? (
               <div className="quick-pending">
                 <LoaderCircle className="spin" aria-hidden="true" />
                 {t('翻译中…')}
@@ -228,9 +237,36 @@ function QuickTranslationApp({
               <span className="quick-placeholder">{t('译文将显示在这里')}</span>
             )}
           </div>
+          {state.phase === 'success' && state.incomplete ? (
+            <div className="quick-incomplete" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <div>
+                <p>{t('{{p0}} 段未能翻译，已保留原文。', { p0: state.incomplete.failed })}</p>
+                <small>{renderMessage(state.incomplete.error)}</small>
+              </div>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => void model.retryFailed()}
+              >
+                <RotateCcw aria-hidden="true" />
+                {t('重试失败部分')}
+              </button>
+            </div>
+          ) : null}
           <div className="quick-pane-footer">
-            <small className="quick-success">
-              {state.phase === 'success' && state.result?.text ? t('翻译完成') : ''}
+            <small
+              className={pending ? 'quick-progress' : 'quick-success'}
+              role={pending ? 'status' : undefined}
+            >
+              {pending && state.progress && state.progress.total > 1
+                ? t('翻译中… {{p0}} / {{p1}}', {
+                    p0: state.progress.done,
+                    p1: state.progress.total,
+                  })
+                : state.phase === 'success' && state.result?.text && !state.incomplete
+                  ? t('翻译完成')
+                  : ''}
             </small>
             <button
               className="text-button"

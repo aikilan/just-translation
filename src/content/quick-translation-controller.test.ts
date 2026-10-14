@@ -15,6 +15,24 @@ const result = {
   targetLanguage: 'Simplified Chinese',
   translatorName: 'Google',
 };
+type QuickTextRequest = Extract<RuntimeRequest, { type: 'TRANSLATE_QUICK_TEXT' }>;
+/** The background answers per slice; a single slice reads like the old one-shot result. */
+function sliceResult(
+  request: QuickTextRequest,
+  text: (source: string) => string = () => 'translated',
+) {
+  return {
+    ok: true as const,
+    data: {
+      translations: Object.fromEntries(request.slices.map((slice) => [slice.id, text(slice.text)])),
+      failures: {},
+      targetLanguage: result.targetLanguage,
+      translatorName: result.translatorName,
+    },
+  };
+}
+const fixed = (request: RuntimeRequest, text: string) =>
+  sliceResult(request as QuickTextRequest, () => text);
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -33,7 +51,9 @@ beforeEach(() => {
     Promise.resolve(
       request.type === 'GET_PUBLIC_SETTINGS'
         ? { ok: true, data: settings }
-        : { ok: true, data: result },
+        : request.type === 'TRANSLATE_QUICK_TEXT'
+          ? sliceResult(request)
+          : { ok: true, data: undefined },
     ),
   );
   clipboard = {
@@ -58,7 +78,7 @@ describe('quick translation state and ownership', () => {
     const firstRequest = send.mock.calls
       .map(([request]) => request)
       .filter((request) => request.type === 'TRANSLATE_QUICK_TEXT')
-      .find((request) => request.text === 'first');
+      .find((request) => request.slices[0].text === 'first');
     expect(firstRequest).toBeDefined();
     expect(model.getSnapshot().phase).toBe('loading');
     model.close();
@@ -77,7 +97,7 @@ describe('quick translation state and ownership', () => {
     expect(requests.every((request) => Boolean(request.requestId))).toBe(true);
     expect(new Set(requests.map((request) => request.requestId)).size).toBe(3);
     expect(reopened.getSnapshot().phase).toBe('success');
-    pending.resolve({ ok: true, data: { ...result, text: 'stale result' } });
+    pending.resolve(fixed(firstRequest!, 'stale result'));
     await first;
     expect(model.getSnapshot().result).toBeUndefined();
     expect(reopened.getSnapshot().result).toEqual(result);
@@ -99,12 +119,16 @@ describe('quick translation state and ownership', () => {
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({
         type: 'TRANSLATE_QUICK_TEXT',
-        text: '  First\nSecond  ',
+        slices: [{ id: 's0', text: 'First\nSecond' }],
         translator: settings.activeTranslator,
         targetLanguage: settings.targetLanguage,
       }),
     );
-    expect(model.getSnapshot()).toMatchObject({ phase: 'success', result });
+    // Whitespace around the text never reaches the provider and is restored in the result.
+    expect(model.getSnapshot()).toMatchObject({
+      phase: 'success',
+      result: { ...result, text: '  translated  ' },
+    });
   });
 
   it('locks before awaiting, cancels on close, and ignores a late result after reopen', async () => {
@@ -115,7 +139,7 @@ describe('quick translation state and ownership', () => {
       request.type === 'GET_PUBLIC_SETTINGS'
         ? Promise.resolve({ ok: true, data: settings })
         : request.type === 'TRANSLATE_QUICK_TEXT'
-          ? request.text === 'first'
+          ? request.slices[0].text === 'first'
             ? first.promise
             : second.promise
           : Promise.resolve({ ok: true, data: undefined }),
@@ -134,9 +158,13 @@ describe('quick translation state and ownership', () => {
     expect(model.getSnapshot().source).toBe('first');
     model.setSource('second');
     const current = model.translate();
-    second.resolve({ ok: true, data: { ...result, text: 'new result' } });
+    const request = (text: string) =>
+      send.mock.calls
+        .map(([sent]) => sent)
+        .find((sent) => sent.type === 'TRANSLATE_QUICK_TEXT' && sent.slices[0].text === text)!;
+    second.resolve(fixed(request('second'), 'new result'));
     await current;
-    first.resolve({ ok: true, data: { ...result, text: 'stale result' } });
+    first.resolve(fixed(request('first'), 'stale result'));
     await old;
     expect(model.getSnapshot().result?.text).toBe('new result');
   });
@@ -261,6 +289,135 @@ describe('quick translation state and ownership', () => {
       pasting: false,
       copying: false,
       source: 'new text',
+    });
+  });
+
+  describe('slices', () => {
+    const paragraphs = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+    const requests = () =>
+      send.mock.calls
+        .map(([request]) => request)
+        .filter((request): request is QuickTextRequest => request.type === 'TRANSLATE_QUICK_TEXT');
+
+    it('shows finished slices in reading order while the rest is still translating', async () => {
+      await model.open();
+      model.setSource(paragraphs);
+      const pending = deferred<Result<unknown>>();
+      send.mockReturnValueOnce(pending.promise);
+      const work = model.translate();
+      const [request] = requests();
+      expect(request.slices.map((slice) => slice.id)).toEqual(['s0', 's1', 's2']);
+      expect(model.getSnapshot().progress).toEqual({ done: 0, total: 3 });
+
+      // A later slice alone is not shown before the earlier one arrives.
+      model.receiveProgress({
+        type: 'QUICK_TRANSLATION_PROGRESS',
+        requestId: request.requestId,
+        translations: { s1: '第二段。' },
+      });
+      expect(model.getSnapshot()).toMatchObject({ partial: undefined, progress: { done: 1 } });
+      model.receiveProgress({
+        type: 'QUICK_TRANSLATION_PROGRESS',
+        requestId: 'another-request',
+        translations: { s0: '错误的请求' },
+      });
+      expect(model.getSnapshot().progress).toEqual({ done: 1, total: 3 });
+      model.receiveProgress({
+        type: 'QUICK_TRANSLATION_PROGRESS',
+        requestId: request.requestId,
+        translations: { s0: '第一段。' },
+      });
+      expect(model.getSnapshot().partial).toBe('第一段。\n\n第二段。\n\n');
+
+      pending.resolve(sliceResult(request, (text) => `译：${text}`));
+      await work;
+      expect(model.getSnapshot()).toMatchObject({
+        phase: 'success',
+        partial: undefined,
+        progress: undefined,
+        incomplete: undefined,
+        result: {
+          text: '译：First paragraph.\n\n译：Second paragraph.\n\n译：Third paragraph.',
+        },
+      });
+    });
+
+    it('keeps finished slices when others fail and retries only the failed ones', async () => {
+      await model.open();
+      model.setSource(paragraphs);
+      send.mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          data: {
+            translations: { s0: '第一段。', s2: '第三段。' },
+            failures: { s1: { text: 'HTTP 504' } },
+            targetLanguage: result.targetLanguage,
+            translatorName: result.translatorName,
+          },
+        }),
+      );
+      await model.translate();
+      expect(model.getSnapshot()).toMatchObject({
+        phase: 'success',
+        result: { text: '第一段。\n\nSecond paragraph.\n\n第三段。' },
+        incomplete: { failed: 1, error: { text: 'HTTP 504' } },
+      });
+
+      await model.retryFailed();
+      const retry = requests()[1];
+      expect(retry.slices).toEqual([{ id: 's1', text: 'Second paragraph.' }]);
+      expect(model.getSnapshot()).toMatchObject({
+        phase: 'success',
+        incomplete: undefined,
+        result: { text: '第一段。\n\ntranslated\n\n第三段。' },
+      });
+      await model.retryFailed();
+      expect(requests()).toHaveLength(2);
+    });
+
+    it('reports an error only when no slice was translated', async () => {
+      await model.open();
+      model.setSource(paragraphs);
+      send.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          translations: {},
+          failures: { s0: { text: 'timeout' }, s1: { text: 'timeout' }, s2: { text: 'timeout' } },
+          targetLanguage: result.targetLanguage,
+          translatorName: result.translatorName,
+        },
+      });
+      await model.translate();
+      expect(model.getSnapshot()).toMatchObject({ phase: 'error', error: { text: 'timeout' } });
+    });
+
+    it('keeps slices finished before stopping and offers the rest as a retry', async () => {
+      await model.open();
+      model.setSource(paragraphs);
+      const pending = deferred<Result<unknown>>();
+      send.mockReturnValueOnce(pending.promise);
+      const work = model.translate();
+      const [request] = requests();
+      model.receiveProgress({
+        type: 'QUICK_TRANSLATION_PROGRESS',
+        requestId: request.requestId,
+        translations: { s0: '第一段。' },
+      });
+      model.stop();
+      expect(send).toHaveBeenLastCalledWith({
+        type: 'CANCEL_QUICK_TRANSLATION',
+        requestId: request.requestId,
+      });
+      expect(model.getSnapshot()).toMatchObject({
+        phase: 'success',
+        result: { text: '第一段。\n\nSecond paragraph.\n\nThird paragraph.' },
+        incomplete: { failed: 2, error: { key: '翻译已停止' } },
+      });
+      pending.resolve(sliceResult(request));
+      await work;
+      expect(model.getSnapshot().result?.text).toBe(
+        '第一段。\n\nSecond paragraph.\n\nThird paragraph.',
+      );
     });
   });
 });

@@ -598,6 +598,11 @@ export default {
   '翻译本地 PDF': 'Lokales PDF übersetzen',
   '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
     '{{p0}} von {{p1}} Seiten übersetzt; Seiten, zu denen Sie scrollen, werden als Nächstes übersetzt',
+  快捷翻译输入无效: 'Ungültige Eingabe für die Schnellübersetzung',
+  '翻译中… {{p0}} / {{p1}}': 'Wird übersetzt … {{p0}} / {{p1}}',
+  '{{p0}} 段未能翻译，已保留原文。':
+    '{{p0}} Abschnitt(e) konnten nicht übersetzt werden; der Originaltext bleibt erhalten.',
+  重试失败部分: 'Fehlgeschlagene Abschnitte wiederholen',
   siteCount: '{{count}} Websites',
   retryCount: '{{count}} Wiederholungen',
   translatedCount: '{{translated}} / {{count}} Absätze übersetzt',

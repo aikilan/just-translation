@@ -572,6 +572,11 @@ export default {
   '翻译本地 PDF': 'Translate local PDF',
   '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
     'Translated {{p0}} of {{p1}} pages; pages you scroll to are translated next',
+  快捷翻译输入无效: 'Invalid quick translation input',
+  '翻译中… {{p0}} / {{p1}}': 'Translating… {{p0}} / {{p1}}',
+  '{{p0}} 段未能翻译，已保留原文。':
+    '{{p0}} part(s) could not be translated and keep the original text.',
+  重试失败部分: 'Retry failed parts',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} retries',
   translatedCount: 'Translated {{translated}} / {{count}} paragraphs',

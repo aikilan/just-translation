@@ -9,6 +9,7 @@ import {
 import type { TranslationRequestStage } from './translation-metrics';
 import type { ImageInput } from './image-input';
 import type { ImageTranslationContent } from './image-translation-client';
+import type { TextSlice } from './text-slices';
 
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
 export type TranslationMode = 'segmented' | 'full-document';
@@ -167,7 +168,8 @@ export type RuntimeRequest =
   | {
       type: 'TRANSLATE_QUICK_TEXT';
       requestId: string;
-      text: string;
+      /** Slices of the input (see sliceText); each one succeeds or fails on its own. */
+      slices: TextSlice[];
       translator: ActiveTranslator;
       /** Per-request choice; never persisted into webpage translation preferences. */
       targetLanguage: string;
@@ -224,8 +226,16 @@ export type RuntimeRequest =
   | { type: 'SET_ACTIVE_TRANSLATOR'; translator: ActiveTranslator }
   | { type: 'SET_SITE_AUTO_TRANSLATE'; hostname: string; enabled: boolean };
 
+/** Slices finished so far, sent to the requesting frame before the final response. */
+export interface QuickTranslationProgress {
+  type: 'QUICK_TRANSLATION_PROGRESS';
+  requestId: string;
+  translations: Record<string, string>;
+}
+
 export type PageCommand =
   | { type: 'UI_LANGUAGE_CHANGED'; locale: UiLocale }
+  | QuickTranslationProgress
   | { type: 'START_SELECTION_TRANSLATION'; text: string; translator: ActiveTranslator }
   | TranslationBatchProgress
   | { type: 'GET_PAGE_DIAGNOSTICS' }
@@ -246,6 +256,51 @@ export interface TextTranslationResult {
   text: string;
   targetLanguage: string;
   translatorName: string;
+}
+
+/** Per-slice outcome of a quick text request; a failed slice never discards finished ones. */
+export interface SliceTranslationResult {
+  translations: Record<string, string>;
+  failures: Record<string, UiMessage>;
+  targetLanguage: string;
+  translatorName: string;
+}
+
+export function isSliceTranslationResult(value: unknown): value is SliceTranslationResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const result = value as Record<string, unknown>;
+  return (
+    isStringRecord(result.translations) &&
+    typeof result.failures === 'object' &&
+    result.failures !== null &&
+    Object.values(result.failures).every(isUiMessage) &&
+    typeof result.targetLanguage === 'string' &&
+    Boolean(result.targetLanguage.trim()) &&
+    typeof result.translatorName === 'string' &&
+    Boolean(result.translatorName.trim())
+  );
+}
+
+export function isQuickTranslationProgress(value: unknown): value is QuickTranslationProgress {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'QUICK_TRANSLATION_PROGRESS' &&
+    'requestId' in value &&
+    typeof value.requestId === 'string' &&
+    'translations' in value &&
+    isStringRecord(value.translations)
+  );
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((entry) => typeof entry === 'string')
+  );
 }
 
 export type ImageTranslationResult = ImageTranslationContent &
