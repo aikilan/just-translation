@@ -23,6 +23,7 @@ WHY JUST TRANSLATE
 FEATURES
 • Bilingual reading: translations appear under the original paragraphs and keep the page's look.
 • Viewport first: what you see is translated first, then the rest of the page. New content is translated as it loads.
+• PDF reader: open a PDF in the built-in reader to read each original page next to its translation. Pages are translated as you scroll to them.
 • Selection translation: select text, right-click, and the result appears next to it.
 • Quick translate: paste text and translate it in a popup.
 • Bring your own AI: connect any AI service with your own API key, or a model running on your computer.
@@ -49,7 +50,7 @@ Source code: https://github.com/aikilan/just-translation
 ### Single purpose
 
 ```text
-Translate the web page the user is reading with the translation service the user explicitly selected, and display the translation next to the original text.
+Translate the web page or PDF document the user is reading with the translation service the user explicitly selected, and display the translation next to the original text.
 ```
 
 ### Permission justifications
@@ -60,7 +61,7 @@ Translate the web page the user is reading with the translation service the user
 - **contextMenus**: `Adds right-click entries to translate the page or the selected text, labeled with the engine that will receive the text.`
 - **alarms**: `Periodically deletes cached translations older than 72 hours.`
 - **webNavigation**: `Binds translation tasks to the current document and cancels them after navigation, so old translations are never written into a new page.`
-- **Host permission (http://\*/\*, https://\*/\*)**: `Reads and displays translations on the regular web pages the user chooses to translate, calls the fixed Google and Bing translation endpoints, and calls the AI API URL the user configured.`
+- **Host permission (http://\*/\*, https://\*/\*)**: `Reads and displays translations on the regular web pages the user chooses to translate, loads the PDF files the user opens in the built-in PDF reader, calls the fixed Google and Bing translation endpoints, and calls the AI API URL the user configured.`
 
 ### Remote code
 
@@ -91,5 +92,5 @@ https://github.com/aikilan/just-translation/blob/main/PRIVACY.en.md
 ## Notes for reviewers (Test instructions tab)
 
 ```text
-No account or credentials are needed. Install the extension, open any regular HTTP/HTTPS article, click the toolbar icon and choose "Translate now". The default engine is the free Google channel; Microsoft can be selected in the popup. Full-document translation is only available with a user-supplied AI API, so its button is disabled by default. The free channels send no cookies and run no remote scripts.
+No account or credentials are needed. Install the extension, open any regular HTTP/HTTPS article, click the toolbar icon and choose "Translate now". The default engine is the free Google channel; Microsoft can be selected in the popup. Full-document translation is only available with a user-supplied AI API, so its button is disabled by default. To test PDF translation, open any online PDF and click "Translate this PDF" at the bottom right: the PDF opens in the extension's built-in reader in a new tab. The free channels send no cookies and run no remote scripts.
 ```
