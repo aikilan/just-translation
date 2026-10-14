@@ -562,11 +562,13 @@ describe('translation pipeline regressions', () => {
       batches.push(request);
       return new Promise((resolve) => releases.push(() => resolve(successful(request))));
     });
+    // Fake time from the start: discovery budgets and the coalescing window then see one clock.
+    vi.useFakeTimers();
     const instance = controller();
     const work = instance.start();
     try {
-      await vi.waitFor(() => expect(batches).toHaveLength(6));
-      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(batches).toHaveLength(6);
       updates.mockClear();
       for (let i = 0; i < 5; i++) {
         visibleId = i % 2 ? 'p60' : 'p70';
@@ -733,11 +735,12 @@ describe('translation pipeline regressions', () => {
       batches.push(request);
       return new Promise((resolve) => releases.push(() => resolve(successful(request))));
     });
+    vi.useFakeTimers();
     const instance = controller();
     const work = instance.start();
     try {
-      await vi.waitFor(() => expect(batches).toHaveLength(6));
-      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(batches).toHaveLength(6);
       const late = document.createElement('p');
       late.id = 'late';
       late.textContent = 'Late viewport paragraph.';
@@ -935,29 +938,37 @@ describe('translation pipeline regressions', () => {
       batches.push(request);
       return new Promise((resolve) => releases.push(() => resolve(successful(request))));
     });
+    // The viewport refresh must finish within the 175ms the test waits, however busy the machine is.
+    vi.useFakeTimers();
     const instance = controller();
     const work = instance.start();
     try {
-      await vi.waitFor(() => expect(batches).toHaveLength(6));
+      await vi.advanceTimersByTimeAsync(50);
+      expect(batches).toHaveLength(6);
       visibleId = 'p60';
       document.querySelector('main')!.dispatchEvent(new Event('scroll'));
       visibleId = 'p70';
       document.querySelector('main')!.dispatchEvent(new Event('scroll'));
-      await new Promise((resolve) => setTimeout(resolve, 175));
+      await vi.advanceTimersByTimeAsync(175);
       expect(batches).toHaveLength(6);
       releases.shift()!();
-      await vi.waitFor(() => expect(batches).toHaveLength(7));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(batches).toHaveLength(7);
       expect(batches[6].segments.map((s) => s.text)).toEqual(['Scrollable paragraph number 70.']);
       expect(batches[6].priority).toBe('visible');
       expect(cancellations).toHaveLength(0);
     } finally {
       instance.stop();
       releases.forEach((release) => release());
+      await vi.advanceTimersByTimeAsync(200);
+      vi.useRealTimers();
       await work;
     }
   });
 
   it('keeps old-order dispatch running when scrolling occurs during candidate lookup', async () => {
+    // The first batch must be the whole first microbatch, which the traversal budget may not split.
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     document.body.innerHTML = `<main>${Array.from({ length: 40 }, (_, i) => `<p id="p${i}">Lookup paragraph ${i}.</p>`).join('')}</main>`;
     let visibleId = '';
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -1167,6 +1178,8 @@ describe('translation pipeline regressions', () => {
     }
   });
   it('promotes backend-queued batches and their uncommitted reading slots when entering the viewport', async () => {
+    // Two batches of four need the traversal budget not to split discovery differently.
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     document.body.innerHTML = `<main>${Array.from({ length: 8 }, (_, i) => `<p id="p${i}">Background reading paragraph ${i}.</p>`).join('')}</main>`;
     let visible: Element | undefined;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -1566,6 +1579,11 @@ describe('style-driven dynamic discovery', () => {
         // CSSOM changes themselves produce no DOM mutation, as with the final frame of an animation.
         (document.querySelector('style')!.sheet!.cssRules[0] as CSSStyleRule).style.display =
           'block';
+        // A browser applies the edit at once; jsdom keeps cached computed styles until its next DOM
+        // change. Touch the document outside <html>, where no page observer can see a mutation.
+        const marker = document.createComment('');
+        document.append(marker);
+        marker.remove();
         document.querySelector('section')!.dispatchEvent(new Event(trigger, { bubbles: true }));
       }
       try {
