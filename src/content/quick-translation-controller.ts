@@ -2,14 +2,16 @@ import { sendRuntimeMessage } from '../shared/chrome-api';
 import { LocalizedError, message, type UiMessage } from '../shared/i18n';
 import {
   getErrorMessage,
-  isTextTranslationResult,
   isImageTranslationResult,
+  isSliceTranslationResult,
   type PublicTranslatorSettings,
+  type QuickTranslationProgress,
   type Result,
   type RuntimeRequest,
   type TextTranslationResult,
   type ImageTranslationResult,
 } from '../shared/messages';
+import { joinSlices, sliceText, type SlicedText, type TextSlice } from '../shared/text-slices';
 import { prepareImageInput, type ImageInput } from '../shared/image-input';
 import {
   activeTranslatorEquals,
@@ -36,6 +38,11 @@ export interface QuickTranslationState {
   settingsError?: UiMessage;
   phase: 'idle' | 'loading' | 'success' | 'error';
   result?: TextTranslationResult | ImageTranslationResult;
+  /** Translated text in reading order while slices are still arriving. */
+  partial?: string;
+  progress?: { done: number; total: number };
+  /** Slices that kept their original wording; they can be retried on their own. */
+  incomplete?: { failed: number; error: UiMessage };
   image?: ImageInput;
   imageLoading: boolean;
   imageError?: UiMessage;
@@ -58,7 +65,10 @@ export class QuickTranslationController {
     copying: false,
   };
   private readonly listeners = new Set<() => void>();
-  private active?: { requestId: string };
+  private active?: { requestId: string; slices?: readonly TextSlice[] };
+  /** Slicing of the text behind the current result and the slices translated so far. */
+  private sliced?: SlicedText;
+  private translatedSlices = new Map<string, string>();
   private settingsRevision = 0;
   private clipboardRevision = 0;
   private imageRevision = 0;
@@ -218,9 +228,129 @@ export class QuickTranslationController {
   /** Lock before the first await; this task never starts or stops a page-translation session. */
   async translate(): Promise<void> {
     if (this.active || !this.canTranslate) return;
+    if (this.state.image) {
+      await this.translateImage();
+      return;
+    }
+    const sliced = sliceText(this.state.source);
+    this.sliced = sliced;
+    this.translatedSlices = new Map();
+    await this.translateSlices(sliced, sliced.slices);
+  }
+
+  /** Sends only the slices that still show their original wording. */
+  async retryFailed(): Promise<void> {
+    const sliced = this.sliced;
+    if (this.active || !this.canTranslate || !sliced || !this.state.incomplete) return;
+    const failed = sliced.slices.filter((slice) => !this.translatedSlices.has(slice.id));
+    if (failed.length > 0) await this.translateSlices(sliced, failed);
+  }
+
+  /** Progress for the running request; slices of any other request are ignored. */
+  receiveProgress(event: QuickTranslationProgress): void {
+    const task = this.active;
+    if (!task?.slices || event.requestId !== task.requestId || !this.sliced) return;
+    const requested = new Set(task.slices.map((slice) => slice.id));
+    for (const [id, text] of Object.entries(event.translations))
+      if (requested.has(id)) this.translatedSlices.set(id, text);
+    this.update(this.progressState(this.sliced));
+  }
+
+  private async translateSlices(
+    sliced: SlicedText,
+    requested: readonly TextSlice[],
+  ): Promise<void> {
+    const task = { requestId: String(++requestSequence), slices: requested };
+    const { translator, targetLanguage } = this.state;
+    this.active = task;
+    this.clipboardRevision += 1;
+    this.update({
+      phase: 'loading',
+      error: undefined,
+      feedback: undefined,
+      copying: false,
+      incomplete: undefined,
+      ...this.progressState(sliced),
+    });
+    let failure: UiMessage | undefined;
+    let names: Pick<TextTranslationResult, 'targetLanguage' | 'translatorName'> | undefined;
+    try {
+      const result = await this.send({
+        type: 'TRANSLATE_QUICK_TEXT',
+        requestId: task.requestId,
+        slices: [...requested],
+        translator: translator!,
+        targetLanguage,
+      });
+      if (this.active !== task || !this.state.open) return;
+      if (!result.ok) throw new LocalizedError(result.error);
+      if (!isSliceTranslationResult(result.data))
+        throw new LocalizedError(message('后台未返回有效译文，请重试'));
+      for (const slice of requested) {
+        const translated = result.data.translations[slice.id];
+        if (translated !== undefined) this.translatedSlices.set(slice.id, translated);
+        else failure ??= result.data.failures[slice.id];
+      }
+      names = result.data;
+    } catch (error) {
+      if (this.active !== task || !this.state.open) return;
+      failure = getErrorMessage(error);
+    } finally {
+      if (this.active === task) this.active = undefined;
+    }
+    this.settle(sliced, failure, names);
+  }
+
+  /** Any translated slice is a usable result; untranslated slices keep their original text. */
+  private settle(
+    sliced: SlicedText,
+    failure: UiMessage | undefined,
+    names: Pick<TextTranslationResult, 'targetLanguage' | 'translatorName'> | undefined,
+  ): void {
+    const failed = sliced.slices.filter((slice) => !this.translatedSlices.has(slice.id)).length;
+    const error = failure ?? message('翻译通道未返回译文，请重试');
+    const previous = this.state.result;
+    if (this.translatedSlices.size === 0) {
+      this.update({ phase: 'error', error, partial: undefined, progress: undefined });
+      return;
+    }
+    this.update({
+      phase: 'success',
+      result: {
+        text: joinSlices(sliced, (slice) => this.translatedSlices.get(slice.id)),
+        targetLanguage:
+          names?.targetLanguage ?? previous?.targetLanguage ?? this.state.targetLanguage,
+        translatorName: names?.translatorName ?? previous?.translatorName ?? '',
+      },
+      partial: undefined,
+      progress: undefined,
+      incomplete: failed > 0 ? { failed, error } : undefined,
+    });
+  }
+
+  /** Shows translations in reading order, stopping at the first slice still in flight. */
+  private progressState(sliced: SlicedText): Pick<QuickTranslationState, 'partial' | 'progress'> {
+    let partial = '';
+    for (const part of sliced.parts) {
+      if ('raw' in part) {
+        partial += part.raw;
+        continue;
+      }
+      const translated = this.translatedSlices.get(sliced.slices[part.slice].id);
+      if (translated === undefined) break;
+      partial += translated;
+    }
+    return {
+      partial: partial.trim() ? partial : undefined,
+      progress: { done: this.translatedSlices.size, total: sliced.slices.length },
+    };
+  }
+
+  private async translateImage(): Promise<void> {
     const task = { requestId: String(++requestSequence) };
     const { source, image, translator, targetLanguage } = this.state;
     this.active = task;
+    this.sliced = undefined;
     this.clipboardRevision += 1;
     this.update({
       phase: 'loading',
@@ -228,12 +358,14 @@ export class QuickTranslationController {
       error: undefined,
       feedback: undefined,
       copying: false,
+      incomplete: undefined,
+      partial: undefined,
+      progress: undefined,
     });
     try {
       const result = await this.send({
-        ...(image
-          ? ({ type: 'TRANSLATE_QUICK_IMAGE', image } as const)
-          : ({ type: 'TRANSLATE_QUICK_TEXT' } as const)),
+        type: 'TRANSLATE_QUICK_IMAGE',
+        image: image!,
         requestId: task.requestId,
         text: source,
         translator: translator!,
@@ -241,14 +373,9 @@ export class QuickTranslationController {
       });
       if (this.active !== task || !this.state.open) return;
       if (!result.ok) throw new LocalizedError(result.error);
-      const data = result.data;
-      if (image) {
-        if (!isImageTranslationResult(data))
-          throw new LocalizedError(message('后台未返回有效译文，请重试'));
-      } else if (!isTextTranslationResult(data)) {
+      if (!isImageTranslationResult(result.data))
         throw new LocalizedError(message('后台未返回有效译文，请重试'));
-      }
-      this.update({ phase: 'success', result: data });
+      this.update({ phase: 'success', result: result.data });
     } catch (error) {
       if (this.active === task && this.state.open)
         this.update({ phase: 'error', error: getErrorMessage(error) });
@@ -261,7 +388,10 @@ export class QuickTranslationController {
     const task = this.active;
     if (!task) return;
     this.active = undefined;
-    this.update({ phase: 'idle', error: undefined });
+    // Slices finished before stopping stay usable, exactly like a partially failed request.
+    if (task.slices && this.sliced && this.translatedSlices.size > 0)
+      this.settle(this.sliced, message('翻译已停止'), undefined);
+    else this.update({ phase: 'idle', error: undefined, partial: undefined, progress: undefined });
     void this.send({ type: 'CANCEL_QUICK_TRANSLATION', requestId: task.requestId }).catch(() => {});
   }
 
@@ -302,9 +432,14 @@ export class QuickTranslationController {
   private invalidateResult(): void {
     this.stop();
     this.clipboardRevision += 1;
+    this.sliced = undefined;
+    this.translatedSlices = new Map();
     this.update({
       phase: 'idle',
       result: undefined,
+      partial: undefined,
+      progress: undefined,
+      incomplete: undefined,
       error: undefined,
       feedback: undefined,
       pasting: false,

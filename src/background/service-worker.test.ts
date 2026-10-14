@@ -30,6 +30,19 @@ describe('background document lifecycle', () => {
   let activeTranslator: ActiveTranslator;
   let activeTabs: chrome.tabs.Tab[];
   let menuStatus: unknown;
+  let viewerContexts: Partial<chrome.runtime.ExtensionContext>[];
+  let commandListener: (command: string) => void;
+  const VIEWER_URL =
+    'chrome-extension://test-extension/src/pdf/index.html?file=https%3A%2F%2Fexample.com%2Fpaper.pdf';
+  const viewerSender = (id = 'viewer-document'): chrome.runtime.MessageSender => ({
+    id: 'test-extension',
+    tab: { id: 24, index: 2 } as chrome.tabs.Tab,
+    documentId: id,
+    frameId: 0,
+    url: VIEWER_URL,
+  });
+  const sendFromViewer = (request: RuntimeRequest, id = 'viewer-document') =>
+    new Promise<Result<unknown>>((resolve) => message(request, viewerSender(id), resolve));
   const sender = (id: string): chrome.runtime.MessageSender => ({
     tab: { id: 18, url: 'https://news.ycombinator.com/news' } as chrome.tabs.Tab,
     documentId: id,
@@ -44,6 +57,15 @@ describe('background document lifecycle', () => {
     documentId = 'old-document';
     activeTabs = [];
     menuStatus = undefined;
+    viewerContexts = [
+      {
+        contextType: 'TAB',
+        tabId: 24,
+        frameId: 0,
+        documentId: 'viewer-document',
+        documentUrl: VIEWER_URL,
+      },
+    ];
     session = {};
     holdSettings = undefined;
     translationRetryCount = 1;
@@ -97,6 +119,13 @@ describe('background document lifecycle', () => {
       runtime: {
         getPlatformInfo: vi.fn().mockResolvedValue({ os: 'mac' }),
         id: 'test-extension',
+        getURL: (path: string) => `chrome-extension://test-extension/${path}`,
+        getContexts: vi.fn(({ documentIds }: chrome.runtime.ContextFilter) =>
+          Promise.resolve(
+            viewerContexts.filter((context) => documentIds?.includes(context.documentId!)),
+          ),
+        ),
+        sendMessage: vi.fn(() => Promise.resolve(undefined)),
         onInstalled: event(),
         onStartup: event(),
         onMessage: {
@@ -115,7 +144,13 @@ describe('background document lifecycle', () => {
         }),
         onClicked: event(),
       },
-      commands: { onCommand: event() },
+      commands: {
+        onCommand: {
+          addListener: (listener: typeof commandListener) => {
+            commandListener = listener;
+          },
+        },
+      },
       windows: { onFocusChanged: event() },
       tabs: {
         onRemoved: event(),
@@ -123,6 +158,7 @@ describe('background document lifecycle', () => {
         onUpdated: event(),
         query: vi.fn(() => Promise.resolve(activeTabs)),
         sendMessage: vi.fn(() => Promise.resolve(menuStatus)),
+        create: vi.fn(() => Promise.resolve({})),
       },
       webNavigation: {
         getFrame: () => Promise.resolve({ documentId, frameId: 0 }),
@@ -167,20 +203,21 @@ describe('background document lifecycle', () => {
 
   it('routes quick text through the requested engine and language without persisting preferences', async () => {
     activeTranslator = { kind: 'builtin', engine: 'google-free' };
-    fetchMock.mockResolvedValue(completionResponse([{ id: 'quick', text: 'quick result' }]));
+    fetchMock.mockResolvedValue(completionResponse([{ id: 's0:0', text: 'quick result' }]));
     const storageWrite = vi.spyOn(chrome.storage.local, 'set');
     const writes = storageWrite.mock.calls.length;
     const response = await send({
       type: 'TRANSLATE_QUICK_TEXT',
       requestId: 'quick-1',
-      text: 'Typed text',
+      slices: [{ id: 's0', text: 'Typed text' }],
       translator: { kind: 'ai', profileId: activeProfile.id },
       targetLanguage: 'Japanese',
     });
     expect(response).toMatchObject({
       ok: true,
       data: {
-        text: 'quick result',
+        translations: { s0: 'quick result' },
+        failures: {},
         targetLanguage: 'Japanese',
         translatorName: activeProfile.name,
       },
@@ -198,7 +235,7 @@ describe('background document lifecycle', () => {
     const work = send({
       type: 'TRANSLATE_QUICK_TEXT',
       requestId: 'cancel-quick',
-      text: 'Typed text',
+      slices: [{ id: 's0', text: 'Typed text' }],
       translator: activeTranslator,
       targetLanguage: 'English',
     });
@@ -346,7 +383,7 @@ describe('background document lifecycle', () => {
   });
 
   it('executes selection requests through the real queue without creating page sessions', async () => {
-    fetchMock.mockResolvedValue(completionResponse([{ id: 'selection', text: '选区译文' }]));
+    fetchMock.mockResolvedValue(completionResponse([{ id: 's0:0', text: '选区译文' }]));
     const response = await send({
       type: 'TRANSLATE_SELECTION',
       requestId: 'selected',
@@ -367,7 +404,7 @@ describe('background document lifecycle', () => {
       messages: { content: string }[];
     };
     expect(JSON.parse(body.messages[1].content)).toEqual({
-      segments: [{ id: 'selection', group: 'selection', part: 0, text: 'Only this paragraph' }],
+      segments: [{ id: 's0:0', group: 's0', part: 0, text: 'Only this paragraph' }],
     });
   });
 
@@ -938,5 +975,136 @@ describe('background document lifecycle', () => {
     release();
     expect((await work).ok).toBe(false);
     expect(Object.values(session)).toHaveLength(0);
+  });
+
+  describe('PDF viewer', () => {
+    it('opens the reader beside a browser PDF using the sender address, never message content', async () => {
+      const result = await new Promise<Result<unknown>>((resolve) =>
+        message(
+          { type: 'OPEN_PDF_VIEWER', translate: 'segmented' },
+          {
+            tab: { id: 18, index: 4, url: 'https://example.com/paper.pdf' } as chrome.tabs.Tab,
+            documentId: 'pdf-document',
+            frameId: 0,
+            url: 'https://example.com/paper.pdf',
+          },
+          resolve,
+        ),
+      );
+      expect(result).toEqual({ ok: true, data: undefined });
+      expect(chrome.tabs.create).toHaveBeenCalledWith({
+        url: 'chrome-extension://test-extension/src/pdf/index.html?file=https%3A%2F%2Fexample.com%2Fpaper.pdf&translate=segmented',
+        index: 5,
+        openerTabId: 18,
+      });
+    });
+
+    it('refuses to open the reader for a child frame', async () => {
+      const result = await new Promise<Result<unknown>>((resolve) =>
+        message(
+          { type: 'OPEN_PDF_VIEWER' },
+          {
+            tab: { id: 18, index: 4 } as chrome.tabs.Tab,
+            documentId: 'frame-document',
+            frameId: 3,
+            url: 'https://example.com/embedded.pdf',
+          },
+          resolve,
+        ),
+      );
+      expect(result.ok).toBe(false);
+      expect(chrome.tabs.create).not.toHaveBeenCalled();
+    });
+
+    it('leaves viewer commands to the addressed viewer tab', () => {
+      const respond = vi.fn();
+      const handled = message(
+        { type: 'PDF_VIEWER_COMMAND', tabId: 24, command: { type: 'GET_PAGE_STATUS' } },
+        { id: 'test-extension', url: 'chrome-extension://test-extension/src/popup/index.html' },
+        respond,
+      ) as unknown;
+      expect(handled).toBe(false);
+      expect(respond).not.toHaveBeenCalled();
+    });
+
+    it('runs viewer sessions in a private cache partition and publishes progress on the runtime channel', async () => {
+      let source!: ReadableStreamDefaultController<Uint8Array>;
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(value) {
+              source = value;
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+      );
+      const begin = await sendFromViewer({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'segmented',
+        translator: { kind: 'ai', profileId: activeProfile.id },
+        sessionId: 'pdf',
+      });
+      expect(begin.ok).toBe(true);
+      expect(Object.values(session)).toEqual([
+        expect.objectContaining({ tabId: 24, origin: 'chrome-extension://test-extension' }),
+      ]);
+      const work = sendFromViewer({
+        type: 'TRANSLATE_BATCH',
+        sessionId: 'pdf',
+        batchId: 'batch',
+        priority: 'visible',
+        segments: [{ requestId: 'a:0', unitId: 'a', partIndex: 0, text: 'First' }],
+      });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      source.enqueue(
+        new TextEncoder().encode(
+          contentEvent('{"translations":[{"id":"a:0","text":"第一段"}]}') + STREAM_END,
+        ),
+      );
+      source.close();
+      expect(await work).toMatchObject({ ok: true, data: { translations: { 'a:0': '第一段' } } });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'TRANSLATION_BATCH_PROGRESS',
+          sessionId: 'pdf',
+          translations: { 'a:0': '第一段' },
+        }),
+      );
+      expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(
+        24,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('invalidates a viewer session once its document is gone', async () => {
+      await sendFromViewer({
+        type: 'BEGIN_TRANSLATION_SESSION',
+        mode: 'segmented',
+        translator: { kind: 'ai', profileId: activeProfile.id },
+        sessionId: 'pdf',
+      });
+      viewerContexts = [];
+      const result = await sendFromViewer({
+        type: 'RESOLVE_TRANSLATION_CANDIDATES',
+        sessionId: 'pdf',
+        candidates: [{ id: 'a', text: 'First' }],
+      });
+      expect(result).toEqual({ ok: false, error: { key: '当前网页已变化，翻译会话失效' } });
+    });
+
+    it('routes the shortcut to a viewer tab when no content script answers', async () => {
+      activeTabs = [{ id: 24 } as chrome.tabs.Tab];
+      vi.mocked(chrome.tabs.sendMessage).mockRejectedValueOnce(new Error('no receiver'));
+      commandListener('translate-page');
+      await vi.waitFor(() =>
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+          type: 'PDF_VIEWER_COMMAND',
+          tabId: 24,
+          command: { type: 'TOGGLE_TRANSLATION' },
+        }),
+      );
+    });
   });
 });

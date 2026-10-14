@@ -549,6 +549,53 @@ export default {
   '只是翻译 · 设置': 'Just Translate · Paramètres',
   '删除“{{p0}}”？': 'Supprimer « {{p0}} » ?',
   '用 {{p0}} 表示目标语言。': 'Utilisez {{p0}} pour la langue cible.',
+  '翻译此 PDF': 'Traduire ce PDF',
+  '第 {{p0}} / {{p1}} 页': 'Page {{p0}} / {{p1}}',
+  'PDF 翻译': 'Traduction PDF',
+  页面布局: 'Mise en page',
+  原版对照: 'Côte à côte',
+  阅读模式: 'Mode lecture',
+  翻译设置: 'Paramètres de traduction',
+  '打开 PDF 文件': 'Ouvrir un fichier PDF',
+  '在浏览器中打开原 PDF': 'Ouvrir le PDF d’origine dans le navigateur',
+  'PDF 解析进度': 'Progression de l’analyse du PDF',
+  '正在加载 PDF…': 'Chargement du PDF…',
+  '正在加载 PDF… {{p0}}%': 'Chargement du PDF… {{p0}} %',
+  '正在解析 {{p0}} / {{p1}} 页': 'Analyse de la page {{p0}} sur {{p1}}',
+  '未找到可提取的文字，可能是扫描件；暂不支持 OCR。':
+    'Aucun texte extractible. Il s’agit peut-être d’un document numérisé ; la reconnaissance de texte (OCR) n’est pas encore prise en charge.',
+  '此 PDF 受密码保护': 'Ce PDF est protégé par un mot de passe',
+  密码: 'Mot de passe',
+  '密码错误，请重试': 'Mot de passe incorrect. Réessayez.',
+  打开: 'Ouvrir',
+  打开扩展详情页: 'Ouvrir les détails de l’extension',
+  '选择 PDF 文件': 'Choisir un fichier PDF',
+  '拖放 PDF 到这里，或选择本地文件': 'Déposez un PDF ici ou choisissez un fichier local',
+  '文件只在本机读取；开始翻译后，提取出的文字会发送给当前翻译引擎。':
+    'Le fichier est lu uniquement sur cet appareil. Lors de la traduction, le texte extrait est envoyé au moteur de traduction actuel.',
+  '此页没有可提取的文字，可能是扫描件或图片。':
+    'Aucun texte extractible sur cette page. Il peut s’agir d’un document numérisé ou d’une image.',
+  '无法读取本地 PDF。请在扩展详情页开启「允许访问文件网址」，或直接选择文件。':
+    'Impossible de lire ce PDF local. Activez « Autoriser l’accès aux URL de fichier » dans les détails de l’extension, ou choisissez directement le fichier.',
+  '无法识别此 PDF 文件': 'Ce fichier n’est pas un PDF valide',
+  'PDF 下载失败（HTTP {{p0}}）': 'Échec du téléchargement du PDF (HTTP {{p0}})',
+  'PDF 下载失败，请检查网络后重试':
+    'Échec du téléchargement du PDF. Vérifiez votre connexion et réessayez.',
+  'PDF 加载失败：{{p0}}': 'Échec du chargement du PDF : {{p0}}',
+  '请选择 PDF 文件': 'Choisissez un fichier PDF',
+  隐藏此按钮: 'Masquer ce bouton',
+  '在阅读器中打开此 PDF，原文与译文逐页并排显示。':
+    'Ouvrez ce PDF dans le lecteur pour voir l’original et la traduction côte à côte, page par page.',
+  '翻译本地 PDF 需要在扩展详情页开启「允许访问文件网址」，也可以直接在阅读器中选择文件。':
+    'Pour traduire des PDF locaux, activez « Autoriser l’accès aux URL de fichier » dans les détails de l’extension, ou choisissez le fichier dans le lecteur.',
+  '翻译本地 PDF': 'Traduire un PDF local',
+  '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
+    '{{p0}} pages sur {{p1}} traduites ; les pages atteintes en faisant défiler seront traduites ensuite',
+  快捷翻译输入无效: 'Saisie de traduction rapide non valide',
+  '翻译中… {{p0}} / {{p1}}': 'Traduction… {{p0}} / {{p1}}',
+  '{{p0}} 段未能翻译，已保留原文。':
+    '{{p0}} partie(s) n’ont pas pu être traduites ; le texte d’origine est conservé.',
+  重试失败部分: 'Réessayer les parties en échec',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} tentatives',
   translatedCount: '{{translated}} / {{count}} paragraphes traduits',

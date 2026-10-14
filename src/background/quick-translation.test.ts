@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TranslationTaskService } from './translation-task';
 import { DEFAULT_SETTINGS, type TranslatorSettings } from '../shared/settings';
 import { TEST_PROFILE } from '../test-utils/provider';
+import { sliceText } from '../shared/text-slices';
 import { translateRuntimeBatch } from './translation-engine';
 import type * as TranslationEngineModule from './translation-engine';
 
@@ -22,9 +23,18 @@ const settings: TranslatorSettings = {
   targetLanguage: 'Simplified Chinese',
   excludedSites: ['example.com'],
 };
+const slices = (text: string) => sliceText(text).slices;
 function setup(read = () => Promise.resolve(settings)) {
   const getFrame = vi.fn().mockResolvedValue({ documentId: 'document' });
-  const service = new TranslationTaskService(read, getFrame);
+  const notify = vi.fn(() => Promise.resolve());
+  const service = new TranslationTaskService(
+    read,
+    getFrame,
+    undefined,
+    undefined,
+    undefined,
+    notify,
+  );
   vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
     Promise.resolve({
       translations: Object.fromEntries(
@@ -33,7 +43,7 @@ function setup(read = () => Promise.resolve(settings)) {
       failures: {},
     }),
   );
-  return { service, getFrame };
+  return { service, getFrame, notify };
 }
 afterEach(() => vi.clearAllMocks());
 
@@ -44,12 +54,13 @@ describe('quick translation request scope', () => {
     const result = await service.translateQuick(
       sender,
       'quick',
-      '  First\nSecond  ',
+      slices('First\nSecond'),
       { kind: 'ai', profileId: TEST_PROFILE.id },
       'Japanese',
     );
     expect(result).toEqual({
-      text: 'translated',
+      translations: { s0: 'translated' },
+      failures: {},
       targetLanguage: 'Japanese',
       translatorName: TEST_PROFILE.name,
     });
@@ -59,7 +70,7 @@ describe('quick translation request scope', () => {
         apiKey: 'quick-test-secret',
         targetLanguage: 'Japanese',
       }),
-      [{ requestId: 'quick', unitId: 'quick', partIndex: 0, text: '  First\nSecond  ' }],
+      [{ requestId: 's0:0', unitId: 's0', partIndex: 0, text: 'First\nSecond' }],
       expect.any(Object),
       expect.any(AbortSignal),
       expect.any(Object),
@@ -79,7 +90,7 @@ describe('quick translation request scope', () => {
       service.translateQuick(
         sender,
         'invalid',
-        'text',
+        slices('text'),
         translator as TranslatorSettings['activeTranslator'],
         target,
       ),
@@ -87,12 +98,12 @@ describe('quick translation request scope', () => {
     expect(translateRuntimeBatch).not.toHaveBeenCalled();
   });
 
-  it('splits long text for free engines while retaining the chosen target and order', async () => {
+  it('sends each slice of long free-engine text as its own request with the chosen target', async () => {
     const { service } = setup();
     vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
       Promise.resolve({
         translations: Object.fromEntries(
-          segments.map((segment) => [segment.requestId, String(segment.partIndex)]),
+          segments.map((segment) => [segment.requestId, segment.unitId]),
         ),
         failures: {},
       }),
@@ -101,11 +112,15 @@ describe('quick translation request scope', () => {
       await service.translateQuick(
         sender,
         'long',
-        'x'.repeat(2100),
+        slices('x'.repeat(2100)),
         { kind: 'builtin', engine: 'microsoft-free' },
         'English',
       ),
-    ).toMatchObject({ text: '012', targetLanguage: 'English', translatorName: 'Microsoft' });
+    ).toMatchObject({
+      translations: { s0: 's0', s1: 's1', s2: 's2' },
+      targetLanguage: 'English',
+      translatorName: 'Microsoft',
+    });
     expect(translateRuntimeBatch).toHaveBeenCalledTimes(3);
     expect(
       vi
@@ -115,6 +130,56 @@ describe('quick translation request scope', () => {
             config.targetLanguage === 'English' && segments[0].text.length <= 1000,
         ),
     ).toBe(true);
+  });
+
+  it('keeps finished slices when another slice fails and reports progress to the sender document', async () => {
+    const { service, notify } = setup();
+    vi.mocked(translateRuntimeBatch).mockImplementation(
+      (_config, segments, _client, _signal, options) => {
+        if (segments.some((segment) => segment.unitId === 's1'))
+          return Promise.reject(new Error('provider timed out'));
+        const translations = Object.fromEntries(
+          segments.map((segment) => [segment.requestId, `译:${segment.unitId}`]),
+        );
+        options?.onTranslations?.(translations);
+        return Promise.resolve({ translations, failures: {} });
+      },
+    );
+    const text = ['A'.repeat(900), 'B'.repeat(900), 'C'.repeat(900)].join('\n\n');
+    const result = await service.translateQuick(
+      sender,
+      'partial',
+      slices(text),
+      { kind: 'builtin', engine: 'google-free' },
+      'English',
+    );
+    expect(result.translations).toEqual({ s0: '译:s0', s2: '译:s2' });
+    expect(result.failures).toEqual({ s1: { text: 'provider timed out' } });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(2));
+    expect(notify).toHaveBeenCalledWith(
+      { tabId: 42, frameId: 0, documentId: 'document' },
+      { type: 'QUICK_TRANSLATION_PROGRESS', requestId: 'partial', translations: { s0: '译:s0' } },
+    );
+  });
+
+  it.each([
+    ['text'],
+    [[]],
+    [[{ id: 's0', text: '' }]],
+    [
+      [
+        { id: 's0', text: 'a' },
+        { id: 's0', text: 'b' },
+      ],
+    ],
+    [[{ id: 's0', text: 'x'.repeat(5_000) }]],
+  ])('rejects malformed slices %j before reading settings', async (input) => {
+    const read = vi.fn(() => Promise.resolve(settings));
+    const { service } = setup(read);
+    await expect(
+      service.translateQuick(sender, 'bad', input, settings.activeTranslator, 'English'),
+    ).rejects.toThrow('快捷翻译输入无效');
+    expect(read).not.toHaveBeenCalled();
   });
 
   it('cancels settings preflight and rejects a changed document', async () => {
@@ -128,7 +193,7 @@ describe('quick translation request scope', () => {
     const pending = service.translateQuick(
       sender,
       'pending',
-      'text',
+      slices('text'),
       settings.activeTranslator,
       'English',
     );
@@ -140,7 +205,7 @@ describe('quick translation request scope', () => {
     const stale = service.translateQuick(
       sender,
       'stale',
-      'text',
+      slices('text'),
       settings.activeTranslator,
       'English',
     );
@@ -163,7 +228,7 @@ describe('quick translation request scope', () => {
       .translateSelection(sender, 'same', 'selection', settings.activeTranslator)
       .catch(() => undefined);
     const quick = service
-      .translateQuick(sender, 'same', 'typed', settings.activeTranslator, 'English')
+      .translateQuick(sender, 'same', slices('typed'), settings.activeTranslator, 'English')
       .catch(() => undefined);
     await vi.waitFor(() => expect(signals).toHaveLength(2));
     service.cancel(sender, 'same', 'quick');

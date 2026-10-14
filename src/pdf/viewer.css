@@ -1,0 +1,347 @@
+body {
+  min-height: 100vh;
+  background: var(--surface-canvas);
+  color: var(--text);
+}
+
+#viewer-ui {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.viewer-toolbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.viewer-file {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 10px;
+}
+
+.viewer-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.viewer-file-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.viewer-file-copy strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-file-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.viewer-actions .segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.viewer-actions .segmented-control svg {
+  width: 15px;
+  height: 15px;
+}
+
+.viewer-actions .button {
+  min-height: 34px;
+  padding: 6px 12px;
+}
+
+.viewer-progress {
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
+  overflow: hidden;
+}
+
+.viewer-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 160ms;
+}
+
+.viewer-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 16px;
+  display: grid;
+  width: min(360px, calc(100vw - 32px));
+  gap: 4px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 14%);
+}
+
+.viewer-panel .setting-row-main {
+  display: grid;
+  gap: 6px;
+}
+
+.viewer-panel .setting-control,
+.viewer-panel select {
+  width: 100%;
+}
+
+.viewer-panel .translator-disclosure {
+  margin: 0 0 6px;
+}
+
+.viewer-panel > .text-button {
+  justify-self: start;
+}
+
+.viewer-note {
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.viewer-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface-raised));
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.viewer-banner svg {
+  color: var(--danger);
+}
+
+.viewer-state {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 96px 16px 32px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.viewer-state > * {
+  pointer-events: auto;
+}
+
+.viewer-state > p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.viewer-state .spin {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+}
+
+.viewer-card {
+  display: grid;
+  width: min(460px, 100%);
+  justify-items: center;
+  gap: 12px;
+  padding: 28px 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  text-align: center;
+}
+
+.viewer-card h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.viewer-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.viewer-card .field {
+  width: 100%;
+  text-align: start;
+}
+
+.viewer-drop {
+  border-style: dashed;
+  border-width: 2px;
+  border-color: var(--border-strong);
+}
+
+.viewer-state-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--accent);
+}
+
+.viewer-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Document: one row per page, the original beside its reading text. */
+.pdf-document {
+  display: grid;
+  max-width: 1600px;
+  margin: 0 auto;
+  gap: 28px;
+  padding: 24px 24px 80px;
+}
+
+.pdf-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 24px;
+}
+
+.pdf-page::before {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  content: attr(data-page-number);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.pdf-page-visual {
+  aspect-ratio: 1 / var(--pdf-page-ratio);
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 2px 8px rgb(0 0 0 / 6%);
+}
+
+.pdf-page-visual canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-page-reading {
+  min-width: 0;
+  padding: 24px 28px;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  box-shadow: 0 0 0 1px var(--border);
+  color: var(--text-strong);
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.pdf-page-reading:empty {
+  min-height: 120px;
+}
+
+.pdf-page-reading > :first-child {
+  margin-top: 0;
+}
+
+.pdf-page-reading > :last-child {
+  margin-bottom: 0;
+}
+
+.pdf-page-reading p {
+  margin: 0 0 0.9em;
+  line-height: 1.7;
+}
+
+.pdf-page-reading h2,
+.pdf-page-reading h3 {
+  margin: 1.1em 0 0.6em;
+  line-height: 1.4;
+}
+
+.pdf-page-reading h2 {
+  font-size: 1.35em;
+}
+
+.pdf-page-reading h3 {
+  font-size: 1.12em;
+}
+
+.pdf-page-reading .pdf-page-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.pdf-document[data-layout='reading'] {
+  max-width: 860px;
+}
+
+.pdf-document[data-layout='reading'] .pdf-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pdf-document[data-layout='reading'] .pdf-page-visual {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .pdf-document {
+    padding: 16px 16px 64px;
+  }
+
+  .pdf-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .viewer-label {
+    display: none;
+  }
+
+  .pdf-page-reading {
+    padding: 18px 16px;
+  }
+}
+
+@media print {
+  #viewer-ui {
+    display: none;
+  }
+}

@@ -58,7 +58,8 @@ describe('selection translation isolation', () => {
     expect(
       await service.translateSelection(sender(3), 'one', '  First\nSecond  ', AI_TRANSLATOR),
     ).toEqual({
-      text: '译文',
+      // Surrounding whitespace never reaches the provider and is restored around the result.
+      text: '  译文  ',
       targetLanguage: settings.targetLanguage,
       translatorName: TEST_PROFILE.name,
     });
@@ -69,7 +70,7 @@ describe('selection translation isolation', () => {
         model: 'model',
         targetLanguage: settings.targetLanguage,
       }),
-      [{ requestId: 'selection', unitId: 'selection', partIndex: 0, text: '  First\nSecond  ' }],
+      [{ requestId: 's0:0', unitId: 's0', partIndex: 0, text: 'First\nSecond' }],
       expect.any(Object),
       expect.any(AbortSignal),
       expect.objectContaining({ maxRetries: settings.translationRetryCount }),
@@ -105,7 +106,7 @@ describe('selection translation isolation', () => {
     vi.mocked(translateRuntimeBatch).mockImplementation((_config, segments) =>
       Promise.resolve({
         translations: Object.fromEntries(
-          segments.map((segment) => [segment.requestId, `[${segment.partIndex}]`]),
+          segments.map((segment) => [segment.requestId, `[${segment.unitId}]`]),
         ),
         failures: {},
       }),
@@ -118,7 +119,7 @@ describe('selection translation isolation', () => {
         freeSettings.activeTranslator,
       ),
     ).resolves.toEqual({
-      text: '[0][1][2]',
+      text: '[s0][s1][s2]',
       targetLanguage: 'English',
       translatorName: 'Microsoft',
     });
@@ -131,20 +132,25 @@ describe('selection translation isolation', () => {
         ),
     ).toBe(true);
   });
-  it('keeps the established AI selection contract as one unsplit request', async () => {
+  it('slices long AI selections into batches within the visible-content limits', async () => {
     const { service } = setup();
-    const text = 'x'.repeat(2_100);
+    const text = [
+      'First paragraph. '.repeat(40).trim(),
+      'Second paragraph. '.repeat(40).trim(),
+    ].join('\n\n');
 
-    await service.translateSelection(sender(), 'long-ai', text, AI_TRANSLATOR);
+    const result = await service.translateSelection(sender(), 'long-ai', text, AI_TRANSLATOR);
 
-    expect(translateRuntimeBatch).toHaveBeenCalledOnce();
-    expect(translateRuntimeBatch).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'ai' }),
-      [{ requestId: 'selection', unitId: 'selection', partIndex: 0, text }],
-      expect.any(Object),
-      expect.any(AbortSignal),
-      expect.any(Object),
-    );
+    const calls = vi.mocked(translateRuntimeBatch).mock.calls;
+    expect(calls.length).toBeGreaterThan(1);
+    for (const [config, segments] of calls) {
+      expect(config).toMatchObject({ kind: 'ai' });
+      expect(segments.reduce((total, segment) => total + segment.text.length, 0)).toBeLessThan(
+        1_200,
+      );
+    }
+    // The paragraph break is kept verbatim between the translated slices.
+    expect(result.text).toContain('\n\n');
   });
   it('cancels sibling selection batches as soon as one batch fails', async () => {
     const freeSettings: TranslatorSettings = {
@@ -157,7 +163,7 @@ describe('selection translation isolation', () => {
     let siblingSignal: AbortSignal | undefined;
     vi.mocked(translateRuntimeBatch).mockImplementation(
       async (_config, segments, _client, signal) => {
-        if (segments[0].partIndex === 0) throw new Error('first batch failed');
+        if (segments[0].unitId === 's0') throw new Error('first batch failed');
         siblingSignal = signal;
         return new Promise((_resolve, reject) => {
           signal?.addEventListener(

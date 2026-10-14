@@ -316,6 +316,41 @@ p {
 .quick-success {
   color: var(--success);
 }
+.quick-progress {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.quick-incomplete {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 8px;
+  margin: 10px 20px 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+.quick-incomplete svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+.quick-incomplete p {
+  margin: 0;
+  font-weight: 500;
+}
+.quick-incomplete small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.quick-incomplete .text-button {
+  color: var(--accent);
+  white-space: nowrap;
+}
 .quick-pending,
 .quick-error strong {
   display: flex;

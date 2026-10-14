@@ -834,3 +834,111 @@ it('labels full-mode incremental work separately from the first full request', a
   expect(view.container.textContent).toContain('正在补译新内容');
   expect(view.container.textContent).not.toContain('全文完成后统一显示译文');
 });
+
+describe('PDF documents', () => {
+  const VIEWER =
+    'chrome-extension://test/src/pdf/index.html?file=https%3A%2F%2Fexample.com%2Fdocs%2Fpaper.pdf';
+
+  it('opens the PDF reader from a browser PDF and closes the popup', async () => {
+    const { tabSend } = mockExtension(
+      READY_SETTINGS,
+      { ...IDLE_STATUS, pdfDocument: true },
+      'https://example.com/docs/paper.pdf',
+    );
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    expect(view.container.textContent).toContain('在阅读器中打开此 PDF，原文与译文逐页并排显示。');
+
+    await click(view.container, '翻译此 PDF');
+    expect(tabSend).toHaveBeenCalledWith(7, { type: 'START_TRANSLATION' }, MAIN_FRAME);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('controls an open reader tab through the runtime channel', async () => {
+    const { send, tabSend } = mockExtension(READY_SETTINGS, IDLE_STATUS, undefined);
+    Object.assign(chrome.runtime, {
+      getContexts: vi.fn(() =>
+        Promise.resolve([{ contextType: 'TAB', tabId: 7, frameId: 0, documentUrl: VIEWER }]),
+      ),
+    });
+    const viewerStatus = { ...IDLE_STATUS, phase: 'translating' as const, total: 4, translated: 1 };
+    send.mockImplementation((request) => {
+      if (request.type === 'PDF_VIEWER_COMMAND')
+        return Promise.resolve(
+          (request.command.type === 'GET_PAGE_STATUS'
+            ? IDLE_STATUS
+            : viewerStatus) as unknown as Awaited<ReturnType<typeof send>>,
+        );
+      return Promise.resolve({ ok: true as const, data: publicSettings('zh-CN') });
+    });
+    view = await mount(<PopupApp />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(view.container.querySelector('.current-site')?.textContent).toBe('paper.pdf');
+    expect(button(view.container, '快捷翻译').disabled).toBe(true);
+
+    await click(view.container, '翻译此 PDF');
+    expect(send).toHaveBeenCalledWith({
+      type: 'PDF_VIEWER_COMMAND',
+      tabId: 7,
+      command: { type: 'START_TRANSLATION' },
+    });
+    expect(tabSend).not.toHaveBeenCalled();
+    expect(view.container.querySelector('h1')?.textContent).toBe('正在翻译');
+  });
+
+  it('explains file access for a local PDF and offers the file picker instead', async () => {
+    mockExtension(READY_SETTINGS, IDLE_STATUS, 'file:///home/reader/paper.pdf');
+    Object.assign(chrome, {
+      extension: { isAllowedFileSchemeAccess: vi.fn(() => Promise.resolve(false)) },
+    });
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(view.container.textContent).toContain('允许访问文件网址');
+
+    await click(view.container, '打开扩展详情页');
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      url: 'chrome://extensions/?id=undefined',
+    });
+    await click(view.container, '选择 PDF 文件');
+    expect(chrome.tabs.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        url: 'chrome-extension://test/src/pdf/index.html',
+        openerTabId: 7,
+      }),
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('opens a local PDF directly when file access is allowed', async () => {
+    mockExtension(READY_SETTINGS, IDLE_STATUS, 'file:///home/reader/paper.pdf');
+    Object.assign(chrome, {
+      extension: { isAllowedFileSchemeAccess: vi.fn(() => Promise.resolve(true)) },
+    });
+    vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await click(view.container, '翻译此 PDF');
+    expect(chrome.tabs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'chrome-extension://test/src/pdf/index.html?file=file%3A%2F%2F%2Fhome%2Freader%2Fpaper.pdf&translate=segmented',
+      }),
+    );
+  });
+
+  it('opens an empty reader for a local file from any page', async () => {
+    mockExtension();
+    vi.spyOn(window, 'close').mockImplementation(() => {});
+    view = await mount(<PopupApp />);
+    await click(view.container, '翻译本地 PDF');
+    expect(chrome.tabs.create).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'chrome-extension://test/src/pdf/index.html' }),
+    );
+  });
+});

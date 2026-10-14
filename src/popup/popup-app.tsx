@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   CircleAlert,
   FileText,
+  FileUp,
   LoaderCircle,
   Languages,
   Play,
@@ -19,8 +20,16 @@ import {
   type PageCommand,
   type PageTranslationStatus,
   type PublicTranslatorSettings,
+  type RuntimeRequest,
 } from '../shared/messages';
 import { isUrlExcluded } from '../shared/settings';
+import {
+  getPdfFileName,
+  getPdfViewerUrl,
+  isLocalPdfUrl,
+  isPdfViewerUrl,
+  readPdfViewerParameters,
+} from '../shared/pdf-viewer';
 import { translationLanguageLabel } from '../shared/translation-languages';
 import { activeTranslatorEquals } from '../shared/translation-engines';
 import {
@@ -53,29 +62,67 @@ const IDLE: PageTranslationStatus = {
 const MAIN_FRAME: chrome.tabs.MessageSendOptions = { frameId: 0 };
 interface PageState {
   tabId?: number;
+  tabIndex?: number;
   hostname?: string;
   url?: string;
   available: boolean;
   restricted: boolean;
+  /** The tab is this extension's PDF reader, controlled through the runtime channel. */
+  pdfViewer?: boolean;
+  /** A local PDF; content scripts never run there, so the popup opens the reader itself. */
+  localPdf?: { fileAccess: boolean };
 }
 
 /** Page translation lives in the top document, and every response crosses a runtime type boundary. */
 async function sendMainFrameCommand(
   tabId: number,
   command: PageCommand,
+  pdfViewer = false,
 ): Promise<PageTranslationStatus> {
-  const response = await sendTabMessage<unknown>(tabId, command, MAIN_FRAME);
+  // Extension pages never receive tab messages; the PDF reader answers on the runtime channel.
+  const response = pdfViewer
+    ? await chrome.runtime.sendMessage<RuntimeRequest, unknown>({
+        type: 'PDF_VIEWER_COMMAND',
+        tabId,
+        command,
+      })
+    : await sendTabMessage<unknown>(tabId, command, MAIN_FRAME);
   if (!isPageTranslationStatus(response))
     throw new LocalizedError(message('请刷新网页后重新打开插件。'));
   return response;
 }
 
-async function readPageStatus(tabId: number): Promise<PageTranslationStatus | null> {
+async function readPageStatus(
+  tabId: number,
+  pdfViewer = false,
+): Promise<PageTranslationStatus | null> {
   try {
-    return await sendMainFrameCommand(tabId, { type: 'GET_PAGE_STATUS' });
+    return await sendMainFrameCommand(tabId, { type: 'GET_PAGE_STATUS' }, pdfViewer);
   } catch {
     return null;
   }
+}
+
+/** Chrome hides extension-page URLs from tab queries; our own contexts are always visible. */
+async function findPdfViewerUrl(tabId: number | undefined): Promise<string | undefined> {
+  if (tabId === undefined || !chrome.runtime.getContexts) return undefined;
+  try {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: ['TAB'], tabIds: [tabId] });
+    return contexts.find((context) => context.frameId === 0 && isPdfViewerUrl(context.documentUrl))
+      ?.documentUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Opens the PDF reader next to the current tab; without a source the user picks a local file. */
+async function openPdfReader(page: PageState | undefined, source?: string): Promise<void> {
+  await chrome.tabs.create({
+    url: getPdfViewerUrl(source, source ? 'segmented' : undefined),
+    ...(page?.tabIndex !== undefined ? { index: page.tabIndex + 1 } : {}),
+    ...(page?.tabId !== undefined ? { openerTabId: page.tabId } : {}),
+  });
+  window.close();
 }
 
 export function PopupApp() {
@@ -126,23 +173,32 @@ export function PopupApp() {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const tab = tabs[0];
         const http = Boolean(tab?.url && /^https?:/u.test(tab.url));
+        const viewerUrl = await findPdfViewerUrl(tab?.id);
+        const pdfViewer = viewerUrl !== undefined;
         const restricted =
-          !http ||
-          Boolean(
-            tab?.url &&
-            /^https:\/\/(chromewebstore.google.com|chrome.google.com\/webstore|microsoftedge.microsoft.com\/addons)/u.test(
-              tab.url,
-            ),
-          );
+          !pdfViewer &&
+          (!http ||
+            Boolean(
+              tab?.url &&
+              /^https:\/\/(chromewebstore.google.com|chrome.google.com\/webstore|microsoftedge.microsoft.com\/addons)/u.test(
+                tab.url,
+              ),
+            ));
+        const localPdf = isLocalPdfUrl(tab?.url)
+          ? { fileAccess: await chrome.extension.isAllowedFileSchemeAccess() }
+          : undefined;
         const nextStatus =
-          !restricted && tab?.id !== undefined ? await readPageStatus(tab.id) : null;
+          !restricted && tab?.id !== undefined ? await readPageStatus(tab.id, pdfViewer) : null;
         if (!mounted) return;
         setPage({
           tabId: tab?.id,
-          url: tab?.url,
+          tabIndex: tab?.index,
+          url: viewerUrl ?? tab?.url,
           hostname: http ? new URL(tab.url!).hostname : undefined,
           available: nextStatus !== null,
           restricted,
+          pdfViewer,
+          localPdf,
         });
         setStatus(nextStatus ?? IDLE);
         if (nextStatus && tab?.id !== undefined) {
@@ -150,7 +206,7 @@ export function PopupApp() {
           timer = setInterval(() => {
             if (polling || commandLock.current) return;
             polling = true;
-            void readPageStatus(tabId)
+            void readPageStatus(tabId, pdfViewer)
               .then((value) => {
                 if (!mounted || commandLock.current) return;
                 setPage((current) => current && { ...current, available: value !== null });
@@ -179,7 +235,14 @@ export function PopupApp() {
     setBusy(true);
     setCommandError('');
     try {
-      setStatus(await sendMainFrameCommand(page.tabId, { type }));
+      const next = await sendMainFrameCommand(page.tabId, { type }, page.pdfViewer);
+      // A browser PDF tab opens the reader in a new tab; this popup belongs to the old one.
+      if (
+        next.pdfDocument &&
+        (type === 'START_TRANSLATION' || type === 'START_FULL_DOCUMENT_TRANSLATION')
+      )
+        window.close();
+      setStatus(next);
     } catch (error) {
       setCommandError(message('操作未完成：{{p0}}', { p0: getErrorMessage(error) }));
     } finally {
@@ -189,7 +252,8 @@ export function PopupApp() {
   }
   /** Keep the popup available for errors; close only after the top document opened its editor. */
   async function openQuickTranslation() {
-    if (page?.tabId === undefined || page.restricted || commandLock.current) return;
+    if (page?.tabId === undefined || page.restricted || page.pdfViewer || commandLock.current)
+      return;
     commandLock.current = true;
     setBusy(true);
     setCommandError('');
@@ -225,6 +289,7 @@ export function PopupApp() {
   const needsRestart = status.context ? contextChanged : Boolean(status.needsRestart);
   const saving = Object.values(feedback).some((value) => value?.status === 'saving');
   const canTranslate = Boolean(page?.available && settings?.ready && !excluded);
+  const pdf = Boolean(page?.pdfViewer || status.pdfDocument);
   const fullDocument = status.mode === 'full-document';
   const incremental = fullDocument && status.stage === 'incremental';
   // Idle pages only need actions; keep progress, failures, and restart guidance visible.
@@ -245,7 +310,9 @@ export function PopupApp() {
                 ? t('翻译新内容')
                 : status.phase === 'error'
                   ? t('重新翻译')
-                  : t('翻译此网页');
+                  : pdf
+                    ? t('翻译此 PDF')
+                    : t('翻译此网页');
   const title = needsRestart
     ? t('新设置已就绪')
     : status.phase === 'translating'
@@ -275,7 +342,7 @@ export function PopupApp() {
     <button
       className="text-button quick-translation-entry"
       type="button"
-      disabled={page?.tabId === undefined || page.restricted || busy || saving}
+      disabled={page?.tabId === undefined || page.restricted || page.pdfViewer || busy || saving}
       onClick={() => void openQuickTranslation()}
     >
       <Languages aria-hidden="true" />
@@ -300,7 +367,15 @@ export function PopupApp() {
         </button>
       </header>
       <div className="popup-content">
-        <p className="current-site">{page?.hostname ?? t('当前网页')}</p>
+        <p className="current-site">
+          {page?.pdfViewer && page.url
+            ? (() => {
+                const source = readPdfViewerParameters(page.url).source;
+                return source ? getPdfFileName(source) : t('PDF 翻译');
+              })()
+            : (page?.hostname ??
+              (page?.localPdf && page.url ? getPdfFileName(page.url) : t('当前网页')))}
+        </p>
         {loadError ? (
           <section className="popup-notice">
             <CircleAlert aria-hidden="true" />
@@ -333,6 +408,42 @@ export function PopupApp() {
                 <ArrowUpRight aria-hidden="true" />
               </button>
             ) : null}
+          </section>
+        ) : page.localPdf ? (
+          <section className="translation-status" aria-label={t('网页翻译状态')}>
+            <p className="status-description">
+              {page.localPdf.fileAccess
+                ? t('在阅读器中打开此 PDF，原文与译文逐页并排显示。')
+                : t(
+                    '翻译本地 PDF 需要在扩展详情页开启「允许访问文件网址」，也可以直接在阅读器中选择文件。',
+                  )}
+            </p>
+            {page.localPdf.fileAccess ? (
+              <button
+                className="button button-primary button-block"
+                disabled={!settings.ready}
+                onClick={() => void openPdfReader(page, page.url)}
+              >
+                <Play aria-hidden="true" />
+                {t('翻译此 PDF')}
+              </button>
+            ) : (
+              <div className="translation-shortcuts">
+                <button
+                  className="button"
+                  onClick={() =>
+                    void chrome.tabs.create({
+                      url: `chrome://extensions/?id=${chrome.runtime.id}`,
+                    })
+                  }
+                >
+                  {t('打开扩展详情页')}
+                </button>
+                <button className="button button-primary" onClick={() => void openPdfReader(page)}>
+                  {t('选择 PDF 文件')}
+                </button>
+              </div>
+            )}
           </section>
         ) : !page.available || excluded ? (
           <section className="popup-notice">
@@ -391,6 +502,11 @@ export function PopupApp() {
                             : t('译文将显示在原文下方。')}
                 </p>
               </>
+            ) : status.pdfDocument ? (
+              // The browser's viewer has no page text: say where the translation will appear.
+              <p className="status-description">
+                {t('在阅读器中打开此 PDF，原文与译文逐页并排显示。')}
+              </p>
             ) : null}
             {!fullDocument && !incremental && status.phase === 'translating' && status.total > 0 ? (
               <div
@@ -552,7 +668,7 @@ export function PopupApp() {
                 checked={Boolean(
                   page?.hostname && settings.autoTranslateSites.includes(page.hostname),
                 )}
-                disabled={!canTranslate || saving || busy}
+                disabled={!canTranslate || !page?.hostname || saving || busy}
                 onChange={(enabled) => {
                   if (!page?.hostname) return;
                   void save(
@@ -571,15 +687,21 @@ export function PopupApp() {
         ) : null}
       </div>
       <footer className="popup-footer">
-        <button
-          className="text-button"
-          type="button"
-          disabled={!page?.available || !status.total || busy || saving}
-          onClick={() => void run('RESTORE_PAGE')}
-        >
-          <RotateCcw aria-hidden="true" />
-          {t('恢复原文')}
-        </button>
+        <div className="popup-footer-actions">
+          <button
+            className="text-button"
+            type="button"
+            disabled={!page?.available || !status.total || busy || saving}
+            onClick={() => void run('RESTORE_PAGE')}
+          >
+            <RotateCcw aria-hidden="true" />
+            {t('恢复原文')}
+          </button>
+          <button className="text-button" type="button" onClick={() => void openPdfReader(page)}>
+            <FileUp aria-hidden="true" />
+            {t('翻译本地 PDF')}
+          </button>
+        </div>
         <span>
           <kbd>Alt</kbd> + <kbd>T</kbd>
         </span>

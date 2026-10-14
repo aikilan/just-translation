@@ -196,11 +196,17 @@ beforeEach(() => {
       data:
         request.type === 'GET_PUBLIC_SETTINGS'
           ? settings
-          : {
-              text: '<img src=x onerror=alert(1)>',
-              targetLanguage: settings.targetLanguage,
-              translatorName: 'Google',
-            },
+          : request.type === 'TRANSLATE_QUICK_TEXT'
+            ? {
+                // Provider text is markup-like on purpose: it must render as plain text.
+                translations: Object.fromEntries(
+                  request.slices.map((slice) => [slice.id, '<img src=x onerror=alert(1)>']),
+                ),
+                failures: {},
+                targetLanguage: settings.targetLanguage,
+                translatorName: 'Google',
+              }
+            : undefined,
     }),
   );
   model = new QuickTranslationController(send);
@@ -413,5 +419,77 @@ it('recovers an invalid language draft by choosing a preset and submits that pre
       type: 'TRANSLATE_QUICK_TEXT',
       targetLanguage: 'Japanese',
     }),
+  );
+});
+
+it('shows progress while slices arrive and offers a retry for slices that failed', async () => {
+  await act(async () => {
+    await Promise.resolve();
+    dialog.open();
+  });
+  let respond!: (value: Result<unknown>) => void;
+  send.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        respond = resolve;
+      }),
+  );
+  await act(async () => {
+    model.setSource('First paragraph.\n\nSecond paragraph.');
+    await Promise.resolve();
+  });
+  await act(async () => {
+    button('翻译').click();
+    await Promise.resolve();
+  });
+  const request = send.mock.calls.at(-1)![0] as Extract<
+    RuntimeRequest,
+    { type: 'TRANSLATE_QUICK_TEXT' }
+  >;
+  await act(async () => {
+    dialog.receiveProgress({
+      type: 'QUICK_TRANSLATION_PROGRESS',
+      requestId: request.requestId,
+      translations: { s0: '第一段。' },
+    });
+    await Promise.resolve();
+  });
+  expect(shadow().querySelector('[data-quick-result]')!.textContent).toBe('第一段。\n\n');
+  expect(shadow().querySelector('.quick-progress')!.textContent).toBe('翻译中… 1 / 2');
+
+  await act(async () => {
+    respond({
+      ok: true,
+      data: {
+        translations: { s0: '第一段。' },
+        failures: { s1: { text: 'HTTP 504' } },
+        targetLanguage: settings.targetLanguage,
+        translatorName: 'Google',
+      },
+    });
+    await Promise.resolve();
+  });
+  expect(shadow().querySelector('[data-quick-result]')!.textContent).toBe(
+    '第一段。\n\nSecond paragraph.',
+  );
+  expect(shadow().querySelector('.quick-incomplete')!.textContent).toContain(
+    '1 段未能翻译，已保留原文。',
+  );
+  await act(async () => {
+    button('重试失败部分').click();
+    await Promise.resolve();
+  });
+  expect(send).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: 'TRANSLATE_QUICK_TEXT',
+      slices: [{ id: 's1', text: 'Second paragraph.' }],
+    }),
+  );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(shadow().querySelector('.quick-incomplete')).toBeNull();
+  expect(shadow().querySelector('[data-quick-result]')!.textContent).toBe(
+    '第一段。\n\n<img src=x onerror=alert(1)>',
   );
 });
