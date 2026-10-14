@@ -20,6 +20,7 @@ Translating a web page is a simple job, yet most bilingual translation extension
 - **Full-document translation** (AI only): sends the whole loaded article in one request, so terminology and cross-paragraph references stay consistent.
 - **Selection translation**: select text, right-click, and the result appears in a popover next to the selection. Works in iframes and editable fields.
 - **Quick translation**: a popup for pasted text, plus image translation with vision-capable AI models.
+- **PDF translation**: open a PDF in the built-in reader to see each original page next to its reflowed text and translation, or switch to a single-column reading view. Translated text never covers the page. Works with online PDFs and local files (drag and drop), and pdf.js ships inside the extension, so the reader also works offline.
 - **Viewport first**: what's on screen is translated first, then the next screen, then the rest. Dynamic content is picked up incrementally.
 - **Site rules**: auto-translate exact domains, exclude domains or `*.example.com` wildcards.
 - **Local cache**: translations are cached in IndexedDB under SHA-256 keys for 72 hours.

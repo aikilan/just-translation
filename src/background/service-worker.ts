@@ -27,6 +27,7 @@ import {
   getErrorMessage,
   type Result,
   type RuntimeRequest,
+  type TranslationMode,
   type TranslationPriority,
   type TranslationBatchProgress,
 } from '../shared/messages';
@@ -55,6 +56,7 @@ import {
   type TranslationRuntimeConfig,
 } from './translation-engine';
 import { activeTranslatorName, type ActiveTranslator } from '../shared/translation-engines';
+import { extensionOrigin, getPdfViewerUrl, isPdfViewerUrl } from '../shared/pdf-viewer';
 
 // 后台唯一入口：负责持久化设置、AI 请求调度和浏览器右键菜单注册。
 const activeRequests = new AbortableRequestRegistry(60_000);
@@ -156,6 +158,8 @@ chrome.webNavigation.onCommitted.addListener(({ tabId, frameId, documentId }) =>
 
 chrome.runtime.onMessage.addListener(
   (request: RuntimeRequest, sender, sendResponse: (response: Result<unknown>) => void) => {
+    // Viewer commands are addressed to a PDF viewer tab; only that page may answer them.
+    if (request?.type === 'PDF_VIEWER_COMMAND') return false;
     void handleRuntimeRequest(request, sender).then(sendResponse);
     return true;
   },
@@ -165,7 +169,17 @@ chrome.commands.onCommand.addListener((command) => {
   if (command !== 'translate-page') return;
   void getActiveTabId().then((tabId) => {
     if (tabId !== undefined) {
-      return chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_TRANSLATION' });
+      // Extension pages never receive tab messages; the PDF viewer listens on the runtime channel.
+      return chrome.tabs
+        .sendMessage(tabId, { type: 'TOGGLE_TRANSLATION' })
+        .catch(() =>
+          chrome.runtime.sendMessage({
+            type: 'PDF_VIEWER_COMMAND',
+            tabId,
+            command: { type: 'TOGGLE_TRANSLATION' },
+          }),
+        )
+        .catch(() => undefined);
     }
     return undefined;
   });
@@ -238,6 +252,10 @@ async function handleRuntimeRequest(
         };
       case 'GET_PUBLIC_SETTINGS': {
         return { ok: true, data: await readPublicSettings() };
+      }
+      case 'OPEN_PDF_VIEWER': {
+        await openPdfViewer(sender, request.translate);
+        return { ok: true, data: undefined };
       }
       case 'BEGIN_TRANSLATION_SESSION': {
         if (request.mode !== 'segmented' && request.mode !== 'full-document')
@@ -370,9 +388,12 @@ async function handleRuntimeRequest(
             };
             // Address the original document, never the tab's newly navigated page.
             // The terminal response still accounts for all results if the document has closed.
-            void chrome.tabs
-              .sendMessage(session.tabId, event, { documentId })
-              .catch(() => undefined);
+            // The PDF viewer is an extension page and only receives runtime messages.
+            void (
+              isExtensionSession(session)
+                ? chrome.runtime.sendMessage(event)
+                : chrome.tabs.sendMessage(session.tabId, event, { documentId })
+            ).catch(() => undefined);
           };
           const queue = getRequestQueue(session.settings);
           const queueUrl = getTranslationQueueUrl(session.settings);
@@ -532,9 +553,27 @@ async function getTranslationSession(
 }
 
 async function assertCurrentDocument(identity: TranslationSessionIdentity): Promise<void> {
+  if (isExtensionSession(identity)) {
+    // webNavigation does not report extension pages; ask the runtime for the live viewer document.
+    const contexts = await chrome.runtime.getContexts({ documentIds: [identity.documentId] });
+    if (
+      !contexts.some(
+        (context) =>
+          context.tabId === identity.tabId &&
+          context.frameId === 0 &&
+          isPdfViewerUrl(context.documentUrl),
+      )
+    )
+      throw new LocalizedError(message('当前网页已变化，翻译会话失效'));
+    return;
+  }
   const current = await chrome.webNavigation.getFrame({ tabId: identity.tabId, frameId: 0 });
   if (current?.documentId !== identity.documentId)
     throw new LocalizedError(message('当前网页已变化，翻译会话失效'));
+}
+
+function isExtensionSession(identity: TranslationSessionIdentity): boolean {
+  return identity.origin === extensionOrigin();
 }
 
 /** Uses browser-owned sender metadata so a webpage cannot choose another cache origin. */
@@ -543,6 +582,12 @@ function getSenderPageIdentity(
   sessionId: string,
 ): TranslationSessionIdentity {
   const tabId = sender.tab?.id;
+  if (tabId !== undefined && isPdfViewerUrl(sender.url)) {
+    if (!sender.documentId || sender.frameId !== 0)
+      throw new LocalizedError(message('无法确定请求所属网页文档'));
+    // Viewer documents are trusted extension code; their PDFs share a private cache partition.
+    return { tabId, documentId: sender.documentId, sessionId, origin: extensionOrigin() };
+  }
   const tabUrl = sender.tab?.url;
   if (tabId === undefined || !tabUrl) throw new LocalizedError(message('无法确定当前网页站点'));
   if (!sender.documentId || sender.frameId !== 0)
@@ -561,6 +606,23 @@ function getSenderPageIdentity(
 
 function getRequestPrefix(identity: TranslationSessionIdentity): string {
   return `${identity.tabId}:${identity.documentId}:${identity.sessionId}:`;
+}
+
+/** Opens the reader beside a browser PDF tab; the address always comes from the sender. */
+async function openPdfViewer(
+  sender: chrome.runtime.MessageSender,
+  translate: TranslationMode | undefined,
+): Promise<void> {
+  const tab = sender.tab;
+  const source = sender.url;
+  if (tab?.id === undefined || sender.frameId !== 0 || !source || !/^https?:/u.test(source))
+    throw new LocalizedError(message('无法确定当前网页站点'));
+  // A new tab keeps the browser's own viewer untouched, like any other "open with" action.
+  await chrome.tabs.create({
+    url: getPdfViewerUrl(source, translate),
+    index: tab.index + 1,
+    openerTabId: tab.id,
+  });
 }
 
 async function getActiveTabId(): Promise<number | undefined> {

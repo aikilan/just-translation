@@ -197,6 +197,11 @@ body {
 .popup-footer .text-button {
   color: var(--text-muted);
 }
+.popup-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
 .popup-footer svg {
   width: 14px;
   height: 14px;

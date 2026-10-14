@@ -24,6 +24,8 @@ export interface PageTranslationStatus {
   displayMode: DisplayMode;
   context?: { translator: ActiveTranslator; targetLanguage: string };
   needsRestart?: boolean;
+  /** The document is a PDF shown by the browser viewer; translation opens the PDF reader. */
+  pdfDocument?: boolean;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
@@ -60,7 +62,8 @@ export function isPageTranslationStatus(value: unknown): value is PageTranslatio
         isActiveTranslator(context.translator) &&
         'targetLanguage' in context &&
         typeof context.targetLanguage === 'string')) &&
-    (status.needsRestart === undefined || typeof status.needsRestart === 'boolean')
+    (status.needsRestart === undefined || typeof status.needsRestart === 'boolean') &&
+    (status.pdfDocument === undefined || typeof status.pdfDocument === 'boolean')
   );
 }
 
@@ -179,6 +182,10 @@ export type RuntimeRequest =
       targetLanguage: string;
     }
   | { type: 'GET_PUBLIC_SETTINGS' }
+  /** Sent by the content script of a browser-rendered PDF; the address comes from the sender. */
+  | { type: 'OPEN_PDF_VIEWER'; translate?: TranslationMode }
+  /** Page commands for an extension-hosted PDF viewer tab; the worker never answers them. */
+  | { type: 'PDF_VIEWER_COMMAND'; tabId: number; command: PageCommand }
   | {
       type: 'BEGIN_TRANSLATION_SESSION';
       translator: ActiveTranslator;
