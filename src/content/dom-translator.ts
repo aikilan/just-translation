@@ -667,6 +667,30 @@ function unwrapReadingRun(source: HTMLElement): void {
   if (source.hasAttribute(READING_RUN_ATTRIBUTE)) source.replaceWith(...source.childNodes);
 }
 
+/** Recognizes our own anchor writes in records collected while no page observer was listening:
+ * wrapping inserts an anchor and moves prose into it, unwrapping replaces an emptied anchor. */
+export function isReadingRunMutation(mutation: MutationRecord): boolean {
+  if (mutation.type !== 'childList') return false;
+  if (isReadingRunAnchor(mutation.target)) return true;
+  const removed = [...mutation.removedNodes];
+  if (
+    removed.length > 0 &&
+    removed.every(
+      (node) =>
+        isReadingRunAnchor(node) && !node.hasChildNodes() && !node.hasAttribute(SOURCE_ATTRIBUTE),
+    )
+  )
+    return true;
+  return (
+    [...mutation.addedNodes].every(isReadingRunAnchor) &&
+    removed.every((node) => isReadingRunAnchor(node.parentNode))
+  );
+}
+
+function isReadingRunAnchor(node: Node | null): node is HTMLElement {
+  return node?.nodeType === 1 && (node as Element).hasAttribute(READING_RUN_ATTRIBUTE);
+}
+
 /** Also removes unselected/queued anchors when translation is stopped before preflight completes. */
 export function cleanupReadingRuns(): void {
   document

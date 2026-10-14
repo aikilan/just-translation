@@ -25,6 +25,15 @@ const PUBLIC_SETTINGS = {
   autoTranslateSites: [],
 };
 
+// A test that fails midway never reaches its own restore(); a controller left running would keep
+// observing the shared document and break every later test.
+const controllers: TranslationController[] = [];
+function trackedController(): TranslationController {
+  const instance = new TranslationController();
+  controllers.push(instance);
+  return instance;
+}
+
 describe('TranslationController', () => {
   it.each([true, false])(
     'keeps failed stream items pending during one automatic retry (success: %s)',
@@ -32,7 +41,7 @@ describe('TranslationController', () => {
       // This protocol test requires both short sources in one batch; traversal budget has separate tests.
       vi.spyOn(performance, 'now').mockReturnValue(0);
       document.body.innerHTML = '<main><p>First source.</p><p>Second source.</p></main>';
-      const instance = new TranslationController();
+      const instance = trackedController();
       const batches: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>[] = [];
       const fetcher = vi.fn<typeof fetch>();
       let finishRetry!: (response: Response) => void;
@@ -109,6 +118,8 @@ describe('TranslationController', () => {
   );
 
   it('orders streamed paragraphs, caches only complete text and retries only the failed node', async () => {
+    // These sources must share one batch; the traversal budget may not split them (tested separately).
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     document.body.innerHTML =
       '<main><p>First source paragraph.</p><p>Second source paragraph.</p><p>Third source paragraph.</p></main>';
     const original = document.body.innerHTML;
@@ -121,7 +132,7 @@ describe('TranslationController', () => {
       }),
       { headers: { 'content-type': 'text/event-stream' } },
     );
-    const instance = new TranslationController();
+    const instance = trackedController();
     const cacheWrites = vi.fn<(request: CacheWriteRequest) => void>();
     const batches: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>[] = [];
     const sendMessage = vi.fn(async (request: RuntimeRequest): Promise<Result<unknown>> => {
@@ -223,7 +234,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     expect(firstRequestTailMeasured).toBe(false);
     expect(controller.getStatus()).toMatchObject({ translated: 60, failed: 0, total: 60 });
@@ -251,7 +262,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     const work = controller.start();
     const settle = () => {
       for (const { request, finish } of batches)
@@ -310,6 +321,7 @@ describe('TranslationController', () => {
   });
 
   afterEach(() => {
+    for (const instance of controllers.splice(0)) instance.restore();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -330,7 +342,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveSession).toBeTypeOf('function'));
@@ -365,7 +377,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -391,7 +403,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     expect(document.querySelector('[data-justranslate-state="pending"]')).toBeNull();
@@ -411,6 +423,8 @@ describe('TranslationController', () => {
   });
 
   it('renders a pending state for every uncached node before the first request completes', async () => {
+    // These sources must share one batch; the traversal budget may not split them (tested separately).
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     document.body.innerHTML =
       '<main><p>First pending source.</p><p>Second pending source.</p></main>';
     let resolveBatch: ((result: Result<TranslationBatchResult>) => void) | undefined;
@@ -428,7 +442,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveBatch).toBeTypeOf('function'));
@@ -482,7 +496,7 @@ describe('TranslationController', () => {
           resolveCandidates = resolve;
         }),
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveCandidates).toBeTypeOf('function'));
@@ -515,7 +529,7 @@ describe('TranslationController', () => {
         },
       },
     });
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -567,7 +581,7 @@ describe('TranslationController', () => {
       },
       (request) => observedRequests.push({ type: request.type, sessionId: request.sessionId }),
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -590,6 +604,9 @@ describe('TranslationController', () => {
   });
 
   it('starts foreground AI work before background candidate resolution finishes', async () => {
+    // The lookup stub holds whole requests, so the background source must get a request of its own;
+    // the traversal budget may not regroup discovery (tested separately).
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     const viewportHeight = window.innerHeight || 768;
     document.body.innerHTML = `
       <main>
@@ -651,7 +668,7 @@ describe('TranslationController', () => {
         missIds: request.candidates.map((candidate) => candidate.id),
       });
     });
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveBackgroundCandidates).toBeTypeOf('function'));
@@ -705,7 +722,7 @@ describe('TranslationController', () => {
         releaseLater = () => resolve(result);
       });
     });
-    const controller = new TranslationController();
+    const controller = trackedController();
     const translation = controller.start();
     await vi.waitFor(() => expect(lookups.length).toBeGreaterThan(1));
     expect(lookups[0].candidates.length).toBeLessThanOrEqual(4);
@@ -759,7 +776,7 @@ describe('TranslationController', () => {
       }
       return Promise.resolve(result);
     });
-    const controller = new TranslationController();
+    const controller = trackedController();
     const translation = controller.start();
     await vi.waitFor(() => expect(releaseAhead).toBeTypeOf('function'));
     await vi.waitFor(() => expect(controller.getStatus().translated).toBe(1));
@@ -800,7 +817,7 @@ describe('TranslationController', () => {
         });
       },
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     expect(controller.getStatus()).toMatchObject({
       phase: 'error',
@@ -840,7 +857,7 @@ describe('TranslationController', () => {
           resolveLookup = resolve;
         }),
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
     const translation = controller.start();
     await vi.advanceTimersByTimeAsync(5_000);
     await translation;
@@ -873,7 +890,7 @@ describe('TranslationController', () => {
         });
       return Promise.resolve(controlResponse(request));
     });
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     expect(
       queryAll.mock.calls.filter(([selector]) => selector === '[data-justranslate-source]'),
@@ -908,7 +925,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(3));
@@ -957,7 +974,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(3));
@@ -1025,7 +1042,7 @@ describe('TranslationController', () => {
         }),
       );
       stubChrome(sendMessage, lookup);
-      const controller = new TranslationController();
+      const controller = trackedController();
       const translation = controller.start();
       try {
         await vi.waitFor(() => expect(pendingBatch).toBeDefined());
@@ -1118,7 +1135,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(1));
@@ -1160,7 +1177,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(pendingBatches).toHaveLength(2));
@@ -1214,7 +1231,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1234,6 +1251,8 @@ describe('TranslationController', () => {
   });
 
   it('keeps valid items from a partial provider response and fails only the missing node', async () => {
+    // These sources must share one batch; the traversal budget may not split them (tested separately).
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     document.body.innerHTML = `
       <main>
         <p id="success">First item in one provider batch.</p>
@@ -1257,7 +1276,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1290,7 +1309,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     const source = document.querySelector<HTMLElement>('#source')!;
 
@@ -1332,7 +1351,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     const source = document.querySelector<HTMLElement>('#source')!;
 
@@ -1386,7 +1405,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
     const source = document.querySelector<HTMLElement>('#source')!;
 
@@ -1426,7 +1445,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveBatch).toBeTypeOf('function'));
@@ -1473,7 +1492,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveFirstBatch).toBeTypeOf('function'));
@@ -1519,7 +1538,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveInitial).toBeTypeOf('function'));
@@ -1570,7 +1589,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(resolveBatchRequest).toBeTypeOf('function'));
@@ -1616,7 +1635,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
 
     document.querySelector<HTMLElement>('#lazy')!.hidden = false;
@@ -1648,7 +1667,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
 
     const bodyScan = vi.spyOn(document.body, 'querySelectorAll');
@@ -1696,7 +1715,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
 
     document.querySelector('[data-justranslate-translation]')!.remove();
@@ -1727,7 +1746,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
     await controller.start();
 
     document.querySelector('#removed')!.remove();
@@ -1758,7 +1777,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1807,7 +1826,7 @@ describe('TranslationController', () => {
         }
       },
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
     expect(document.querySelector('[data-justranslate-translation]')?.textContent).toBe('译文 1');
@@ -1839,7 +1858,7 @@ describe('TranslationController', () => {
         missIds: [],
       }),
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1878,7 +1897,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1927,7 +1946,7 @@ describe('TranslationController', () => {
           .map((candidate) => candidate.id),
       }),
     );
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     await controller.start();
 
@@ -1979,7 +1998,7 @@ describe('TranslationController', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const controller = new TranslationController();
+    const controller = trackedController();
 
     const translation = controller.start();
     await vi.waitFor(() => expect(started).toBe(6));
@@ -2130,6 +2149,7 @@ describe('revealed content', () => {
       '<section id="later" translate="no"><p>Second page paragraph.</p></section></main>';
   });
   afterEach(() => {
+    for (const instance of controllers.splice(0)) instance.restore();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -2157,7 +2177,7 @@ describe('revealed content', () => {
 
   it('extends a finished translation to a revealed page only', async () => {
     const { batches } = translateEverything();
-    const instance = new TranslationController();
+    const instance = trackedController();
     await instance.start();
     expect(translatedTexts()).toEqual(['译：First page paragraph.']);
 
@@ -2184,7 +2204,7 @@ describe('revealed content', () => {
         release = resolve;
       }),
     );
-    const instance = new TranslationController();
+    const instance = trackedController();
     const work = instance.start();
     await vi.waitFor(() => expect(batches).toHaveLength(1));
     const later = document.querySelector<HTMLElement>('#later')!;
@@ -2198,7 +2218,7 @@ describe('revealed content', () => {
 
   it('never starts translation by itself', async () => {
     translateEverything();
-    const instance = new TranslationController();
+    const instance = trackedController();
     const later = document.querySelector<HTMLElement>('#later')!;
     later.removeAttribute('translate');
     expect(instance.revealContent([later])).toBe(true);
@@ -2218,7 +2238,7 @@ describe('revealed content', () => {
       return Promise.resolve(controlResponse(request));
     });
     stubChrome(sendMessage);
-    const instance = new TranslationController();
+    const instance = trackedController();
     void instance.startFullDocument();
     await vi.waitFor(() =>
       expect(sendMessage).toHaveBeenCalledWith(

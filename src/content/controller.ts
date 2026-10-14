@@ -39,6 +39,7 @@ import {
   discoverTranslatableElements,
   getOriginalSourceText,
   getElementDeclaredLanguage,
+  isReadingRunMutation,
   getElementSourceText,
   renderTranslation,
   prepareTranslationRender,
@@ -64,6 +65,14 @@ const PREFLIGHT_MESSAGE_TIMEOUT_MS = 5_000;
 const CANDIDATE_CHUNK_MAX_ITEMS = 24;
 const CANDIDATE_CHUNK_MAX_CHARACTERS = 12_000;
 const MAX_PENDING_DISCOVERY_SLICES = 3;
+const PAGE_OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  characterDataOldValue: true,
+  attributes: true,
+};
+const PRESENTATION_EVENTS = ['transitionend', 'animationend', 'toggle'];
 const TRANSLATION_PRIORITIES: readonly TranslationPriority[] = [
   'visible',
   'readAhead',
@@ -133,6 +142,8 @@ interface OrderedRenderSlot {
   element: HTMLElement;
   record?: TranslationRecord;
   skipped: boolean;
+  /** The flush has moved past this slot; a later record for its element needs a new one. */
+  committed?: boolean;
 }
 
 interface OrderedRenderQueue {
@@ -205,14 +216,8 @@ export class TranslationController {
   private readonly sessionInfos = new Map<string, TranslationSessionInfo>();
   private readonly sessionCacheWrites = new Map<string, Set<Promise<void>>>();
   private observer: MutationObserver | null = null;
-  /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
-  private readonly onPresentationChanged = (event: Event): void => {
-    const element = event.target;
-    if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
-      return;
-    this.addNearestDynamicRoot(element);
-    this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
-  };
+  private readonly onPresentationChanged = (event: Event): void =>
+    this.notePresentationChange(event.target);
   private observerTimer: number | undefined;
   private readonly dynamicRoots = new Map<
     HTMLElement,
@@ -355,6 +360,11 @@ export class TranslationController {
     expectedTranslator?: ActiveTranslator,
   ): Promise<void> {
     if (this.hasActiveOperation()) return;
+    // disconnect() would drop records not yet delivered.
+    this.consumeObservedMutations();
+    // Our own anchor writes while preparing must not look like page changes, so the page observer
+    // stays off until preflight ends. Record that window instead and replay what the page changed.
+    const missedChanges = this.recordMissedPageChanges();
     this.disconnectObserver(scopeRoots === undefined);
     this.purgeDisconnectedRecords();
     const sessionId = crypto.randomUUID();
@@ -444,7 +454,10 @@ export class TranslationController {
       this.dynamicContentEnabled = settings.translateDynamicContent;
       this.status.displayMode = settings.displayMode;
       setDocumentDisplayMode(settings.displayMode);
-      if (this.dynamicContentEnabled) this.observeDynamicContent();
+      if (this.dynamicContentEnabled) {
+        this.observeDynamicContent();
+        missedChanges.replay();
+      }
       let hasStaleSource = false;
       let lastError: UiMessage | undefined;
       for (let pass = 0; pass < MAX_STALE_RETRANSLATION_PASSES; pass += 1) {
@@ -481,6 +494,7 @@ export class TranslationController {
       this.status.phase = 'error';
       this.status.error = message;
     } finally {
+      missedChanges.stop();
       preflightObserver.disconnect();
       if (sessionStarted) void this.closeSessionAfterCacheWrites(sessionId);
       if (!this.hasActiveOperation()) this.metrics.finish();
@@ -1167,22 +1181,18 @@ export class TranslationController {
   private flushOrderedRenderLane(queue: OrderedRenderQueue, tasks: RenderTasks): void {
     while (queue.nextIndex < queue.slots.length) {
       const slot = queue.slots[queue.nextIndex];
-      if (slot.skipped) {
-        queue.nextIndex += 1;
-        continue;
-      }
       const record = slot.record;
-      if (!record) break;
-      if (this.records.get(record.element) !== record) {
-        queue.nextIndex += 1;
-        continue;
+      if (!slot.skipped) {
+        if (!record) break;
+        if (this.records.get(record.element) === record) {
+          if (!record.outcome) break;
+          const outcome = record.outcome;
+          record.outcome = undefined;
+          this.enqueueRecordRender(record, outcome, tasks);
+        }
       }
-      if (!record.outcome) break;
-
-      const outcome = record.outcome;
-      record.outcome = undefined;
+      slot.committed = true;
       queue.nextIndex += 1;
-      this.enqueueRecordRender(record, outcome, tasks);
     }
   }
 
@@ -1266,13 +1276,14 @@ export class TranslationController {
     return queue;
   }
 
-  /** Inserts dynamic nodes into the uncommitted suffix without reordering already shown content. */
+  /** Inserts dynamic nodes into the uncommitted suffix without reordering already shown content.
+   * A source the page rewrote after its slot was committed gets a new slot in that suffix. */
   private ensureOrderedRenderSlot(
     queue: ReadingWindowRenderCoordinator,
     element: HTMLElement,
   ): OrderedRenderSlot {
     const existing = queue.slotByElement.get(element);
-    if (existing) return existing;
+    if (existing && !existing.committed) return existing;
     const lane = queue.lanes[getElementTranslationPriority(element)];
     const slot: OrderedRenderSlot = {
       element,
@@ -1369,6 +1380,7 @@ export class TranslationController {
         }
         const record = this.createRecord(element, group.sourceText);
         slot.record = record;
+        slot.skipped = false;
       }
     }
     this.consumeObservedMutations();
@@ -1532,6 +1544,7 @@ export class TranslationController {
         }
         const record = this.records.get(element) ?? this.createRecord(element, group.sourceText);
         slot.record = record;
+        slot.skipped = false;
         records.push(record);
         if (cached !== undefined) {
           // Cache hits are already complete: bypass network ordering, but retain guarded rendering.
@@ -1669,6 +1682,7 @@ export class TranslationController {
       if (translatedText === undefined && failedError === undefined && !activeGroup) continue;
       const record = this.createRecord(member, group.sourceText);
       slot.record = record;
+      slot.skipped = false;
       // A late duplicate shares settled parts, but keeps its own DOM retry lifecycle.
       if (translatedText === undefined) record.checkpoint = activeGroup?.checkpoint;
       if (translatedText !== undefined) {
@@ -2019,15 +2033,47 @@ export class TranslationController {
   private observeDynamicContent(): void {
     this.observer?.disconnect();
     this.observer = new MutationObserver((mutations) => this.handlePageMutations(mutations));
-    this.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      characterDataOldValue: true,
-      attributes: true,
-    });
-    for (const event of ['transitionend', 'animationend', 'toggle'])
+    this.observer.observe(document.documentElement, PAGE_OBSERVER_OPTIONS);
+    for (const event of PRESENTATION_EVENTS)
       document.addEventListener(event, this.onPresentationChanged, true);
+  }
+
+  /** Collects page changes while the page observer is off; replay hands them to the live path. */
+  private recordMissedPageChanges(): { replay: () => void; stop: () => void } {
+    const mutations: MutationRecord[] = [];
+    const presentationTargets: EventTarget[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(document.documentElement, PAGE_OBSERVER_OPTIONS);
+    const onPresentationChanged = (event: Event) => {
+      if (event.target) presentationTargets.push(event.target);
+    };
+    for (const event of PRESENTATION_EVENTS)
+      document.addEventListener(event, onPresentationChanged, true);
+    const stop = () => {
+      mutations.push(...observer.takeRecords());
+      observer.disconnect();
+      for (const event of PRESENTATION_EVENTS)
+        document.removeEventListener(event, onPresentationChanged, true);
+    };
+    return {
+      stop,
+      replay: () => {
+        stop();
+        const pageMutations = mutations.filter((mutation) => !isReadingRunMutation(mutation));
+        if (pageMutations.length > 0) this.handlePageMutations(pageMutations);
+        for (const target of presentationTargets) this.notePresentationChange(target);
+        mutations.length = 0;
+        presentationTargets.length = 0;
+      },
+    };
+  }
+
+  /** CSS transitions and details toggles can reveal text without changing class/style attributes. */
+  private notePresentationChange(element: EventTarget | null): void {
+    if (!(element instanceof HTMLElement) || element.closest('[data-justranslate-translation]'))
+      return;
+    this.addNearestDynamicRoot(element);
+    this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
   }
 
   /** Drain without dropping page-authored changes sharing a task with our rendering. */
@@ -2172,6 +2218,9 @@ export class TranslationController {
       )
         continue;
       if (group.records.some((record) => record.element.isConnected)) pass.markStale();
+      // Without its group no outcome can reach these records, and their ordered render slots
+      // would hold every later result. The rescan scheduled for the edit creates fresh ones.
+      for (const record of group.records) this.discardRecord(record);
       pass.activeGroups.delete(id);
       pass.groupsBySourceText.delete(group.sourceText);
       pass.expectedSegmentsByGroup.delete(id);
@@ -2237,7 +2286,7 @@ export class TranslationController {
   private disconnectObserver(clearPending = true): void {
     this.observer?.disconnect();
     this.observer = null;
-    for (const event of ['transitionend', 'animationend', 'toggle'])
+    for (const event of PRESENTATION_EVENTS)
       document.removeEventListener(event, this.onPresentationChanged, true);
     window.clearTimeout(this.observerTimer);
     if (clearPending) this.dynamicRoots.clear();
