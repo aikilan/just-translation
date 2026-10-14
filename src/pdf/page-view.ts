@@ -14,8 +14,8 @@ export interface PdfPageElements {
 }
 
 /**
- * One page row: the rendered original beside its reading text. The original is excluded from
- * translation discovery; only the reading text is a translation source.
+ * One page row: the rendered original beside its reading text. The original is never a
+ * translation source; the reading text becomes one once the page is unlocked.
  */
 export function createPageSection(
   ownerDocument: Document,
@@ -37,6 +37,8 @@ export function createPageSection(
   const reading = ownerDocument.createElement('div');
   reading.className = 'pdf-page-reading';
   reading.dataset.state = 'pending';
+  // Locked until the reader reaches the page; see PdfPageScope.
+  reading.setAttribute('translate', 'no');
   section.append(visual, reading);
   return { section, visual, canvas, reading };
 }

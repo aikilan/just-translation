@@ -14,6 +14,7 @@ import { getSettings } from '../shared/settings-store';
 import { PdfReader, type PdfSource } from './pdf-reader';
 import { loadPdfDocument } from './pdfjs-loader';
 import { PdfViewerApp, type PdfLayout } from './viewer-app';
+import { PdfPageScope } from './page-scope';
 import { PdfViewerSession } from './viewer-session';
 import { createViewerStore } from './viewer-store';
 import '../ui/base.css';
@@ -36,7 +37,9 @@ const store = createViewerStore({
 });
 documentRoot.dataset.layout = store.getSnapshot().layout;
 
-const session = new PdfViewerSession(() => new TranslationController());
+// Pages are handed to the translator as the reader scrolls to them.
+const scope = new PdfPageScope(documentRoot, (readings) => session.reveal(readings));
+const session = new PdfViewerSession(() => new TranslationController(), scope);
 const reader = new PdfReader(documentRoot, loadPdfDocument, {
   onState: (state) => {
     session.updateReader(state);
@@ -146,6 +149,7 @@ void getSettings()
         <PdfViewerApp
           store={store}
           getStatus={() => session.getStatus()}
+          getPageProgress={() => session.getPageProgress()}
           runCommand={(command) => {
             session.handleCommand(command);
           }}

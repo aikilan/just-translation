@@ -773,6 +773,27 @@ export class TranslationController {
     } else this.restore();
   }
 
+  /**
+   * Extends a translation the user already started to subtrees the host has just made
+   * translatable, such as PDF pages scrolled into view. Unlike observed dynamic content it does
+   * not depend on that preference or wait for a stability window. Returns false while a retry or
+   * full-document request owns the page; the caller offers the roots again later.
+   */
+  revealContent(roots: readonly HTMLElement[]): boolean {
+    const live = roots.filter((root) => root.isConnected);
+    if (live.length === 0 || this.status.needsRestart) return true;
+    const pass = this.activePass;
+    if (pass && this.mainSessionId === pass.sessionId) {
+      this.trackDynamicDiscovery(pass, live);
+      return true;
+    }
+    if (this.hasActiveOperation()) return false;
+    // Idle, stopped and restored pages stay untranslated until the user asks again.
+    if (this.status.phase === 'complete' || this.status.phase === 'error')
+      void this.startTranslation(live);
+    return true;
+  }
+
   setDisplayMode(displayMode: DisplayMode): void {
     this.status.displayMode = displayMode;
     if (this.fullDocument) this.fullDocument.setDisplayMode(displayMode);
@@ -2184,16 +2205,7 @@ export class TranslationController {
           return;
         }
         if (pass && this.mainSessionId === pass.sessionId) {
-          const discovery = this.enqueueDynamicContent(pass, roots)
-            .catch((error: unknown) => {
-              if (this.mainSessionId !== pass.sessionId) return;
-              this.status.phase = 'error';
-              this.status.error = getErrorMessage(error);
-            })
-            .finally(() => {
-              pass.pendingDiscoveries.delete(discovery);
-            });
-          pass.pendingDiscoveries.add(discovery);
+          this.trackDynamicDiscovery(pass, roots);
           this.scheduleDynamicTranslation(DYNAMIC_CONTENT_DEBOUNCE_MS);
           return;
         }
@@ -2206,6 +2218,20 @@ export class TranslationController {
       },
       Math.max(0, earliest - performance.now()),
     );
+  }
+
+  /** The running pass waits for tracked discoveries before it settles. */
+  private trackDynamicDiscovery(pass: ActiveTranslationPass, roots: readonly HTMLElement[]): void {
+    const discovery = this.enqueueDynamicContent(pass, roots)
+      .catch((error: unknown) => {
+        if (this.mainSessionId !== pass.sessionId) return;
+        this.status.phase = 'error';
+        this.status.error = getErrorMessage(error);
+      })
+      .finally(() => {
+        pass.pendingDiscoveries.delete(discovery);
+      });
+    pass.pendingDiscoveries.add(discovery);
   }
 
   private disconnectObserver(clearPending = true): void {

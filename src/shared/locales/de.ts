@@ -596,6 +596,8 @@ export default {
   '翻译本地 PDF 需要在扩展详情页开启「允许访问文件网址」，也可以直接在阅读器中选择文件。':
     'Um lokale PDFs zu übersetzen, aktivieren Sie in den Erweiterungsdetails „Zugriff auf Datei-URLs zulassen“ oder wählen Sie die Datei im Reader aus.',
   '翻译本地 PDF': 'Lokales PDF übersetzen',
+  '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
+    '{{p0}} von {{p1}} Seiten übersetzt; Seiten, zu denen Sie scrollen, werden als Nächstes übersetzt',
   siteCount: '{{count}} Websites',
   retryCount: '{{count}} Wiederholungen',
   translatedCount: '{{translated}} / {{count}} Absätze übersetzt',

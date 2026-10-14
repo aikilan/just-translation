@@ -2120,3 +2120,114 @@ function stubChrome(
     },
   });
 }
+
+describe('revealed content', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+    // PDF pages arrive as sections; the second one is locked until the reader reaches it.
+    document.body.innerHTML =
+      '<main><section><p>First page paragraph.</p></section>' +
+      '<section id="later" translate="no"><p>Second page paragraph.</p></section></main>';
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function translateEverything(hold?: Promise<void>) {
+    const batches: Extract<RuntimeRequest, { type: 'TRANSLATE_BATCH' }>[] = [];
+    const begins: RuntimeRequest[] = [];
+    const sendMessage = vi.fn(async (request: RuntimeRequest): Promise<Result<unknown>> => {
+      // Revealed pages never depend on the dynamic-content preference.
+      if (request.type === 'GET_PUBLIC_SETTINGS')
+        return { ok: true, data: { ...PUBLIC_SETTINGS, translateDynamicContent: false } };
+      if (request.type === 'BEGIN_TRANSLATION_SESSION') begins.push(request);
+      if (request.type !== 'TRANSLATE_BATCH') return controlResponse(request);
+      batches.push(request);
+      if (batches.length === 1) await hold;
+      return { ok: true, data: successfulBatchData(request.segments, ({ text }) => `译：${text}`) };
+    });
+    stubChrome(sendMessage);
+    return { batches, begins };
+  }
+  const translatedTexts = () =>
+    [...document.querySelectorAll('[data-justranslate-state="translated"]')].map(
+      (node) => node.textContent,
+    );
+
+  it('extends a finished translation to a revealed page only', async () => {
+    const { batches } = translateEverything();
+    const instance = new TranslationController();
+    await instance.start();
+    expect(translatedTexts()).toEqual(['译：First page paragraph.']);
+
+    const later = document.querySelector<HTMLElement>('#later')!;
+    later.removeAttribute('translate');
+    expect(instance.revealContent([later])).toBe(true);
+    await vi.waitFor(() =>
+      expect(translatedTexts()).toEqual([
+        '译：First page paragraph.',
+        '译：Second page paragraph.',
+      ]),
+    );
+    expect(batches.map((batch) => batch.segments.map(({ text }) => text))).toEqual([
+      ['First page paragraph.'],
+      ['Second page paragraph.'],
+    ]);
+    await vi.waitFor(() => expect(instance.getStatus()).toMatchObject({ phase: 'complete' }));
+  });
+
+  it('adds a page revealed during the running pass to the same session', async () => {
+    let release!: () => void;
+    const { batches, begins } = translateEverything(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const instance = new TranslationController();
+    const work = instance.start();
+    await vi.waitFor(() => expect(batches).toHaveLength(1));
+    const later = document.querySelector<HTMLElement>('#later')!;
+    later.removeAttribute('translate');
+    expect(instance.revealContent([later])).toBe(true);
+    release();
+    await work;
+    expect(translatedTexts()).toEqual(['译：First page paragraph.', '译：Second page paragraph.']);
+    expect(begins).toHaveLength(1);
+  });
+
+  it('never starts translation by itself', async () => {
+    translateEverything();
+    const instance = new TranslationController();
+    const later = document.querySelector<HTMLElement>('#later')!;
+    later.removeAttribute('translate');
+    expect(instance.revealContent([later])).toBe(true);
+    instance.stop();
+    expect(instance.revealContent([later])).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(translatedTexts()).toEqual([]);
+    expect(instance.getStatus().phase).toBe('stopped');
+  });
+
+  it('asks the caller to offer pages again while another request owns the page', async () => {
+    const sendMessage = vi.fn((request: RuntimeRequest): Promise<Result<unknown>> => {
+      if (request.type === 'GET_PUBLIC_SETTINGS')
+        return Promise.resolve({ ok: true, data: PUBLIC_SETTINGS });
+      // The full-document request stays in flight for the whole test.
+      if (request.type === 'TRANSLATE_FULL_DOCUMENT') return new Promise(() => {});
+      return Promise.resolve(controlResponse(request));
+    });
+    stubChrome(sendMessage);
+    const instance = new TranslationController();
+    void instance.startFullDocument();
+    await vi.waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'TRANSLATE_FULL_DOCUMENT' }),
+      ),
+    );
+    const later = document.querySelector<HTMLElement>('#later')!;
+    later.removeAttribute('translate');
+    expect(instance.revealContent([later])).toBe(false);
+    instance.restore();
+  });
+});

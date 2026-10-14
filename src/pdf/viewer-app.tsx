@@ -44,9 +44,17 @@ import type { ViewerStore } from './viewer-store';
 
 export type PdfLayout = 'split' | 'reading';
 
+/** Pages handed to the translator; `following` means newly reached pages keep being added. */
+export interface PageProgress {
+  unlocked: number;
+  total: number;
+  following: boolean;
+}
+
 export interface PdfViewerAppProps {
   store: ViewerStore;
   getStatus: () => PageTranslationStatus;
+  getPageProgress: () => PageProgress;
   runCommand: (command: PageCommand) => void;
   onOpenFile: (file: File) => void;
   onSubmitPassword: (password: string) => void;
@@ -58,6 +66,7 @@ export interface PdfViewerAppProps {
 export function PdfViewerApp({
   store,
   getStatus,
+  getPageProgress,
   runCommand,
   onOpenFile,
   onSubmitPassword,
@@ -68,6 +77,7 @@ export function PdfViewerApp({
   const [settings, setSettings] = useState<PublicTranslatorSettings>();
   const [loadError, setLoadError] = useState<UiMessage>();
   const [status, setStatus] = useState(getStatus);
+  const [pages, setPages] = useState(getPageProgress);
   const [panelOpen, setPanelOpen] = useState(false);
   const settingsRevision = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -118,13 +128,17 @@ export function PdfViewerApp({
   }, [viewer.fileName, locale]);
 
   useEffect(() => {
-    const timer = setInterval(() => setStatus(getStatus()), 400);
+    const timer = setInterval(() => {
+      setStatus(getStatus());
+      setPages(getPageProgress());
+    }, 400);
     return () => clearInterval(timer);
-  }, [getStatus]);
+  }, [getStatus, getPageProgress]);
 
   function command(value: PageCommand) {
     runCommand(value);
     setStatus(getStatus());
+    setPages(getPageProgress());
   }
 
   function accept(value: PublicTranslatorSettings) {
@@ -176,7 +190,7 @@ export function PdfViewerApp({
     else command({ type: 'START_TRANSLATION' });
   }
 
-  const statusText = describeStatus(reader, status, needsRestart);
+  const statusText = describeStatus(reader, status, needsRestart, pages);
   const pageLabel =
     viewer.pageCount > 0
       ? t('第 {{p0}} / {{p1}} 页', { p0: viewer.currentPage || 1, p1: viewer.pageCount })
@@ -420,6 +434,7 @@ function describeStatus(
   reader: PdfReaderState,
   status: PageTranslationStatus,
   needsRestart: boolean,
+  pages: PageProgress,
 ): string {
   if (reader.phase === 'loading')
     return reader.percent === undefined
@@ -450,6 +465,12 @@ function describeStatus(
   }
   if (fullDocument && !incremental && status.phase === 'error') return t('全文翻译失败');
   if (status.failed > 0) return `${t('部分段落未完成')} · ${counts}`;
+  if (status.phase === 'complete' && pages.following && pages.unlocked < pages.total)
+    // Lazy translation is only finished for the pages read so far.
+    return t('已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译', {
+      p0: pages.unlocked,
+      p1: pages.total,
+    });
   if (status.phase === 'complete')
     return status.total ? `${t('翻译完成')} · ${counts}` : t('未发现需要翻译的内容');
   if (status.phase === 'stopped') return t('已停止');

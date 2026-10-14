@@ -570,6 +570,8 @@ export default {
   '翻译本地 PDF 需要在扩展详情页开启「允许访问文件网址」，也可以直接在阅读器中选择文件。':
     'To translate local PDFs, turn on “Allow access to file URLs” on the extension details page, or choose the file in the reader.',
   '翻译本地 PDF': 'Translate local PDF',
+  '已翻译 {{p0}} / {{p1}} 页，滚动到的页面会继续翻译':
+    'Translated {{p0}} of {{p1}} pages; pages you scroll to are translated next',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} retries',
   translatedCount: 'Translated {{translated}} / {{count}} paragraphs',
