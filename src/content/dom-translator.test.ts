@@ -143,6 +143,46 @@ describe('DOM translation rendering', () => {
     expect(document.querySelector('a')).toBe(link);
   });
 
+  it('leaves label text that arrives during discovery to the rescan its page change schedules', async () => {
+    document.body.innerHTML = '<main><button id="late"><svg></svg></button></main>';
+    const button = document.querySelector<HTMLElement>('#late')!;
+    const label = button.insertBefore(document.createTextNode(''), button.firstChild);
+    let entered = false;
+    const computedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      if (element === button) entered = true;
+      return computedStyle(element, pseudo);
+    });
+    // Every step exhausts the slice budget, so page code runs between entering and leaving the button.
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (now += 10));
+    const discover = async (yieldTask?: () => Promise<void>) => {
+      const units: HTMLElement[] = [];
+      for await (const slice of discoverTranslatableElements(document.body, {
+        isVisible: () => true,
+        yieldTask,
+      }))
+        units.push(...slice);
+      return units;
+    };
+    try {
+      const units = await discover(() => {
+        if (entered && !label.data) label.data = 'Save';
+        return Promise.resolve();
+      });
+      expect(label.data).toBe('Save');
+      // The button itself cannot hide its label text; only a label anchor can.
+      expect(units).toEqual([]);
+      const rescanned = await discover(() => Promise.resolve());
+      expect(rescanned).toHaveLength(1);
+      expect(rescanned[0]).not.toBe(button);
+      expect(getElementSourceText(rescanned[0])).toBe('Save');
+    } finally {
+      vi.restoreAllMocks();
+      restoreDocument();
+    }
+  });
+
   it('tells reading-run anchor bookkeeping apart from page edits in mutation records', () => {
     document.body.innerHTML =
       '<main><div id="mixed">Opening readable prose.<p>Nested independent paragraph.</p>Closing readable prose.</div><button>保存<svg></svg></button></main>';

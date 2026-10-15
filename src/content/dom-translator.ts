@@ -412,6 +412,18 @@ function* iterateReadingElements(
             propagateBoundary(false);
             continue;
           }
+          // A label shows its translation through the anchors made when it was entered. Text the
+          // page added since then has none and could never be hidden; the page change that added
+          // it schedules a fresh scan, which anchors it.
+          if (
+            !readOnly &&
+            !siteRule &&
+            !element.hasAttribute(READING_RUN_ATTRIBUTE) &&
+            findUnanchoredLabelText(element, Array.from(element.childNodes), readSemantics)?.length
+          ) {
+            if (parentFrame) parentFrame.owned = true;
+            continue;
+          }
           const analysis = yield* analyzeSourceFragments(element);
           if (!hasReadableText(analysis.text, !!element.closest(CONTROL_SELECTOR))) {
             if (!readOnly) unwrapReadingRun(element);
@@ -523,25 +535,34 @@ function wrapInlineReadingRuns(
 /** Grouping is shared by materializing discovery and read-only inspection, including raw prose.
  * Element-boundary inspection yields so one large custom subtree cannot monopolize the page.
  */
+/** Anchor only text, never the button or its icons/input/badge children. Returns undefined when
+ * the container does not present its text as a label. */
+function findUnanchoredLabelText(
+  container: HTMLElement,
+  children: readonly Node[],
+  readSemantics: RenderedReadingSemanticsReader,
+): Text[] | undefined {
+  if (
+    getTranslationUnitKindFromStructure(container, readSemantics) !== 'label' ||
+    (hasInlineReadingOwner(container, readSemantics) && !container.closest(CONTROL_SELECTOR))
+  )
+    return undefined;
+  return children.filter(
+    (node): node is Text =>
+      node.nodeType === Node.TEXT_NODE &&
+      !getLabelSource(node) &&
+      /\p{L}/u.test(node.textContent ?? ''),
+  );
+}
+
 function* inspectInlineReadingRuns(
   container: HTMLElement,
   children: Node[],
   readSemantics: RenderedReadingSemanticsReader,
 ): Generator<null, Node[][]> {
   if (container.hasAttribute(READING_RUN_ATTRIBUTE)) return [];
-  // Anchor only text, never the button or its icons/input/badge children.
-  if (
-    getTranslationUnitKindFromStructure(container, readSemantics) === 'label' &&
-    (!hasInlineReadingOwner(container, readSemantics) || container.closest(CONTROL_SELECTOR))
-  )
-    return children
-      .filter(
-        (node) =>
-          node.nodeType === Node.TEXT_NODE &&
-          !getLabelSource(node) &&
-          /\p{L}/u.test(node.textContent ?? ''),
-      )
-      .map((node) => [node]);
+  const labelText = findUnanchoredLabelText(container, children, readSemantics);
+  if (labelText) return labelText.map((node) => [node]);
   const semantics = readSemantics(container);
   // Inline layout boxes participate in their outer sentence; their inner layout
   // does not turn anonymous text into a separate (and previously lost) item.
