@@ -1,6 +1,6 @@
 # Chrome 应用店上架材料
 
-适用版本：v0.3.40（`just-translate-v0.3.40.zip`，在项目根目录，由 `pnpm build` 生成）。
+适用版本：v0.3.41（`just-translate-v0.3.41.zip`，在项目根目录，由 `pnpm build` 生成）。
 
 Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrome 应用店开发者后台](https://chrome.google.com/webstore/devconsole) 手动完成。
 
@@ -8,7 +8,7 @@ Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrom
 
 | 用途                          | 文件                                                                  |
 | ----------------------------- | --------------------------------------------------------------------- |
-| 上架包                        | 项目根目录 `just-translate-v0.3.40.zip`                               |
+| 上架包                        | 项目根目录 `just-translate-v0.3.41.zip`                               |
 | 商店图标 128×128              | `store-icon-128.png`                                                  |
 | 英文截图 1280×800             | `screenshots/en/1-5*.png`                                             |
 | 阿拉伯语截图 1280×800         | `screenshots/ar/1-5*.png`                                             |
