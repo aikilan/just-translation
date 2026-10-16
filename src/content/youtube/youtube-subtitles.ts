@@ -1,13 +1,20 @@
 import { sendRuntimeMessage } from '../../shared/chrome-api';
 import { message, renderMessage, type UiMessage } from '../../shared/i18n';
-import type {
-  PublicTranslatorSettings,
-  VideoSubtitlePhase,
-  VideoSubtitleStatus,
+import {
+  getErrorMessage,
+  type PublicTranslatorSettings,
+  type VideoSubtitlePhase,
+  type VideoSubtitleStatus,
 } from '../../shared/messages';
 import { isUrlExcluded, type DisplayMode } from '../../shared/settings';
 import { CAPTION_EVENT, CAPTION_REPLAY_EVENT } from './caption-protocol';
-import { parseCaptionResponse, type CaptionTrack } from './captions';
+import {
+  describeCaptionUrl,
+  parseCaptionBody,
+  type CaptionSource,
+  type CaptionTrack,
+} from './captions';
+import { NativeCaptions } from './native-captions';
 import { buildSentences, findSentenceAt, type SubtitleSentence } from './sentences';
 import { SubtitleButton } from './subtitle-button';
 import { SubtitleOverlay } from './subtitle-overlay';
@@ -18,8 +25,10 @@ const PLAYER_WAIT_MS = 8_000;
 /** Re-plan the translation window at most this often while playing. */
 const REPLAN_INTERVAL_MS = 1_000;
 const ERROR_NOTICE_INTERVAL_MS = 30_000;
-/** Tracks of recently opened videos, for going back without reloading captions. */
-const MAX_TRACKS = 8;
+/** Caption responses of recently opened videos, for going back without reloading them. */
+const MAX_RESPONSES = 4;
+/** The worker may be restarting when the page loads; navigation also tries again. */
+const SETTINGS_RETRY_MS = [1_000, 3_000, 10_000];
 
 export function isYouTubeWatchHost(hostname = location.hostname): boolean {
   return hostname === 'www.youtube.com';
@@ -33,6 +42,15 @@ function currentVideoId(): string | undefined {
 
 function findPlayer(): HTMLElement | null {
   return document.querySelector<HTMLElement>('#movie_player.html5-video-player');
+}
+
+function findCaptionsButton(): HTMLElement | null | undefined {
+  return findPlayer()?.querySelector<HTMLElement>('.ytp-subtitles-button');
+}
+
+interface CaptionResponse {
+  source: CaptionSource;
+  body: string;
 }
 
 interface ActiveSubtitles {
@@ -56,28 +74,33 @@ interface ActiveSubtitles {
  */
 export class YouTubeSubtitles {
   private enabled = false;
+  /** This tab's choice made before preferences were known; it wins over the preference. */
+  private chosen: boolean | undefined;
   private phase: VideoSubtitlePhase = 'off';
   private error: UiMessage | undefined;
   private displayMode: DisplayMode = 'bilingual';
   private excluded = false;
   /** Navigation events wait until exclusions and preferences are known. */
   private ready = false;
-  private readonly tracks = new Map<string, CaptionTrack>();
+  private loadingSettings = false;
+  private settingsRetries = 0;
+  /** Unparsed: most caption loads happen while subtitles are off. */
+  private readonly responses = new Map<string, CaptionResponse>();
   private active: ActiveSubtitles | undefined;
-  /** The video whose captions are awaited, with its give-up timer. */
-  private waiting: { videoId: string; timer: ReturnType<typeof setTimeout> } | undefined;
+  /** The video whose captions are awaited; the timer runs once CC is on. */
+  private waiting: { videoId: string; timer?: ReturnType<typeof setTimeout> } | undefined;
   /** Opening a video tries once; a failure is not retried on every later media event. */
   private attemptedVideoId: string | undefined;
   private button: SubtitleButton | undefined;
   private buttonObserver: MutationObserver | undefined;
-  /** We switched YouTube's CC on to receive the track; switch it back when turned off. */
-  private captionsTurnedOn = false;
+  private readonly nativeCaptions = new NativeCaptions();
   private generation = 0;
   private lastErrorNoticeAt = Number.NEGATIVE_INFINITY;
   private readonly lifetime = new AbortController();
 
   initialize(): void {
     const { signal } = this.lifetime;
+    this.nativeCaptions.initialize(signal);
     document.addEventListener(CAPTION_EVENT, (event) => this.receiveCaptions(event), { signal });
     // The page-world hook keeps responses that arrived before this script started.
     document.dispatchEvent(new CustomEvent(CAPTION_REPLAY_EVENT));
@@ -85,15 +108,7 @@ export class YouTubeSubtitles {
     // Media events do not bubble; capturing them also notices a new video if YouTube renames its
     // navigation event.
     document.addEventListener('loadedmetadata', () => this.navigate(), { signal, capture: true });
-    void this.readSettings().then((settings) => {
-      if (!settings || signal.aborted) return;
-      this.excluded = isUrlExcluded(location.href, settings.excludedSites);
-      if (this.excluded) return;
-      this.ready = true;
-      this.watchForControls();
-      if (settings.youtubeSubtitles) this.enabled = true;
-      this.navigate();
-    });
+    this.loadSettings();
   }
 
   getStatus(): VideoSubtitleStatus {
@@ -105,7 +120,15 @@ export class YouTubeSubtitles {
   }
 
   setEnabled(enabled: boolean): void {
+    // Excluded sites never send captions anywhere, whoever asks.
+    if (this.excluded || this.lifetime.signal.aborted) return;
     this.enabled = enabled;
+    if (!this.ready) {
+      this.chosen = enabled;
+      this.updateButton();
+      this.loadSettings();
+      return;
+    }
     if (enabled) {
       const videoId = currentVideoId();
       if (videoId && this.active?.videoId !== videoId) void this.activate(videoId);
@@ -129,16 +152,45 @@ export class YouTubeSubtitles {
     this.navigate();
   }
 
+  /** The page is going away: stop everything, and leave YouTube's CC as it is, like a closed tab. */
   dispose(): void {
-    this.lifetime.abort();
     this.enabled = false;
-    this.deactivate(true);
+    this.deactivate(false);
+    this.lifetime.abort();
     this.buttonObserver?.disconnect();
     this.button?.detach();
   }
 
+  private loadSettings(): void {
+    if (this.ready || this.excluded || this.loadingSettings || this.lifetime.signal.aborted) return;
+    this.loadingSettings = true;
+    void this.readSettings().then((settings) => {
+      this.loadingSettings = false;
+      if (this.lifetime.signal.aborted) return;
+      if (!settings) {
+        const delay = SETTINGS_RETRY_MS[this.settingsRetries++];
+        if (delay !== undefined) setTimeout(() => this.loadSettings(), delay);
+        return;
+      }
+      this.excluded = isUrlExcluded(location.href, settings.excludedSites);
+      if (this.excluded) {
+        this.enabled = false;
+        return;
+      }
+      this.ready = true;
+      this.displayMode = settings.displayMode;
+      this.enabled = this.chosen ?? settings.youtubeSubtitles;
+      this.watchForControls();
+      this.navigate();
+    });
+  }
+
   private navigate(): void {
-    if (!this.ready || this.lifetime.signal.aborted) return;
+    if (this.lifetime.signal.aborted) return;
+    if (!this.ready) {
+      this.loadSettings();
+      return;
+    }
     this.mountButton();
     const videoId = currentVideoId();
     if (videoId !== this.attemptedVideoId) this.attemptedVideoId = undefined;
@@ -160,52 +212,54 @@ export class YouTubeSubtitles {
     if (!payload || typeof payload !== 'object') return;
     const { url, body } = payload as { url?: unknown; body?: unknown };
     if (typeof url !== 'string' || typeof body !== 'string') return;
-    const track = parseCaptionResponse(url, body);
-    if (!track) return;
-    this.tracks.delete(track.videoId);
-    this.tracks.set(track.videoId, track);
-    if (this.tracks.size > MAX_TRACKS) this.tracks.delete(this.tracks.keys().next().value!);
+    const source = describeCaptionUrl(url);
+    if (!source) return;
+    this.responses.delete(source.videoId);
+    this.responses.set(source.videoId, { source, body });
+    if (this.responses.size > MAX_RESPONSES)
+      this.responses.delete(this.responses.keys().next().value!);
     // A new track for the current video: the one awaited, one the viewer turned on after a
     // failure, or another language chosen in the player.
-    if (this.enabled && track.videoId === currentVideoId() && this.active?.track.key !== track.key)
-      void this.useTrack(track);
+    if (
+      !this.ready ||
+      !this.enabled ||
+      source.videoId !== currentVideoId() ||
+      this.active?.track.key === source.key
+    )
+      return;
+    const track = parseCaptionBody(source, body);
+    if (track) void this.useTrack(track);
   }
 
   private async activate(videoId: string): Promise<void> {
     const generation = ++this.generation;
     this.attemptedVideoId = videoId;
     this.clearWaiting();
-    // Waiting starts now: the player may load the track while the controls are still appearing.
-    this.waiting = {
-      videoId,
-      timer: setTimeout(() => {
-        if (generation !== this.generation) return;
-        this.waiting = undefined;
-        this.fail(message('未能获取字幕，请打开 YouTube 字幕后重试'));
-      }, PLAYER_WAIT_MS + CAPTION_WAIT_MS),
-    };
+    // Waiting starts now: the player may load the track while its controls are still appearing.
+    const waiting: NonNullable<typeof this.waiting> = { videoId };
+    this.waiting = waiting;
     this.setPhase('loading');
-    const settings = await this.readSettings();
-    if (generation !== this.generation || !this.enabled) return;
-    if (settings) this.displayMode = settings.displayMode;
-    const track = this.tracks.get(videoId);
+    const stored = this.responses.get(videoId);
+    const track = stored && parseCaptionBody(stored.source, stored.body);
     if (track) {
       await this.useTrack(track);
       return;
     }
     const captionsButton = await this.waitForCaptionsButton(generation);
     if (generation !== this.generation) return;
-    if (!captionsButton || isUnavailable(captionsButton)) {
+    if (!captionsButton) {
       this.clearWaiting();
       this.setPhase('no-captions');
       this.notify(message('此视频没有字幕'));
       return;
     }
+    waiting.timer = setTimeout(() => {
+      if (generation !== this.generation) return;
+      this.waiting = undefined;
+      this.fail(message('未能获取字幕，请打开 YouTube 字幕后重试'));
+    }, CAPTION_WAIT_MS);
     // The player asks for the track only while its CC is on.
-    if (captionsButton.getAttribute('aria-pressed') !== 'true') {
-      captionsButton.click();
-      this.captionsTurnedOn = true;
-    }
+    this.nativeCaptions.turnOn(captionsButton);
   }
 
   private async useTrack(track: CaptionTrack): Promise<void> {
@@ -251,13 +305,20 @@ export class YouTubeSubtitles {
       target.addEventListener(type, handler);
       active.cleanup.push(() => target.removeEventListener(type, handler));
     };
-    const tick = () => {
+    // One frame loop while playing: a frame is requested only when none is pending.
+    const frame = () => {
       active.frame = undefined;
       if (this.active !== active) return;
       this.render();
-      if (!video.paused) active.frame = requestAnimationFrame(tick);
+      scheduleFrame();
     };
-    listen(video, 'play', tick);
+    const scheduleFrame = () => {
+      if (active.frame === undefined && !video.paused) active.frame = requestAnimationFrame(frame);
+    };
+    listen(video, 'play', () => {
+      this.render();
+      scheduleFrame();
+    });
     listen(video, 'timeupdate', () => this.render());
     listen(video, 'seeked', () => {
       // A seek needs its translations planned now, not at the next interval.
@@ -268,11 +329,12 @@ export class YouTubeSubtitles {
       if (active.frame !== undefined) cancelAnimationFrame(active.frame);
     });
     this.setPhase('on');
-    tick();
+    this.render();
+    scheduleFrame();
     try {
       await translator.start(settings.activeTranslator);
     } catch (error) {
-      if (this.active === active) this.fail(toMessage(error));
+      if (this.active === active) this.fail(getErrorMessage(error));
     }
   }
 
@@ -309,15 +371,12 @@ export class YouTubeSubtitles {
     );
   }
 
+  /** Turning subtitles off also switches CC back off if the extension turned it on. */
   private deactivate(restoreCaptions: boolean): void {
     this.generation += 1;
     this.clearWaiting();
     this.teardownActive();
-    if (restoreCaptions && this.captionsTurnedOn) {
-      const captionsButton = findPlayer()?.querySelector<HTMLElement>('.ytp-subtitles-button');
-      if (captionsButton?.getAttribute('aria-pressed') === 'true') captionsButton.click();
-    }
-    if (restoreCaptions) this.captionsTurnedOn = false;
+    if (restoreCaptions) this.nativeCaptions.restore(findCaptionsButton());
     this.setPhase('off');
   }
 
@@ -332,7 +391,7 @@ export class YouTubeSubtitles {
   }
 
   private clearWaiting(): void {
-    if (this.waiting) clearTimeout(this.waiting.timer);
+    clearTimeout(this.waiting?.timer);
     this.waiting = undefined;
   }
 
@@ -394,11 +453,18 @@ export class YouTubeSubtitles {
     this.buttonObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  /**
+   * This video's CC button once it can be used. Right after navigation the button may still show
+   * the previous video or an ad, so an unavailable button is watched until the time runs out;
+   * ads do not count against it.
+   */
   private async waitForCaptionsButton(generation: number): Promise<HTMLElement | undefined> {
-    const deadline = performance.now() + PLAYER_WAIT_MS;
+    let deadline = performance.now() + PLAYER_WAIT_MS;
     while (generation === this.generation) {
-      const button = findPlayer()?.querySelector<HTMLElement>('.ytp-subtitles-button');
-      if (button) return button;
+      const player = findPlayer();
+      const button = player?.querySelector<HTMLElement>('.ytp-subtitles-button');
+      if (player?.classList.contains('ad-showing')) deadline = performance.now() + PLAYER_WAIT_MS;
+      else if (button && !isUnavailable(button)) return button;
       if (performance.now() > deadline) return undefined;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
@@ -423,12 +489,4 @@ function isUnavailable(button: HTMLElement): boolean {
     button.hidden ||
     getComputedStyle(button).display === 'none'
   );
-}
-
-function toMessage(error: unknown): UiMessage {
-  return error && typeof error === 'object' && 'uiMessage' in error
-    ? (error as { uiMessage: UiMessage }).uiMessage
-    : error instanceof Error
-      ? { text: error.message }
-      : message('发生未知错误');
 }

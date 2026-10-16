@@ -165,6 +165,21 @@ export class TranslationScheduler {
     this.sortPending();
   }
 
+  /** Drops units that have not been sent; returns the ids removed. Sent requests always finish. */
+  discard(unitIds: readonly string[]): string[] {
+    const discarded = new Set(unitIds);
+    const sending = new Set([...this.active.values()].flat().map((item) => item.segment.unitId));
+    const removed = new Set<string>();
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      const { unitId } = this.pending[index].segment;
+      if (!discarded.has(unitId) || sending.has(unitId)) continue;
+      this.pending.splice(index, 1);
+      removed.add(unitId);
+    }
+    this.flushIdleWaiters();
+    return [...removed];
+  }
+
   /** Wakes a queue blocked on controller preflight, layout changes, or render completion. */
   refresh(): void {
     this.pump();

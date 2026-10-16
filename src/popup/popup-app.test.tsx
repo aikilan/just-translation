@@ -977,6 +977,47 @@ describe('YouTube subtitles', () => {
     expect(toggle(view.container)?.checked).toBe(true);
   });
 
+  it("shows this tab's state and makes the preference and the tab agree", async () => {
+    const { send, tabSend } = mockExtension(
+      { ...READY_SETTINGS, youtubeSubtitles: true },
+      { ...IDLE_STATUS, videoSubtitles: { enabled: false, phase: 'off' } },
+      'https://www.youtube.com/watch?v=abcdefghijk',
+    );
+    view = await mount(<PopupApp />);
+    // The player button turned this tab off; the saved preference is still on.
+    expect(toggle(view.container)?.checked).toBe(false);
+    tabSend.mockResolvedValueOnce({
+      ...IDLE_STATUS,
+      videoSubtitles: { enabled: true, phase: 'loading' },
+    });
+    await act(async () => {
+      toggle(view.container)!.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() =>
+      expect(tabSend).toHaveBeenCalledWith(
+        7,
+        { type: 'SET_VIDEO_SUBTITLES', enabled: true },
+        MAIN_FRAME,
+      ),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { youtubeSubtitles: true },
+    });
+    expect(toggle(view.container)?.checked).toBe(true);
+  });
+
+  it('is disabled on an excluded YouTube', async () => {
+    mockExtension(
+      { ...READY_SETTINGS, excludedSites: ['www.youtube.com'] },
+      IDLE_STATUS,
+      'https://www.youtube.com/watch?v=abcdefghijk',
+    );
+    view = await mount(<PopupApp />);
+    expect(toggle(view.container)?.disabled).toBe(true);
+  });
+
   it('is offered only on YouTube', async () => {
     mockExtension();
     view = await mount(<PopupApp />);

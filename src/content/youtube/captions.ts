@@ -7,43 +7,61 @@ export interface CaptionCue {
   text: string;
 }
 
-export interface CaptionTrack {
+/** What a timedtext request asks for, read from its URL alone. */
+export interface CaptionSource {
   videoId: string;
   /** Identifies this exact track, including YouTube's own translation target, if any. */
   key: string;
   languageCode?: string;
   /** Speech recognition captions: word timings, usually no punctuation. */
   automatic: boolean;
+}
+
+export interface CaptionTrack extends CaptionSource {
   cues: CaptionCue[];
 }
 
 const MAX_CUES = 50_000;
-const MAX_CUE_TEXT = 2_000;
+/** Far above a real caption line, and short enough that a sentence fits one translation request. */
+const MAX_CUE_TEXT = 500;
 
-/** Parses a timedtext response in the json3, srv3 or legacy XML format; undefined if unusable. */
-export function parseCaptionResponse(url: string, body: string): CaptionTrack | undefined {
+/** Describes a timedtext request without reading its body; undefined for anything else. */
+export function describeCaptionUrl(url: string): CaptionSource | undefined {
   if (!isTimedTextUrl(url)) return undefined;
   const parameters = new URL(url).searchParams;
   const videoId = parameters.get('v');
   if (!videoId || !/^[\w-]{6,20}$/u.test(videoId)) return undefined;
-  const automatic = parameters.get('kind') === 'asr';
-  const languageCode = parameters.get('tlang') || parameters.get('lang') || undefined;
+  const key = ['v', 'lang', 'kind', 'name', 'tlang']
+    .map((name) => `${name}=${parameters.get(name) ?? ''}`)
+    .join('&');
+  return {
+    videoId,
+    key,
+    languageCode: parameters.get('tlang') || parameters.get('lang') || undefined,
+    automatic: parameters.get('kind') === 'asr',
+  };
+}
+
+/** Parses a timedtext body in the json3, srv3 or legacy XML format; undefined if unusable. */
+export function parseCaptionBody(source: CaptionSource, body: string): CaptionTrack | undefined {
   const trimmed = body.trimStart();
   let cues: CaptionCue[] | undefined;
   try {
     cues = trimmed.startsWith('{')
-      ? parseJson3(JSON.parse(trimmed) as unknown, automatic)
+      ? parseJson3(JSON.parse(trimmed) as unknown, source.automatic)
       : trimmed.startsWith('<')
-        ? parseXml(trimmed, automatic)
+        ? parseXml(trimmed, source.automatic)
         : undefined;
   } catch {
     return undefined;
   }
   if (!cues?.length) return undefined;
-  const key = ['v', 'lang', 'kind', 'name', 'tlang']
-    .map((name) => `${name}=${parameters.get(name) ?? ''}`)
-    .join('&');
-  return { videoId, key, languageCode, automatic, cues: finishCues(cues, automatic) };
+  return { ...source, cues: finishCues(cues, source.automatic) };
+}
+
+export function parseCaptionResponse(url: string, body: string): CaptionTrack | undefined {
+  const source = describeCaptionUrl(url);
+  return source && parseCaptionBody(source, body);
 }
 
 interface Json3Segment {
@@ -92,16 +110,16 @@ function parseXml(body: string, automatic: boolean): CaptionCue[] {
   const cues: CaptionCue[] = [];
   // srv3: <p t="ms" d="ms">, optionally with word spans <s t="offset ms">.
   for (const paragraph of Array.from(document.getElementsByTagName('p'))) {
-    const start = readMs(Number(paragraph.getAttribute('t')));
+    const start = readAttributeMs(paragraph, 't');
     if (start === undefined) continue;
-    const end = start + (readMs(Number(paragraph.getAttribute('d'))) ?? 0);
+    const end = start + (readAttributeMs(paragraph, 'd') ?? 0);
     const words = Array.from(paragraph.getElementsByTagName('s'));
     if (automatic && words.length) {
       for (const word of words) {
         const text = word.textContent ?? '';
         if (!text.trim()) continue;
         cues.push({
-          startMs: start + (readMs(Number(word.getAttribute('t'))) ?? 0),
+          startMs: start + (readAttributeMs(word, 't') ?? 0),
           endMs: end,
           text,
         });
@@ -112,15 +130,27 @@ function parseXml(body: string, automatic: boolean): CaptionCue[] {
     }
   }
   if (cues.length) return cues;
-  // Legacy format 1: <text start="seconds" dur="seconds">.
+  // Legacy format 1: <text start="seconds" dur="seconds">, whose text is HTML-escaped once more.
   for (const element of Array.from(document.getElementsByTagName('text'))) {
-    const start = readMs(Number(element.getAttribute('start')) * 1000);
+    const start = readAttributeMs(element, 'start', 1000);
     if (start === undefined) continue;
-    const end = start + (readMs(Number(element.getAttribute('dur')) * 1000) ?? 0);
-    const text = element.textContent ?? '';
+    const end = start + (readAttributeMs(element, 'dur', 1000) ?? 0);
+    const text = decodeEntities(element.textContent ?? '');
     if (text.trim()) cues.push({ startMs: start, endMs: end, text });
   }
   return cues;
+}
+
+/** A missing or empty attribute is unknown, not zero. */
+function readAttributeMs(element: Element, name: string, scale = 1): number | undefined {
+  const value = element.getAttribute(name)?.trim();
+  return value ? readMs(Number(value) * scale) : undefined;
+}
+
+function decodeEntities(text: string): string {
+  if (!text.includes('&')) return text;
+  // A parsed HTML document is inert: nothing in it loads or runs.
+  return new DOMParser().parseFromString(text, 'text/html').documentElement.textContent ?? text;
 }
 
 /** Orders cues, bounds their size and gives every word a real end: the next word's start. */

@@ -4,9 +4,15 @@ import type { VideoSubtitlePhase } from '../../shared/messages';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const PAGE_STYLE_ID = 'justtranslate-youtube-subtitles-style';
 
-/** Light-DOM rules: hide YouTube's own captions while ours are shown, and style our button. */
+/**
+ * Light-DOM rules: hide YouTube's captions while ours are shown or while CC is on only because the
+ * extension turned it on, and style our button.
+ */
 const PAGE_STYLE = `
-#movie_player[data-justranslate-subtitles] .ytp-caption-window-container { display: none !important; }
+#movie_player[data-justranslate-subtitles] .ytp-caption-window-container,
+html[data-justranslate-native-captions-hidden] .ytp-caption-window-container {
+  display: none !important;
+}
 .ytp-button[data-justranslate-subtitle-button] .jt-mark { opacity: 0; transition: opacity 0.1s; }
 .ytp-button[data-justranslate-subtitle-button][aria-pressed="true"] .jt-mark { opacity: 1; }
 .ytp-button[data-justranslate-subtitle-button][data-state="loading"] svg {

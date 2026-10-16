@@ -23,7 +23,7 @@ import {
     if (!body || body.length > MAX_CAPTION_BODY_LENGTH) return;
     const detail = JSON.stringify({ url, body });
     recent.push(detail);
-    if (recent.length > 8) recent.shift();
+    if (recent.length > 4) recent.shift();
     document.dispatchEvent(new CustomEvent(CAPTION_EVENT, { detail }));
   };
   document.addEventListener(CAPTION_REPLAY_EVENT, () => {

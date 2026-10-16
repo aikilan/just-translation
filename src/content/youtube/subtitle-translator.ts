@@ -49,7 +49,7 @@ const MAX_ATTEMPTS = 3;
 export class SubtitleTranslator {
   private readonly states = new Map<string, SubtitleTranslation>();
   private readonly attempts = new Map<string, { count: number; failedAt: number }>();
-  /** Sentences in a cache lookup or the request queue; value is the queued unit id. */
+  /** Sentences in a cache lookup, the request queue or a request; value is their unit id. */
   private readonly requested = new Map<string, string>();
   private readonly sentenceByUnit = new Map<string, SubtitleSentence>();
   private session: (TranslationSessionInfo & { id: string }) | undefined;
@@ -57,6 +57,8 @@ export class SubtitleTranslator {
   private stopped = false;
   private positionMs = 0;
   private lookups = Promise.resolve();
+  /** Every request gets a new unit id: the scheduler never takes the same id twice. */
+  private unitSerial = 0;
 
   constructor(
     private readonly sentences: readonly SubtitleSentence[],
@@ -107,13 +109,13 @@ export class SubtitleTranslator {
     const scheduler = this.scheduler!;
     const fresh: SubtitleSentence[] = [];
     const queued: Pick<ScheduledTranslationUnit, 'id' | 'priority' | 'order'>[] = [];
+    const departed: string[] = [];
     for (const [order, sentence] of this.sentences.entries()) {
-      if (
-        sentence.endMs < this.positionMs - HORIZON_BEHIND_MS ||
-        sentence.startMs > this.positionMs + HORIZON_AHEAD_MS
-      )
-        continue;
       const unitId = this.requested.get(sentence.id);
+      if (!this.isNearPlayback(sentence)) {
+        if (unitId) departed.push(unitId);
+        continue;
+      }
       if (unitId) {
         queued.push({ id: unitId, priority: this.priorityOf(sentence), order });
         continue;
@@ -128,29 +130,43 @@ export class SubtitleTranslator {
         continue;
       fresh.push(sentence);
     }
-    // A seek re-ranks work that is still waiting; requests already sent are never aborted.
+    // After a seek, lines left behind are not sent; requests already sent still finish.
+    if (departed.length) for (const unitId of scheduler.discard(departed)) this.release(unitId);
     if (queued.length) {
       scheduler.updatePriorities(queued);
-      scheduler.promote(
-        queued.filter((unit) => unit.priority === 'visible').map((unit) => unit.id),
-        'visible',
-      );
+      scheduler.refresh();
     }
     if (!fresh.length) return;
     for (const sentence of fresh) {
-      const unitId = `${sentence.id}:${(this.attempts.get(sentence.id)?.count ?? 0) + 1}`;
+      const unitId = `${sentence.id}:${++this.unitSerial}`;
       this.requested.set(sentence.id, unitId);
       this.sentenceByUnit.set(unitId, sentence);
     }
     for (let index = 0; index < fresh.length; index += LOOKUP_CHUNK_ITEMS) {
       const chunk = fresh.slice(index, index + LOOKUP_CHUNK_ITEMS);
-      this.lookups = this.lookups.then(() => this.resolve(chunk));
+      const unitIds = chunk.map((sentence) => this.requested.get(sentence.id)!);
+      this.lookups = this.lookups
+        .then(() => this.resolve(chunk))
+        .catch(() => {
+          // Keep later lookups going; these lines are requested again while near playback.
+          if (this.stopped) return;
+          this.scheduler!.discard(unitIds);
+          for (const unitId of unitIds) this.release(unitId);
+        });
     }
   }
 
   /** Cache hits and target-language lines never reach the provider. */
-  private async resolve(sentences: SubtitleSentence[]): Promise<void> {
+  private async resolve(chunk: SubtitleSentence[]): Promise<void> {
     if (this.stopped || !this.session) return;
+    // Lines a seek left behind while they waited for this lookup are not looked up or sent.
+    const sentences = chunk.filter((sentence) => {
+      if (this.isNearPlayback(sentence)) return true;
+      const unitId = this.requested.get(sentence.id);
+      if (unitId) this.release(unitId);
+      return false;
+    });
+    if (!sentences.length) return;
     let resolution: CandidateResolution;
     try {
       const response = await this.runtime<CandidateResolution>({
@@ -173,12 +189,13 @@ export class SubtitleTranslator {
       };
     }
     if (this.stopped) return;
+    const cachedTranslations = resolution.cachedTranslations ?? {};
+    const skipped = new Set(resolution.skippedIds ?? []);
     const units: ScheduledTranslationUnit[] = [];
     for (const sentence of sentences) {
-      const cached = resolution.cachedTranslations[sentence.id];
-      if (cached !== undefined) this.settle(sentence, { state: 'translated', text: cached });
-      else if (resolution.skippedIds.includes(sentence.id))
-        this.settle(sentence, { state: 'original' });
+      const cached = cachedTranslations[sentence.id];
+      if (typeof cached === 'string') this.settle(sentence, { state: 'translated', text: cached });
+      else if (skipped.has(sentence.id)) this.settle(sentence, { state: 'original' });
       else
         units.push({
           id: this.requested.get(sentence.id)!,
@@ -188,7 +205,7 @@ export class SubtitleTranslator {
         });
     }
     if (units.length) this.scheduler!.enqueue(units);
-    this.listener.onChange();
+    this.notifyChange();
   }
 
   private async translateBatch(batch: ScheduledTranslationBatch): Promise<void> {
@@ -212,17 +229,19 @@ export class SubtitleTranslator {
     if (this.stopped) return;
     if ('deferred' in result) throw new TranslationBatchDeferredError();
     const parts = new Map<string, string[]>();
+    const failedUnits = new Set<string>();
     let failure: UiMessage | undefined;
     for (const segment of batch.segments) {
+      if (failedUnits.has(segment.unitId)) continue;
       const text = result.translations[segment.requestId];
       if (text === undefined) {
-        failure ??= result.failures[segment.requestId] ?? message('AI 返回中缺少该段译文');
+        const error = result.failures[segment.requestId] ?? message('AI 返回中缺少该段译文');
+        failure ??= error;
+        failedUnits.add(segment.unitId);
         parts.delete(segment.unitId);
-        this.failUnit(segment.unitId, failure);
+        this.failUnit(segment.unitId, error);
         continue;
       }
-      if (this.states.get(this.sentenceByUnit.get(segment.unitId)?.id ?? '')?.state === 'failed')
-        continue;
       const unitParts = parts.get(segment.unitId) ?? [];
       unitParts[segment.partIndex] = text;
       parts.set(segment.unitId, unitParts);
@@ -245,12 +264,26 @@ export class SubtitleTranslator {
         sessionId: session.id,
         entries,
       }).catch(() => undefined);
-    if (failure) this.listener.onError(failure);
-    this.listener.onChange();
+    if (failure) this.notifyError(failure);
+    this.notifyChange();
+  }
+
+  private isNearPlayback(sentence: SubtitleSentence): boolean {
+    return (
+      sentence.endMs >= this.positionMs - HORIZON_BEHIND_MS &&
+      sentence.startMs <= this.positionMs + HORIZON_AHEAD_MS
+    );
   }
 
   private priorityOf(sentence: SubtitleSentence): TranslationPriority {
     return sentence.startMs <= this.positionMs + VISIBLE_AHEAD_MS ? 'visible' : 'readAhead';
+  }
+
+  /** Forgets a request that will not be sent, so the line can be requested again later. */
+  private release(unitId: string): void {
+    const sentence = this.sentenceByUnit.get(unitId);
+    this.sentenceByUnit.delete(unitId);
+    if (sentence && this.requested.get(sentence.id) === unitId) this.requested.delete(sentence.id);
   }
 
   private settle(sentence: SubtitleSentence, state: SubtitleTranslation): void {
@@ -261,8 +294,25 @@ export class SubtitleTranslator {
   private failUnits(batch: ScheduledTranslationBatch, error: UiMessage): void {
     for (const unitId of new Set(batch.segments.map((segment) => segment.unitId)))
       this.failUnit(unitId, error);
-    this.listener.onError(error);
-    this.listener.onChange();
+    this.notifyError(error);
+    this.notifyChange();
+  }
+
+  // Listener failures belong to the display; they must not stop translation.
+  private notifyChange(): void {
+    try {
+      this.listener.onChange();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  private notifyError(error: UiMessage): void {
+    try {
+      this.listener.onError(error);
+    } catch (problem) {
+      console.error(problem);
+    }
   }
 
   /** A failed line shows its original; it is requested again later while still near playback. */

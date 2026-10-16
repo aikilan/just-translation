@@ -330,6 +330,37 @@ describe('TranslationScheduler', () => {
     releases.shift()?.();
     await scheduler.waitForIdle();
   });
+
+  it('discards only units that have not been sent', async () => {
+    const releases: Array<() => void> = [];
+    const dispatched: ScheduledTranslationBatch[] = [];
+    const scheduler = new TranslationScheduler(
+      (batch) => {
+        dispatched.push(batch);
+        return new Promise<void>((resolve) => releases.push(resolve));
+      },
+      {
+        concurrency: 1,
+        batchProfiles: {
+          ...TRANSLATION_BATCH_PROFILES,
+          visible: { maxCharacters: 1_000, maxItems: 1 },
+        },
+      },
+    );
+    const units = createUnits('visible', 3, 10, 0);
+    scheduler.enqueue(units);
+    await vi.waitFor(() => expect(dispatched).toHaveLength(1));
+    expect(scheduler.discard([units[0].id, units[1].id])).toEqual([units[1].id]);
+    releases.shift()?.();
+    await vi.waitFor(() => expect(dispatched).toHaveLength(2));
+    expect(getUnitIds(dispatched[1].segments)).toEqual([units[2].id]);
+    releases.shift()?.();
+    await scheduler.waitForIdle();
+    expect(dispatched.flatMap((batch) => getUnitIds(batch.segments))).toEqual([
+      units[0].id,
+      units[2].id,
+    ]);
+  });
 });
 
 function createUnits(

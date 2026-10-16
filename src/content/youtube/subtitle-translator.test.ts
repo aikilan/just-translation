@@ -173,6 +173,139 @@ describe('subtitle translator', () => {
     expect(translator.translationOf('s0')).toMatchObject({ state: 'failed' });
   });
 
+  it('shows a translation that succeeds on retry', async () => {
+    let fail = true;
+    const { runtime, requests } = fakeRuntime({
+      translate: (batch) =>
+        fail
+          ? { ok: false, error: { text: 'quota exceeded' } }
+          : {
+              ok: true,
+              data: {
+                translations: { [batch.segments[0].requestId]: '重试译文' },
+                failures: {},
+              },
+            },
+    });
+    let now = 0;
+    const translator = new SubtitleTranslator(
+      sentences(1),
+      'en',
+      { onChange() {}, onError() {} },
+      runtime,
+      () => now,
+    );
+    await translator.start(TRANSLATOR);
+    for (let i = 0; i < 10; i++) await settle();
+    expect(translator.translationOf('s0')).toMatchObject({ state: 'failed' });
+    now = 20_000;
+    fail = false;
+    translator.setPosition(1_000);
+    for (let i = 0; i < 10; i++) await settle();
+    expect(sentTexts(requests)).toHaveLength(2);
+    expect(translator.translationOf('s0')).toEqual({ state: 'translated', text: '重试译文' });
+  });
+
+  it("keeps each line's own failure reason", async () => {
+    const { runtime } = fakeRuntime({
+      translate: (batch) => ({
+        ok: true,
+        data: {
+          translations: {},
+          failures: Object.fromEntries(
+            batch.segments.map((segment) => [segment.requestId, { text: `${segment.text} 失败` }]),
+          ),
+        },
+      }),
+    });
+    const translator = new SubtitleTranslator(
+      sentences(2),
+      'en',
+      { onChange() {}, onError() {} },
+      runtime,
+    );
+    await translator.start(TRANSLATOR);
+    for (let i = 0; i < 10; i++) await settle();
+    expect(translator.translationOf('s0')).toEqual({
+      state: 'failed',
+      error: { text: 'Line number 0. 失败' },
+    });
+    expect(translator.translationOf('s1')).toEqual({
+      state: 'failed',
+      error: { text: 'Line number 1. 失败' },
+    });
+  });
+
+  it('drops queued lines a seek left behind and sends the new position first', async () => {
+    const releases: (() => void)[] = [];
+    const { runtime, requests } = fakeRuntime({
+      translate: (batch) =>
+        new Promise((resolve) =>
+          releases.push(() =>
+            resolve({
+              ok: true,
+              data: {
+                translations: { [batch.segments[0].requestId]: `译文 ${batch.segments[0].text}` },
+                failures: {},
+              },
+            }),
+          ),
+        ),
+    });
+    const translator = new SubtitleTranslator(
+      sentences(60),
+      'en',
+      { onChange() {}, onError() {} },
+      runtime,
+    );
+    await translator.start(TRANSLATOR);
+    for (let i = 0; i < 20; i++) await settle();
+    // Two requests are in flight; lines 2–18 wait in the queue.
+    expect(sentTexts(requests)).toEqual(['Line number 0.', 'Line number 1.']);
+    translator.setPosition(400_000);
+    for (let i = 0; i < 20; i++) await settle();
+    while (releases.length) {
+      releases.shift()!();
+      for (let i = 0; i < 10; i++) await settle();
+    }
+    const sent = sentTexts(requests);
+    expect(sent.slice(0, 3)).toEqual(['Line number 0.', 'Line number 1.', 'Line number 40.']);
+    expect(sent).not.toContain('Line number 2.');
+    expect(sent).toContain('Line number 58.');
+    // Requests already sent still finish and are shown when playback returns.
+    expect(translator.translationOf('s0')).toEqual({
+      state: 'translated',
+      text: '译文 Line number 0.',
+    });
+    // Lines dropped by the seek are requested again once playback is back near them.
+    translator.setPosition(0);
+    for (let i = 0; i < 20; i++) await settle();
+    while (releases.length) {
+      releases.shift()!();
+      for (let i = 0; i < 10; i++) await settle();
+    }
+    expect(translator.translationOf('s2')).toMatchObject({ state: 'translated' });
+  });
+
+  it('keeps translating after the display throws', async () => {
+    const { runtime, requests } = fakeRuntime({});
+    const listener = {
+      onChange: vi.fn(() => {
+        throw new Error('render failed');
+      }),
+      onError: vi.fn(),
+    };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const translator = new SubtitleTranslator(sentences(60), 'en', listener, runtime);
+    await translator.start(TRANSLATOR);
+    for (let i = 0; i < 20; i++) await settle();
+    translator.setPosition(400_000);
+    for (let i = 0; i < 20; i++) await settle();
+    expect(sentTexts(requests)).toContain('Line number 40.');
+    expect(translator.translationOf('s40')).toMatchObject({ state: 'translated' });
+    consoleError.mockRestore();
+  });
+
   it('ends the session when stopped and ignores late results', async () => {
     let release!: () => void;
     const { runtime, requests } = fakeRuntime({

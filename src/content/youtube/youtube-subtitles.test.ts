@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublicTranslatorSettings, Result, RuntimeRequest } from '../../shared/messages';
 import { DEFAULT_SETTINGS } from '../../shared/settings';
 import { CAPTION_EVENT, CAPTION_REPLAY_EVENT } from './caption-protocol';
+import { CAPTIONS_TURNED_ON_KEY, NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE } from './native-captions';
 import { YouTubeSubtitles } from './youtube-subtitles';
 
 const TRANSLATOR = { kind: 'builtin', engine: 'google-free' } as const;
@@ -43,6 +44,7 @@ describe('YouTube bilingual subtitles', () => {
   let captionsByVideo: Record<string, string>;
   let video: HTMLVideoElement;
   let testLifetime: AbortController;
+  let settingsFailures: number;
 
   const player = () => document.querySelector<HTMLElement>('#movie_player')!;
   const ccButton = () => document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
@@ -84,7 +86,10 @@ describe('YouTube bilingual subtitles', () => {
     requests = [];
     shadowRoots = [];
     testLifetime = new AbortController();
+    settingsFailures = 0;
     captionsByVideo = {};
+    localStorage.clear();
+    document.documentElement.removeAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE);
     // eslint-disable-next-line @typescript-eslint/unbound-method -- Called with the host below.
     const attachShadow = HTMLElement.prototype.attachShadow;
     vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (
@@ -104,6 +109,7 @@ describe('YouTube bilingual subtitles', () => {
           await Promise.resolve();
           switch (request.type) {
             case 'GET_PUBLIC_SETTINGS':
+              if (settingsFailures-- > 0) throw new Error('worker restarting');
               return { ok: true, data: structuredClone(settings) };
             case 'BEGIN_TRANSLATION_SESSION':
               return {
@@ -190,7 +196,7 @@ describe('YouTube bilingual subtitles', () => {
     expect(subtitles.getStatus()).toEqual({ enabled: true, phase: 'on' });
     expect(player().hasAttribute('data-justranslate-subtitles')).toBe(true);
     expect(document.getElementById('justtranslate-youtube-subtitles-style')?.textContent).toContain(
-      '.ytp-caption-window-container { display: none !important; }',
+      '#movie_player[data-justranslate-subtitles] .ytp-caption-window-container',
     );
     playAt(1);
     await settle();
@@ -222,9 +228,12 @@ describe('YouTube bilingual subtitles', () => {
     expect(ccButton().getAttribute('aria-pressed')).toBe('true');
     expect(ourButton()?.getAttribute('aria-pressed')).toBe('true');
     expect(layer()).toBeDefined();
+    expect(localStorage.getItem(CAPTIONS_TURNED_ON_KEY)).toBe('1');
     ourButton()!.click();
     await settle();
     expect(ccButton().getAttribute('aria-pressed')).toBe('false');
+    expect(localStorage.getItem(CAPTIONS_TURNED_ON_KEY)).toBeNull();
+    expect(document.documentElement.hasAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE)).toBe(false);
     expect(layer()).toBeUndefined();
     expect(player().hasAttribute('data-justranslate-subtitles')).toBe(false);
     expect(requests.map((request) => request.type)).toContain('END_TRANSLATION_SESSION');
@@ -247,13 +256,98 @@ describe('YouTube bilingual subtitles', () => {
     expect(subtitles.getStatus()).toEqual({ enabled: false, phase: 'off' });
   });
 
-  it('tells the viewer when a video has no captions', async () => {
-    ccButton().setAttribute('aria-disabled', 'true');
-    const subtitles = await start({ youtubeSubtitles: true });
-    expect(subtitles.getStatus()).toEqual({ enabled: true, phase: 'no-captions' });
-    expect(toast()).toBe('此视频没有字幕');
+  it("keeps YouTube's captions hidden after the tab closes when CC was off before", async () => {
+    await start({ youtubeSubtitles: true });
+    expect(ccButton().getAttribute('aria-pressed')).toBe('true');
+    // The tab closes: YouTube keeps CC on, but the viewer never chose it.
+    subtitles!.dispose();
+    subtitles = undefined;
+    const next = await start({ youtubeSubtitles: false });
+    expect(next.getStatus()).toEqual({ enabled: false, phase: 'off' });
+    expect(document.documentElement.hasAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE)).toBe(true);
+    expect(document.getElementById('justtranslate-youtube-subtitles-style')?.textContent).toContain(
+      `html[${NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE}] .ytp-caption-window-container`,
+    );
+    // The extension's own clicks are not the viewer's choice.
+    ccButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    ccButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(localStorage.getItem(CAPTIONS_TURNED_ON_KEY)).toBe('1');
+    // Turning subtitles on and off here gives the viewer's CC choice back.
+    next.setEnabled(true);
+    await settle();
+    expect(next.getStatus().phase).toBe('on');
+    next.setEnabled(false);
     expect(ccButton().getAttribute('aria-pressed')).toBe('false');
-    expect(ourButton()?.dataset.state).toBe('unavailable');
+    expect(document.documentElement.hasAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE)).toBe(false);
+  });
+
+  it('follows another tab that gives CC back', async () => {
+    localStorage.setItem(CAPTIONS_TURNED_ON_KEY, '1');
+    await start();
+    expect(document.documentElement.hasAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE)).toBe(true);
+    localStorage.removeItem(CAPTIONS_TURNED_ON_KEY);
+    window.dispatchEvent(new StorageEvent('storage', { key: CAPTIONS_TURNED_ON_KEY }));
+    expect(document.documentElement.hasAttribute(NATIVE_CAPTIONS_HIDDEN_ATTRIBUTE)).toBe(false);
+  });
+
+  it('tells the viewer when a video has no captions', async () => {
+    vi.useFakeTimers();
+    try {
+      ccButton().setAttribute('aria-disabled', 'true');
+      settings.youtubeSubtitles = true;
+      subtitles = new YouTubeSubtitles();
+      subtitles.initialize();
+      await vi.advanceTimersByTimeAsync(1_000);
+      // A disabled button may still show the previous video: it is watched for a while.
+      expect(subtitles.getStatus().phase).toBe('loading');
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(subtitles.getStatus()).toEqual({ enabled: true, phase: 'no-captions' });
+      expect(toast()).toBe('此视频没有字幕');
+      expect(ccButton().getAttribute('aria-pressed')).toBe('false');
+      expect(ourButton()?.dataset.state).toBe('unavailable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits out a CC button still showing the previous video or an ad', async () => {
+    vi.useFakeTimers();
+    try {
+      ccButton().setAttribute('aria-disabled', 'true');
+      player().classList.add('ad-showing');
+      settings.youtubeSubtitles = true;
+      subtitles = new YouTubeSubtitles();
+      subtitles.initialize();
+      // A long ad does not use up the wait.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(subtitles.getStatus().phase).toBe('loading');
+      player().classList.remove('ad-showing');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(subtitles.getStatus().phase).toBe('loading');
+      ccButton().removeAttribute('aria-disabled');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(ccButton().getAttribute('aria-pressed')).toBe('true');
+      expect(subtitles.getStatus().phase).toBe('on');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tries reading preferences again when the worker did not answer', async () => {
+    vi.useFakeTimers();
+    try {
+      settingsFailures = 1;
+      settings.youtubeSubtitles = true;
+      subtitles = new YouTubeSubtitles();
+      subtitles.initialize();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(ourButton()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(ourButton()).not.toBeNull();
+      expect(subtitles.getStatus().phase).toBe('on');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('gives up when the player never loads a track', async () => {
@@ -351,11 +445,14 @@ describe('YouTube bilingual subtitles', () => {
     expect(subtitles.getStatus().phase).toBe('on');
   });
 
-  it('does nothing on excluded sites', async () => {
+  it('does nothing on excluded sites, even when asked from the popup', async () => {
     const subtitles = await start({ youtubeSubtitles: true, excludedSites: [location.hostname] });
     expect(ourButton()).toBeNull();
+    subtitles.setEnabled(true);
+    await settle();
     expect(ccButton().getAttribute('aria-pressed')).toBe('false');
     expect(subtitles.getStatus()).toEqual({ enabled: false, phase: 'off' });
+    expect(requests.map((request) => request.type)).not.toContain('BEGIN_TRANSLATION_SESSION');
   });
 
   it('explains an unusable translation engine', async () => {

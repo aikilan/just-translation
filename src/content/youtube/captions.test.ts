@@ -74,6 +74,19 @@ describe('YouTube caption parsing', () => {
     expect(legacy?.cues).toEqual([{ startMs: 1_500, endMs: 3_500, text: 'Guten Tag' }]);
   });
 
+  it("skips XML lines without a time and decodes the legacy format's second escaping", () => {
+    const srv3 = parseCaptionResponse(
+      url('lang=en&fmt=srv3'),
+      '<timedtext format="3"><body><p d="900">No time</p><p t="2000" d="1000">Timed</p></body></timedtext>',
+    );
+    expect(srv3?.cues).toEqual([{ startMs: 2_000, endMs: 3_000, text: 'Timed' }]);
+    const legacy = parseCaptionResponse(
+      url('lang=en'),
+      '<transcript><text dur="1">No start</text><text start="0.5" dur="1">I&amp;#39;m &amp;quot;here&amp;quot; &amp;amp; ready</text></transcript>',
+    );
+    expect(legacy?.cues).toEqual([{ startMs: 500, endMs: 1_500, text: 'I\'m "here" & ready' }]);
+  });
+
   it('rejects other hosts, missing video ids and unreadable bodies', () => {
     const body = JSON.stringify({
       events: [{ tStartMs: 0, dDurationMs: 1, segs: [{ utf8: 'x' }] }],

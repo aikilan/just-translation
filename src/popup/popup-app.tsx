@@ -687,15 +687,16 @@ export function PopupApp() {
               <SettingRow label={t('YouTube 双语字幕')} feedback={feedback.video}>
                 <Switch
                   label={t('YouTube 双语字幕')}
-                  checked={settings.youtubeSubtitles}
-                  disabled={saving || busy}
+                  // This tab's state when known: the player button may have changed it.
+                  checked={status.videoSubtitles?.enabled ?? settings.youtubeSubtitles}
+                  disabled={excluded || saving || busy}
                   onChange={(enabled) => {
                     void save(
                       'video',
                       { type: 'UPDATE_READING_PREFERENCES', patch: { youtubeSubtitles: enabled } },
                       (next) => {
                         accept(next);
-                        // The player button controls one tab; the switch also applies to this one.
+                        // The switch sets both the preference and this tab, so the two agree.
                         if (page.available && page.tabId !== undefined)
                           void sendMainFrameCommand(page.tabId, {
                             type: 'SET_VIDEO_SUBTITLES',
