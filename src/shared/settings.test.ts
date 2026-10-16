@@ -129,6 +129,7 @@ describe('validateSettings', () => {
         model: 'legacy-model',
         displayMode: 'invalid',
         translateDynamicContent: 'yes',
+        youtubeSubtitles: 'yes',
         batchMaxCharacters: 20_000,
         batchMaxItems: 100,
         batchConcurrency: 5,

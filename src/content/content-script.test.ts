@@ -52,6 +52,7 @@ const settings: PublicTranslatorSettings = {
   translateDynamicContent: true,
   autoTranslateSites: [location.hostname],
   excludedSites: [],
+  youtubeSubtitles: false,
 };
 const GOOGLE_TRANSLATOR: ActiveTranslator = { kind: 'builtin', engine: 'google-free' };
 beforeEach(async () => {

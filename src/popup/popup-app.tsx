@@ -683,6 +683,36 @@ export function PopupApp() {
                 }}
               />
             </SettingRow>
+            {page?.hostname === 'www.youtube.com' ? (
+              <SettingRow label={t('YouTube 双语字幕')} feedback={feedback.video}>
+                <Switch
+                  label={t('YouTube 双语字幕')}
+                  checked={settings.youtubeSubtitles}
+                  disabled={saving || busy}
+                  onChange={(enabled) => {
+                    void save(
+                      'video',
+                      { type: 'UPDATE_READING_PREFERENCES', patch: { youtubeSubtitles: enabled } },
+                      (next) => {
+                        accept(next);
+                        // The player button controls one tab; the switch also applies to this one.
+                        if (page.available && page.tabId !== undefined)
+                          void sendMainFrameCommand(page.tabId, {
+                            type: 'SET_VIDEO_SUBTITLES',
+                            enabled,
+                          })
+                            .then(setStatus)
+                            .catch(() =>
+                              setCommandError(
+                                message('偏好已保存，当前网页应用失败，请刷新后重试。'),
+                              ),
+                            );
+                      },
+                    );
+                  }}
+                />
+              </SettingRow>
+            ) : null}
           </div>
         ) : null}
       </div>

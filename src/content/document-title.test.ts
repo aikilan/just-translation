@@ -31,6 +31,7 @@ beforeEach(() => {
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
+    youtubeSubtitles: false,
   };
   fail = false;
   cached = false;

@@ -14,6 +14,16 @@ import type { TextSlice } from './text-slices';
 export type TranslationPhase = 'idle' | 'translating' | 'complete' | 'stopped' | 'error';
 export type TranslationMode = 'segmented' | 'full-document';
 
+export type VideoSubtitlePhase = 'off' | 'loading' | 'on' | 'no-captions' | 'error';
+
+/** Bilingual video subtitles of this tab, reported only on YouTube. */
+export interface VideoSubtitleStatus {
+  /** Wanted in this tab; it may still be waiting for a video or captions. */
+  enabled: boolean;
+  phase: VideoSubtitlePhase;
+  error?: UiMessage;
+}
+
 export interface PageTranslationStatus {
   mode: TranslationMode;
   stage?: 'collecting' | 'requesting' | 'applying' | 'incremental';
@@ -27,6 +37,17 @@ export interface PageTranslationStatus {
   needsRestart?: boolean;
   /** The document is a PDF shown by the browser viewer; translation opens the PDF reader. */
   pdfDocument?: boolean;
+  videoSubtitles?: VideoSubtitleStatus;
+}
+
+function isVideoSubtitleStatus(value: unknown): value is VideoSubtitleStatus {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const status = value as Record<string, unknown>;
+  return (
+    typeof status.enabled === 'boolean' &&
+    ['off', 'loading', 'on', 'no-captions', 'error'].includes(status.phase as string) &&
+    (status.error === undefined || isUiMessage(status.error))
+  );
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
@@ -64,7 +85,8 @@ export function isPageTranslationStatus(value: unknown): value is PageTranslatio
         'targetLanguage' in context &&
         typeof context.targetLanguage === 'string')) &&
     (status.needsRestart === undefined || typeof status.needsRestart === 'boolean') &&
-    (status.pdfDocument === undefined || typeof status.pdfDocument === 'boolean')
+    (status.pdfDocument === undefined || typeof status.pdfDocument === 'boolean') &&
+    (status.videoSubtitles === undefined || isVideoSubtitleStatus(status.videoSubtitles))
   );
 }
 
@@ -88,6 +110,7 @@ export type PublicTranslatorSettings = Pick<
   | 'excludedSites'
   | 'activeTranslator'
   | 'autoTranslateSites'
+  | 'youtubeSubtitles'
 > & {
   profiles: PublicTranslationProfile[];
   ready: boolean;
@@ -148,6 +171,7 @@ export type ReadingPreferences = Pick<
   | 'translationConcurrency'
   | 'translationRetryCount'
   | 'fullDocumentTimeoutMinutes'
+  | 'youtubeSubtitles'
 >;
 export interface SiteRuleUpdate {
   list: 'autoTranslateSites' | 'excludedSites';
@@ -247,6 +271,8 @@ export type PageCommand =
   | { type: 'RESTORE_PAGE' }
   | { type: 'TOGGLE_TRANSLATION' }
   | { type: 'SET_DISPLAY_MODE'; displayMode: DisplayMode }
+  /** Bilingual video subtitles in this tab; the saved preference is changed separately. */
+  | { type: 'SET_VIDEO_SUBTITLES'; enabled: boolean }
   | { type: 'GET_PAGE_STATUS' };
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: UiMessage };

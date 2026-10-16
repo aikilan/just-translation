@@ -596,6 +596,17 @@ export default {
   '{{p0}} 段未能翻译，已保留原文。':
     '{{p0}} partie(s) n’ont pas pu être traduites ; le texte d’origine est conservé.',
   重试失败部分: 'Réessayer les parties en échec',
+  开启双语字幕: 'Activer les sous-titres bilingues',
+  关闭双语字幕: 'Désactiver les sous-titres bilingues',
+  '正在获取字幕…': 'Chargement des sous-titres…',
+  此视频没有字幕: 'Cette vidéo n’a pas de sous-titres',
+  '未能获取字幕，请打开 YouTube 字幕后重试':
+    'Impossible de charger les sous-titres. Activez les sous-titres YouTube et réessayez.',
+  '字幕翻译失败：{{p0}}': 'Échec de la traduction des sous-titres : {{p0}}',
+  视频字幕设置无效: 'Réglage des sous-titres vidéo invalide',
+  'YouTube 双语字幕': 'Sous-titres bilingues YouTube',
+  '打开 YouTube 视频时自动显示原文和译文字幕':
+    'Afficher automatiquement les sous-titres originaux et traduits sur les vidéos YouTube',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} tentatives',
   translatedCount: '{{translated}} / {{count}} paragraphes traduits',

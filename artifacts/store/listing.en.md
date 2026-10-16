@@ -24,6 +24,7 @@ FEATURES
 • Bilingual reading: translations appear under the original paragraphs and keep the page's look.
 • Viewport first: what you see is translated first, then the rest of the page. New content is translated as it loads.
 • PDF reader: open a PDF in the built-in reader to read each original page next to its translation. Pages are translated as you scroll to them.
+• YouTube bilingual subtitles: one click in the player shows each caption line with its translation underneath, translated as the video plays.
 • Selection translation: select text, right-click, and the result appears next to it.
 • Quick translate: paste text and translate it in a popup.
 • Bring your own AI: connect any AI service with your own API key, or a model running on your computer.
@@ -50,14 +51,14 @@ Source code: https://github.com/aikilan/just-translation
 ### Single purpose
 
 ```text
-Translate the web page or PDF document the user is reading with the translation service the user explicitly selected, and display the translation next to the original text.
+Translate the web page, PDF document or YouTube video captions the user is reading with the translation service the user explicitly selected, and display the translation next to the original text.
 ```
 
 ### Permission justifications
 
 - **storage**: `Saves the user's AI configurations, reading preferences, site rules, temporary session state and the local translation cache in the browser.`
 - **activeTab**: `Communicates with the current tab and starts translation when the user clicks the toolbar button, the context menu or the keyboard shortcut.`
-- **scripting**: `Injects the Quick translate dialog into the current page only when the user clicks Quick translate in the popup.`
+- **scripting**: `Injects the Quick translate dialog into the current page only when the user clicks Quick translate in the popup, and registers a script on www.youtube.com that reads the caption data the YouTube player itself loads, so the extension can show bilingual subtitles. That script never changes the page's requests or responses.`
 - **contextMenus**: `Adds right-click entries to translate the page or the selected text, labeled with the engine that will receive the text.`
 - **alarms**: `Periodically deletes cached translations older than 72 hours.`
 - **webNavigation**: `Binds translation tasks to the current document and cancels them after navigation, so old translations are never written into a new page.`

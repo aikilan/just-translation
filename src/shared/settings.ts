@@ -57,6 +57,8 @@ export interface TranslatorSettings {
   fullDocumentTimeoutMinutes: number;
   excludedSites: string[];
   autoTranslateSites: string[];
+  /** Turns on bilingual subtitles for every YouTube video; the player button controls one tab. */
+  youtubeSubtitles: boolean;
 }
 
 export type TranslationProfileValidationErrors = Partial<
@@ -126,6 +128,7 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
   fullDocumentTimeoutMinutes: 10,
   excludedSites: [],
   autoTranslateSites: [],
+  youtubeSubtitles: false,
 };
 
 /** Normalizes the endpoint using the explicitly selected wire protocol. */
@@ -320,6 +323,7 @@ export function mergeSettings(value: unknown): TranslatorSettings {
       : DEFAULT_SETTINGS.fullDocumentTimeoutMinutes,
     excludedSites: readStringArray(value.excludedSites),
     autoTranslateSites: readStringArray(value.autoTranslateSites),
+    youtubeSubtitles: value.youtubeSubtitles === true,
   };
 }
 

@@ -97,6 +97,35 @@ if (opened?.ok !== true)
   throw new Error(`构建校验失败：快捷翻译注入函数无法独立运行 ${JSON.stringify(opened)}`);
 stdout.write('构建校验通过：快捷翻译注入函数可独立运行\n');
 
+// The YouTube caption hook runs in the page world as a classic script, so it must carry no
+// imports. Run the emitted file against a stand-in page and observe one caption response.
+const captionHookPath = 'src/content/youtube/caption-hook.iife.js';
+if (!backgroundBundle.includes(captionHookPath))
+  throw new Error('构建校验失败：后台没有注册 YouTube 字幕脚本');
+const captionHook = await readFile(path.join(distDirectory, captionHookPath), 'utf8');
+const pageDocument = new globalThis.EventTarget();
+const pageWindow = { fetch: () => Promise.resolve(new globalThis.Response('{"events":[]}')) };
+class PageRequest extends globalThis.EventTarget {
+  open() {}
+}
+new Function('window', 'document', 'XMLHttpRequest', 'location', captionHook)(
+  pageWindow,
+  pageDocument,
+  PageRequest,
+  new globalThis.URL('https://www.youtube.com/watch?v=abcdefghijk'),
+);
+const captionEvent = new Promise((resolve) =>
+  pageDocument.addEventListener('justtranslate-youtube-captions', (event) => resolve(event.detail)),
+);
+await pageWindow.fetch('https://www.youtube.com/api/timedtext?v=abcdefghijk&lang=en&fmt=json3');
+const captionDetail = await Promise.race([
+  captionEvent,
+  new Promise((resolve) => globalThis.setTimeout(resolve, 1_000)),
+]);
+if (JSON.parse(captionDetail ?? '{}').body !== '{"events":[]}')
+  throw new Error('构建校验失败：YouTube 字幕脚本无法独立运行');
+stdout.write('构建校验通过：YouTube 字幕脚本可独立运行\n');
+
 // Every browser-owned metadata reference must resolve in every shipped locale.
 if (manifest.default_locale !== 'en') throw new Error('Invalid default locale');
 for (const locale of ['zh_CN', 'zh_TW', 'en', 'fr', 'de', 'ar']) {

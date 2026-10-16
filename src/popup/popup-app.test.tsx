@@ -942,3 +942,44 @@ describe('PDF documents', () => {
     );
   });
 });
+
+describe('YouTube subtitles', () => {
+  const toggle = (container: HTMLElement) =>
+    container.querySelector<HTMLInputElement>('[role="switch"][aria-label="YouTube 双语字幕"]');
+
+  it('saves the preference and applies it to the open video', async () => {
+    const { send, tabSend } = mockExtension(
+      READY_SETTINGS,
+      IDLE_STATUS,
+      'https://www.youtube.com/watch?v=abcdefghijk',
+    );
+    view = await mount(<PopupApp />);
+    expect(toggle(view.container)?.checked).toBe(false);
+    tabSend.mockResolvedValueOnce({
+      ...IDLE_STATUS,
+      videoSubtitles: { enabled: true, phase: 'loading' },
+    });
+    await act(async () => {
+      toggle(view.container)!.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() =>
+      expect(tabSend).toHaveBeenCalledWith(
+        7,
+        { type: 'SET_VIDEO_SUBTITLES', enabled: true },
+        MAIN_FRAME,
+      ),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'UPDATE_READING_PREFERENCES',
+      patch: { youtubeSubtitles: true },
+    });
+    expect(toggle(view.container)?.checked).toBe(true);
+  });
+
+  it('is offered only on YouTube', async () => {
+    mockExtension();
+    view = await mount(<PopupApp />);
+    expect(toggle(view.container)).toBeNull();
+  });
+});

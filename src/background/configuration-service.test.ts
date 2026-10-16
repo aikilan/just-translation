@@ -94,6 +94,19 @@ describe('configuration service', () => {
       expect(storageSet).not.toHaveBeenCalled();
     },
   );
+  it('persists and publicly exposes the YouTube subtitle preference', async () => {
+    await expect(updateReadingPreferences({ youtubeSubtitles: true })).resolves.toMatchObject({
+      youtubeSubtitles: true,
+    });
+    expect(stored.youtubeSubtitles).toBe(true);
+    await expect(readPublicSettings()).resolves.toMatchObject({ youtubeSubtitles: true });
+    storageSet.mockClear();
+    await expect(
+      // @ts-expect-error exercise the untrusted runtime-message boundary
+      updateReadingPreferences({ youtubeSubtitles: 'yes' }),
+    ).rejects.toThrow('视频字幕');
+    expect(storageSet).not.toHaveBeenCalled();
+  });
   it.each([0, -1, 7, 1.5, NaN, Infinity])(
     'rejects invalid concurrency %s without writing',
     async (value) => {
