@@ -99,6 +99,7 @@ export function OptionsApp() {
           fullDocumentTimeoutMinutes: value.fullDocumentTimeoutMinutes,
           autoTranslateSites: value.autoTranslateSites,
           excludedSites: value.excludedSites,
+          youtubeSubtitles: value.youtubeSubtitles,
         },
     );
   }

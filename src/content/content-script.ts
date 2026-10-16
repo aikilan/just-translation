@@ -1,11 +1,17 @@
 import { initializeContentLanguage } from './ui-language';
 import { sendRuntimeMessage } from '../shared/chrome-api';
-import type { PageCommand, PublicTranslatorSettings, TranslationMode } from '../shared/messages';
+import type {
+  PageCommand,
+  PageTranslationStatus,
+  PublicTranslatorSettings,
+  TranslationMode,
+} from '../shared/messages';
 import { isUrlExcluded } from '../shared/settings';
 import { TranslationController } from './controller';
 import { registerRetryInteractions } from './retry-interaction';
 import { tryStartAutomaticTranslation } from './auto-start';
 import { isBrowserPdfDocument, mountPdfEntry } from './pdf-entry';
+import { isYouTubeWatchHost, YouTubeSubtitles } from './youtube/youtube-subtitles';
 import './styles.css';
 
 // 页面唯一入口：只处理当前网页中的译文采集、渲染和状态切换。
@@ -23,6 +29,14 @@ registerRetryInteractions((source) => {
 const pdfDocument = isBrowserPdfDocument();
 function openPdfViewer(translate: TranslationMode): void {
   void sendRuntimeMessage<void>({ type: 'OPEN_PDF_VIEWER', translate }).catch(() => {});
+}
+
+// Video subtitles are a separate feature of this page; page translation never depends on them.
+const youtubeSubtitles = !pdfDocument && isYouTubeWatchHost() ? new YouTubeSubtitles() : undefined;
+youtubeSubtitles?.initialize();
+function pageStatus(): PageTranslationStatus {
+  const status = controller.getStatus();
+  return youtubeSubtitles ? { ...status, videoSubtitles: youtubeSubtitles.getStatus() } : status;
 }
 
 chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendResponse) => {
@@ -72,11 +86,15 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendRespons
       break;
     case 'SET_DISPLAY_MODE':
       controller.setDisplayMode(command.displayMode);
+      youtubeSubtitles?.setDisplayMode(command.displayMode);
+      break;
+    case 'SET_VIDEO_SUBTITLES':
+      youtubeSubtitles?.setEnabled(command.enabled);
       break;
     case 'GET_PAGE_STATUS':
       break;
   }
-  sendResponse(controller.getStatus());
+  sendResponse(pageStatus());
 });
 
 // Every full navigation creates a fresh content script, so hostname rules also cover pagination.
@@ -99,10 +117,12 @@ window.addEventListener('pagehide', () => {
   resumeAfterPageShow =
     status.mode === 'segmented' && ['translating', 'complete', 'error'].includes(status.phase);
   controller.stop();
+  youtubeSubtitles?.suspend();
 });
 window.addEventListener('pageshow', (event) => {
   if (event.persisted && resumeAfterPageShow) void controller.start();
   resumeAfterPageShow = false;
+  if (event.persisted) youtubeSubtitles?.resume();
 });
 
 initializeContentLanguage();

@@ -51,6 +51,10 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
         current.translateDynamicContent === old.translateDynamicContent
           ? settings.translateDynamicContent
           : current.translateDynamicContent,
+      youtubeSubtitles:
+        current.youtubeSubtitles === old.youtubeSubtitles
+          ? settings.youtubeSubtitles
+          : current.youtubeSubtitles,
     }));
     previous.current = settings;
   }, [settings]);
@@ -101,6 +105,18 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
             checked={draft.translateDynamicContent}
             disabled={feedback.translateDynamicContent?.status === 'saving'}
             onChange={(value) => change('translateDynamicContent', value)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('YouTube 双语字幕')}
+          description={t('打开 YouTube 视频时自动显示原文和译文字幕')}
+          feedback={feedback.youtubeSubtitles}
+        >
+          <Switch
+            label={t('YouTube 双语字幕')}
+            checked={draft.youtubeSubtitles}
+            disabled={feedback.youtubeSubtitles?.status === 'saving'}
+            onChange={(value) => change('youtubeSubtitles', value)}
           />
         </SettingRow>
       </div>

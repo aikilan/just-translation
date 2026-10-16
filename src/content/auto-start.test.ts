@@ -17,6 +17,7 @@ const SETTINGS: PublicTranslatorSettings = {
   translateDynamicContent: true,
   excludedSites: [],
   autoTranslateSites: ['news.ycombinator.com'],
+  youtubeSubtitles: false,
 };
 
 describe('tryStartAutomaticTranslation', () => {

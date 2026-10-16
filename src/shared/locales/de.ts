@@ -603,6 +603,17 @@ export default {
   '{{p0}} 段未能翻译，已保留原文。':
     '{{p0}} Abschnitt(e) konnten nicht übersetzt werden; der Originaltext bleibt erhalten.',
   重试失败部分: 'Fehlgeschlagene Abschnitte wiederholen',
+  开启双语字幕: 'Zweisprachige Untertitel einschalten',
+  关闭双语字幕: 'Zweisprachige Untertitel ausschalten',
+  '正在获取字幕…': 'Untertitel werden geladen …',
+  此视频没有字幕: 'Dieses Video hat keine Untertitel',
+  '未能获取字幕，请打开 YouTube 字幕后重试':
+    'Die Untertitel konnten nicht geladen werden. Schalten Sie die YouTube-Untertitel ein und versuchen Sie es erneut.',
+  '字幕翻译失败：{{p0}}': 'Übersetzung der Untertitel fehlgeschlagen: {{p0}}',
+  视频字幕设置无效: 'Ungültige Einstellung für Videountertitel',
+  'YouTube 双语字幕': 'Zweisprachige YouTube-Untertitel',
+  '打开 YouTube 视频时自动显示原文和译文字幕':
+    'Original- und übersetzte Untertitel bei YouTube-Videos automatisch anzeigen',
   siteCount: '{{count}} Websites',
   retryCount: '{{count}} Wiederholungen',
   translatedCount: '{{translated}} / {{count}} Absätze übersetzt',

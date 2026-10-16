@@ -128,6 +128,11 @@ export async function updateReadingPreferences(
           );
         next.translationRetryCount = patch.translationRetryCount;
       }
+      if (patch.youtubeSubtitles !== undefined) {
+        if (typeof patch.youtubeSubtitles !== 'boolean')
+          throw new LocalizedError(message('视频字幕设置无效'));
+        next.youtubeSubtitles = patch.youtubeSubtitles;
+      }
       if (patch.fullDocumentTimeoutMinutes !== undefined) {
         if (!isValidFullDocumentTimeout(patch.fullDocumentTimeoutMinutes))
           throw new LocalizedError(message('全文最长等待必须是 2–60 的整数'));
@@ -206,6 +211,7 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
     fullDocumentTimeoutMinutes: settings.fullDocumentTimeoutMinutes,
     excludedSites: settings.excludedSites,
     autoTranslateSites: settings.autoTranslateSites,
+    youtubeSubtitles: settings.youtubeSubtitles,
   };
 }
 

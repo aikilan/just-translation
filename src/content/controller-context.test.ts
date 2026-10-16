@@ -21,6 +21,7 @@ beforeEach(() => {
     translateDynamicContent: true,
     autoTranslateSites: [],
     excludedSites: [],
+    youtubeSubtitles: false,
   };
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   send = vi.fn(async (request: RuntimeRequest) => {

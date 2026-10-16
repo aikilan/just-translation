@@ -577,6 +577,17 @@ export default {
   '{{p0}} 段未能翻译，已保留原文。':
     '{{p0}} part(s) could not be translated and keep the original text.',
   重试失败部分: 'Retry failed parts',
+  开启双语字幕: 'Turn on bilingual subtitles',
+  关闭双语字幕: 'Turn off bilingual subtitles',
+  '正在获取字幕…': 'Loading subtitles…',
+  此视频没有字幕: 'This video has no subtitles',
+  '未能获取字幕，请打开 YouTube 字幕后重试':
+    'Could not load the subtitles. Turn on YouTube captions and try again.',
+  '字幕翻译失败：{{p0}}': 'Subtitle translation failed: {{p0}}',
+  视频字幕设置无效: 'Invalid video subtitle setting',
+  'YouTube 双语字幕': 'YouTube bilingual subtitles',
+  '打开 YouTube 视频时自动显示原文和译文字幕':
+    'Show original and translated subtitles automatically on YouTube videos',
   siteCount: '{{count}} sites',
   retryCount: '{{count}} retries',
   translatedCount: 'Translated {{translated}} / {{count}} paragraphs',

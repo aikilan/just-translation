@@ -152,6 +152,11 @@ describe('background document lifecycle', () => {
         },
       },
       windows: { onFocusChanged: event() },
+      scripting: {
+        getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
+        registerContentScripts: vi.fn().mockResolvedValue(undefined),
+        updateContentScripts: vi.fn().mockResolvedValue(undefined),
+      },
       tabs: {
         onRemoved: event(),
         onActivated: event(),
@@ -173,6 +178,14 @@ describe('background document lifecycle', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the YouTube caption hook registered whenever the worker starts', async () => {
+    await vi.waitFor(() =>
+      expect(vi.mocked(chrome.scripting.registerContentScripts)).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'youtube-caption-hook', world: 'MAIN' }),
+      ]),
+    );
+  });
 
   it('routes a supported image through trusted storage and the shared quick cancellation scope', async () => {
     activeProfile.imageInputEnabled = true;
