@@ -1,6 +1,6 @@
 # Chrome 应用店上架材料
 
-适用版本：v0.3.42（`just-translate-v0.3.42.zip`，在项目根目录，由 `pnpm build` 生成）。
+适用版本：v0.3.43（`just-translate-v0.3.43.zip`，在项目根目录，由 `pnpm build` 生成）。
 
 Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrome 应用店开发者后台](https://chrome.google.com/webstore/devconsole) 手动完成。
 
@@ -8,7 +8,7 @@ Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrom
 
 | 用途                          | 文件                                                                  |
 | ----------------------------- | --------------------------------------------------------------------- |
-| 上架包                        | 项目根目录 `just-translate-v0.3.42.zip`                               |
+| 上架包                        | 项目根目录 `just-translate-v0.3.43.zip`                               |
 | 商店图标 128×128              | `store-icon-128.png`                                                  |
 | 英文截图 1280×800             | `screenshots/en/1-5*.png`                                             |
 | 阿拉伯语截图 1280×800         | `screenshots/ar/1-5*.png`                                             |
@@ -31,7 +31,7 @@ Chrome 不允许扩展脚本操作开发者后台，以下步骤需要在 [Chrom
    - Category、Language、图标、英文截图、宣传图块按上表上传。
    - Homepage / Support URL 见 `listing.en.md`。
 4. **添加阿拉伯语**：在 Store listing 顶部语言下拉中选择「Arabic - العربية」，粘贴 `listing.ar.md` 中的描述，并上传 `screenshots/ar` 截图和 `promo/*-ar.png` 图块。安装包已内置阿拉伯语名称和摘要。
-5. **Privacy practices**：单一用途、各权限说明、远程代码、数据使用勾选项和隐私政策 URL，全部照抄 `listing.en.md`。
+5. **Privacy practices**：单一用途、各权限说明、远程代码、数据使用勾选项和隐私政策 URL，全部照抄 `listing.en.md`。0.3.43 新增 YouTube 双语字幕，单一用途和 `scripting` 权限说明随之改变，从旧版本更新时需重新粘贴这两项。
 6. **Distribution**：Free、Public、所有地区。
 7. **Test instructions**：粘贴 `listing.en.md` 末尾的审核说明。
 8. 点击「Submit for review」。审核通常需要几天，`<all_urls>` 级别的主机权限可能延长审核时间。
