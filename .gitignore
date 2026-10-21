@@ -8,3 +8,4 @@ coverage/
 .playwright-mcp
 .claude
 artifacts/chrome-web-store/screenshots/
+justtranslate-.*\.zip
