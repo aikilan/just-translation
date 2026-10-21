@@ -19,7 +19,7 @@ const controller = new TranslationController(() => {
   // This notification carries no page data; the background reads its current active document.
   void sendRuntimeMessage<void>({ type: 'PAGE_RETRY_STATE_CHANGED' }).catch(() => {});
 });
-const automaticStartup = new AbortController();
+let automaticStartup = new AbortController();
 registerRetryInteractions((source) => {
   automaticStartup.abort();
   void controller.retry(source);
@@ -108,14 +108,17 @@ if (pdfDocument) {
     .catch(() => {});
 } else void tryStartAutomaticTranslation(controller, location.href, automaticStartup.signal);
 
+/** Only an enabled segmented page may resume by itself; a user's stopped page remains stopped. */
+function isResumable(status: PageTranslationStatus): boolean {
+  return status.mode === 'segmented' && ['translating', 'complete', 'error'].includes(status.phase);
+}
+
 // BFCache preserves this controller. Cancel its old sessions and explicitly restart only an
-// already enabled page when it is restored; a user's stopped page must remain stopped.
+// already enabled page when it is restored.
 let resumeAfterPageShow = false;
 window.addEventListener('pagehide', () => {
   automaticStartup.abort();
-  const status = controller.getStatus();
-  resumeAfterPageShow =
-    status.mode === 'segmented' && ['translating', 'complete', 'error'].includes(status.phase);
+  resumeAfterPageShow = isResumable(controller.getStatus());
   controller.stop();
   youtubeSubtitles?.suspend();
 });
@@ -124,5 +127,53 @@ window.addEventListener('pageshow', (event) => {
   resumeAfterPageShow = false;
   if (event.persisted) youtubeSubtitles?.resume();
 });
+
+interface HistoryEntry {
+  readonly key: string;
+  readonly url: string | null;
+}
+interface HistoryNavigation extends EventTarget {
+  readonly currentEntry: HistoryEntry | null;
+}
+interface HistoryEntryChangeEvent extends Event {
+  readonly navigationType: 'push' | 'replace' | 'reload' | 'traverse' | null;
+  readonly from: HistoryEntry;
+}
+
+// SPA route changes keep this document, so its dynamic observer would translate the next route.
+// Treat a changed path like a full navigation: a pushed route starts untranslated, while
+// back/forward mirrors BFCache per history entry and resumes only a route enabled when left.
+// Query/fragment changes (filters, pagination, anchors) and replaceState (often rewritten while
+// scrolling) stay within the current page.
+const resumableEntries = new Map<string, boolean>();
+// The browser PDF viewer translates in the extension reader, never through page auto-start.
+const historyNavigation = pdfDocument
+  ? undefined
+  : (window as Window & { navigation?: HistoryNavigation }).navigation;
+historyNavigation?.addEventListener('currententrychange', (event) => {
+  const { navigationType, from } = event as HistoryEntryChangeEvent;
+  const current = historyNavigation.currentEntry;
+  const status = controller.getStatus();
+  resumableEntries.set(from.key, isResumable(status));
+  if (navigationType !== 'push' && navigationType !== 'traverse') return;
+  if (!current || isSamePath(from.url, current.url)) return;
+  // A pushed entry always has a new key, so it follows the never-left branch below.
+  const resume = resumableEntries.get(current.key);
+  if (resume && isResumable(status)) return;
+  automaticStartup.abort();
+  if (status.phase !== 'idle') controller.restore();
+  if (resume) {
+    void controller.start();
+  } else if (resume === undefined) {
+    // An entry this script never left follows the same hostname rule as a full navigation.
+    automaticStartup = new AbortController();
+    void tryStartAutomaticTranslation(controller, location.href, automaticStartup.signal);
+  }
+});
+
+function isSamePath(from: string | null, to: string | null): boolean {
+  if (!from || !to) return true;
+  return new URL(from).pathname === new URL(to).pathname;
+}
 
 initializeContentLanguage();

@@ -330,6 +330,61 @@ describe('background document lifecycle', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('cancels a segmented batch while its session lookup is still waiting', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      translator: { kind: 'ai', profileId: activeProfile.id },
+      sessionId: 'stopped',
+      mode: 'segmented',
+    });
+    let release!: () => void;
+    holdSessionRead = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const work = send({
+      type: 'TRANSLATE_BATCH',
+      sessionId: 'stopped',
+      batchId: 'waiting',
+      priority: 'visible',
+      segments: [{ requestId: 'a', unitId: 'a', partIndex: 0, text: 'Paragraph' }],
+    });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    holdSessionRead = undefined;
+    await send({ type: 'CANCEL_TRANSLATION_REQUESTS', sessionId: 'stopped' });
+    release();
+    expect((await work).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels a segmented batch on reload while its session lookup is still waiting', async () => {
+    await send({
+      type: 'BEGIN_TRANSLATION_SESSION',
+      translator: { kind: 'ai', profileId: activeProfile.id },
+      sessionId: 'reloaded',
+      mode: 'segmented',
+    });
+    let release!: () => void;
+    holdSessionRead = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    const work = send({
+      type: 'TRANSLATE_BATCH',
+      sessionId: 'reloaded',
+      batchId: 'waiting',
+      priority: 'visible',
+      segments: [{ requestId: 'a', unitId: 'a', partIndex: 0, text: 'Paragraph' }],
+    });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    holdSessionRead = undefined;
+    documentId = 'reloaded-document';
+    committed({ tabId: 18, frameId: 0, documentId });
+    release();
+    expect((await work).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('ignores late priority snapshots and keeps the strict rate window when reordering', async () => {
     vi.useFakeTimers();
     try {

@@ -379,57 +379,66 @@ async function handleRuntimeRequest(
         };
         translationBatches.set(requestKey, batchState);
         try {
-          const session = await getTranslationSession(sender, request.sessionId);
-          assertSessionMode(session, 'segmented');
-          if (batchState.cancelled) throw new LocalizedError(message('API 请求已取消'));
-          if (batchState.deferred) return { ok: true, data: { deferred: true } };
-          const documentId = session.documentId;
-          const publish = (data: Pick<TranslationBatchProgress, 'translations' | 'timing'>) => {
-            const event: TranslationBatchProgress = {
-              type: 'TRANSLATION_BATCH_PROGRESS',
-              sessionId: request.sessionId,
-              batchId: request.batchId,
-              ...data,
-            };
-            // Address the original document, never the tab's newly navigated page.
-            // The terminal response still accounts for all results if the document has closed.
-            // The PDF viewer is an extension page and only receives runtime messages.
-            void (
-              isExtensionSession(session)
-                ? chrome.runtime.sendMessage(event)
-                : chrome.tabs.sendMessage(session.tabId, event, { documentId })
-            ).catch(() => undefined);
-          };
-          const queue = getRequestQueue(session.settings);
-          const queueUrl = getTranslationQueueUrl(session.settings);
+          // Register before asynchronous preflight: stop/navigation also cancel work awaiting storage.
           const translations = await activeRequests.run(
             requestKey,
-            (signal) =>
-              translateRuntimeBatch(session.settings, request.segments, builtinTranslator, signal, {
-                // Keep the retry budget fixed for this session, including later dynamic batches.
-                maxRetries: session.settings.translationRetryCount,
-                onTranslations: (translations) => publish({ translations }),
-                onTiming: (stage, durationMs) =>
-                  publish({ translations: {}, timing: { stage, durationMs } }),
-                scheduleAttempt: (attempt) =>
-                  queue.run(
-                    queueUrl,
-                    batchState.priority,
-                    signal,
-                    getTranslationRequestTimeout(session.settings, batchState.priority),
-                    async (attemptSignal) => {
-                      // A suspended worker can wake for an old message: validate again at HTTP admission.
-                      await assertCurrentDocument(session);
-                      attemptSignal.throwIfAborted();
-                      // No await between this boundary and the HTTP attempt: viewport updates
-                      // may only return batches that have never submitted a request.
-                      batchState.started = true;
-                      return attempt(attemptSignal);
-                    },
-                    requestKey,
-                  ),
-                onRateLimit: (delayMs) => queue.defer(queueUrl, delayMs),
-              }),
+            async (signal) => {
+              const session = await getTranslationSession(sender, request.sessionId);
+              assertSessionMode(session, 'segmented');
+              if (batchState.cancelled) throw new LocalizedError(message('API 请求已取消'));
+              // Priority requeue aborts this signal; the catch below reports it as deferred.
+              signal.throwIfAborted();
+              const documentId = session.documentId;
+              const publish = (data: Pick<TranslationBatchProgress, 'translations' | 'timing'>) => {
+                const event: TranslationBatchProgress = {
+                  type: 'TRANSLATION_BATCH_PROGRESS',
+                  sessionId: request.sessionId,
+                  batchId: request.batchId,
+                  ...data,
+                };
+                // Address the original document, never the tab's newly navigated page.
+                // The terminal response still accounts for all results if the document has closed.
+                // The PDF viewer is an extension page and only receives runtime messages.
+                void (
+                  isExtensionSession(session)
+                    ? chrome.runtime.sendMessage(event)
+                    : chrome.tabs.sendMessage(session.tabId, event, { documentId })
+                ).catch(() => undefined);
+              };
+              const queue = getRequestQueue(session.settings);
+              const queueUrl = getTranslationQueueUrl(session.settings);
+              return translateRuntimeBatch(
+                session.settings,
+                request.segments,
+                builtinTranslator,
+                signal,
+                {
+                  // Keep the retry budget fixed for this session, including later dynamic batches.
+                  maxRetries: session.settings.translationRetryCount,
+                  onTranslations: (translations) => publish({ translations }),
+                  onTiming: (stage, durationMs) =>
+                    publish({ translations: {}, timing: { stage, durationMs } }),
+                  scheduleAttempt: (attempt) =>
+                    queue.run(
+                      queueUrl,
+                      batchState.priority,
+                      signal,
+                      getTranslationRequestTimeout(session.settings, batchState.priority),
+                      async (attemptSignal) => {
+                        // A suspended worker can wake for an old message: validate again at HTTP admission.
+                        await assertCurrentDocument(session);
+                        attemptSignal.throwIfAborted();
+                        // No await between this boundary and the HTTP attempt: viewport updates
+                        // may only return batches that have never submitted a request.
+                        batchState.started = true;
+                        return attempt(attemptSignal);
+                      },
+                      requestKey,
+                    ),
+                  onRateLimit: (delayMs) => queue.defer(queueUrl, delayMs),
+                },
+              );
+            },
             0,
           );
           return { ok: true, data: translations };

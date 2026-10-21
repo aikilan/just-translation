@@ -38,6 +38,19 @@ vi.mock('./retry-interaction', () => ({ registerRetryInteractions: vi.fn() }));
 let release: (value: Result<PublicTranslatorSettings>) => void;
 let message: Parameters<typeof chrome.runtime.onMessage.addListener>[0];
 let listeners: MockInstance<typeof window.addEventListener>;
+let historyNavigation: EventTarget & { currentEntry: { key: string; url: string } };
+/** Commits a same-document history change the way Chrome's Navigation API reports it. */
+function changeEntry(
+  key: string,
+  url: string,
+  navigationType: 'push' | 'replace' | 'traverse',
+): void {
+  const from = historyNavigation.currentEntry;
+  historyNavigation.currentEntry = { key, url };
+  historyNavigation.dispatchEvent(
+    Object.assign(new Event('currententrychange'), { from, navigationType }),
+  );
+}
 const settings: PublicTranslatorSettings = {
   uiLanguage: 'system',
   ready: true,
@@ -60,6 +73,10 @@ beforeEach(async () => {
   vi.clearAllMocks();
   actions.getStatus.mockReturnValue({ phase: 'idle', mode: 'segmented' });
   listeners = vi.spyOn(window, 'addEventListener');
+  historyNavigation = Object.assign(new EventTarget(), {
+    currentEntry: { key: 'list', url: 'https://example.com/list' },
+  });
+  Object.defineProperty(window, 'navigation', { configurable: true, value: historyNavigation });
   vi.stubGlobal('chrome', {
     runtime: {
       sendMessage: vi.fn(
@@ -83,6 +100,7 @@ afterEach(async () => {
   for (const [type, listener, options] of listeners.mock.calls)
     window.removeEventListener(type, listener, options);
   listeners.mockRestore();
+  Reflect.deleteProperty(window, 'navigation');
   vi.unstubAllGlobals();
 });
 
@@ -165,4 +183,64 @@ it('notifies the background when retry availability changes', async () => {
   observer.notify?.();
   await Promise.resolve();
   expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'PAGE_RETRY_STATE_CHANGED' });
+});
+
+it('restores an SPA route reached by back navigation when it was untranslated when left', () => {
+  release({ ok: false, error: { text: 'not ready' } });
+  changeEntry('detail', 'https://example.com/detail', 'push');
+  actions.getStatus.mockReturnValue({ phase: 'complete', mode: 'segmented' });
+  changeEntry('list', 'https://example.com/list', 'traverse');
+  expect(actions.restore).toHaveBeenCalledOnce();
+  expect(actions.start).not.toHaveBeenCalled();
+});
+
+it('starts a pushed path untranslated and resumes a translated route on traversal', () => {
+  actions.getStatus.mockReturnValue({ phase: 'complete', mode: 'segmented' });
+  changeEntry('detail', 'https://example.com/detail', 'push');
+  expect(actions.restore).toHaveBeenCalledOnce();
+  expect(actions.start).not.toHaveBeenCalled();
+  // `list` was enabled when left, so going back restarts it.
+  actions.getStatus.mockReturnValue({ phase: 'idle', mode: 'segmented' });
+  changeEntry('list', 'https://example.com/list', 'traverse');
+  expect(actions.start).toHaveBeenCalledOnce();
+  // `detail` was idle when left, so going forward resets the translated `list`.
+  actions.getStatus.mockReturnValue({ phase: 'complete', mode: 'segmented' });
+  changeEntry('detail', 'https://example.com/detail', 'traverse');
+  expect(actions.restore).toHaveBeenCalledTimes(2);
+  // The user translates `detail`; the dynamic observer already owns an enabled `list`.
+  changeEntry('list', 'https://example.com/list', 'traverse');
+  expect(actions.restore).toHaveBeenCalledTimes(2);
+  expect(actions.start).toHaveBeenCalledOnce();
+});
+
+it('applies the hostname auto-translation rule again to a pushed path', async () => {
+  release({ ok: true, data: settings });
+  await vi.waitFor(() => expect(actions.start).toHaveBeenCalledOnce());
+  actions.getStatus.mockReturnValue({ phase: 'complete', mode: 'segmented' });
+  changeEntry('detail', 'https://example.com/detail', 'push');
+  expect(actions.restore).toHaveBeenCalledOnce();
+  release({ ok: true, data: settings });
+  await vi.waitFor(() => expect(actions.start).toHaveBeenCalledTimes(2));
+});
+
+it('keeps translation across query, fragment and replaceState changes', () => {
+  actions.getStatus.mockReturnValue({ phase: 'translating', mode: 'segmented' });
+  changeEntry('page-2', 'https://example.com/list?page=2', 'push');
+  changeEntry('comments', 'https://example.com/list?page=2#comments', 'push');
+  changeEntry('list', 'https://example.com/list', 'traverse');
+  // Long articles often rewrite their path while scrolling.
+  changeEntry('list', 'https://example.com/list/next-article', 'replace');
+  expect(actions.restore).not.toHaveBeenCalled();
+  expect(actions.stop).not.toHaveBeenCalled();
+});
+
+it('retires pending startup when back navigation resets a full-document route', async () => {
+  actions.getStatus.mockReturnValue({ phase: 'idle', mode: 'segmented' });
+  changeEntry('detail', 'https://example.com/detail', 'push');
+  actions.getStatus.mockReturnValue({ phase: 'complete', mode: 'full-document' });
+  changeEntry('list', 'https://example.com/list', 'traverse');
+  expect(actions.restore).toHaveBeenCalledOnce();
+  release({ ok: true, data: settings });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(actions.start).not.toHaveBeenCalled();
 });

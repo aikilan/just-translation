@@ -11,6 +11,7 @@ import {
 import { getElementTranslationPriority } from './viewport';
 import type { DisplayMode } from '../shared/settings';
 import { getTranslationSiteRule } from './site-rules';
+import { excludeHostScrollAnchors, restoreHostScrollAnchors } from './scroll-anchoring';
 import { yieldToPage } from './render-tasks';
 import { PROTECTED_MARKER_PATTERN } from '../shared/protected-markers';
 import { canTraverseReadingSubtree, isReadingTextVisible } from './reading-visibility';
@@ -1074,6 +1075,7 @@ function ensureTranslationElement(
 
   present();
   source.append(translation);
+  excludeHostScrollAnchors(source.ownerDocument);
   return translation;
 }
 
@@ -1148,6 +1150,7 @@ export function restoreDocument(): void {
   restoreDocumentTitles();
   getPresentedSources(document).forEach(restoreSourceElement);
   cleanupReadingRuns();
+  restoreHostScrollAnchors(document);
 }
 
 export function restoreSourceElement(source: HTMLElement): void {
