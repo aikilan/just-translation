@@ -4,4 +4,7 @@ coverage/
 .DS_Store
 *.log
 *.zip
+.idea
+.playwright-mcp
+.claude
 artifacts/chrome-web-store/screenshots/
