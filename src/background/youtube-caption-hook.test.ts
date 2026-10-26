@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerYouTubeCaptionHook, YOUTUBE_CAPTION_HOOK_ID } from './youtube-caption-hook';
+import {
+  registerYouTubeCaptionHook,
+  unregisterYouTubeCaptionHook,
+  YOUTUBE_CAPTION_HOOK_ID,
+} from './youtube-caption-hook';
 
 function fakeScripting(registered: chrome.scripting.RegisteredContentScript[]) {
   return {
     getRegisteredContentScripts: vi.fn(() => Promise.resolve(registered)),
     registerContentScripts: vi.fn(() => Promise.resolve()),
     updateContentScripts: vi.fn(() => Promise.resolve()),
+    unregisterContentScripts: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -38,5 +43,19 @@ describe('YouTube caption hook registration', () => {
       expect.objectContaining({ id: YOUTUBE_CAPTION_HOOK_ID, world: 'MAIN' }),
     ]);
     expect(scripting.registerContentScripts).not.toHaveBeenCalled();
+  });
+
+  it('removes a registration kept from an earlier version', async () => {
+    const scripting = fakeScripting([{ id: YOUTUBE_CAPTION_HOOK_ID, js: ['old.js'] }]);
+    await unregisterYouTubeCaptionHook(scripting);
+    expect(scripting.unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [YOUTUBE_CAPTION_HOOK_ID],
+    });
+  });
+
+  it('has nothing to remove when no registration is kept', async () => {
+    const scripting = fakeScripting([]);
+    await unregisterYouTubeCaptionHook(scripting);
+    expect(scripting.unregisterContentScripts).not.toHaveBeenCalled();
   });
 });

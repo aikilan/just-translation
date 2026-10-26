@@ -57,7 +57,8 @@ import {
 } from './translation-engine';
 import { activeTranslatorName, type ActiveTranslator } from '../shared/translation-engines';
 import { extensionOrigin, getPdfViewerUrl, isPdfViewerUrl } from '../shared/pdf-viewer';
-import { registerYouTubeCaptionHook } from './youtube-caption-hook';
+import { registerYouTubeCaptionHook, unregisterYouTubeCaptionHook } from './youtube-caption-hook';
+import { YOUTUBE_SUBTITLES_ENABLED } from '../shared/features';
 
 // 后台唯一入口：负责持久化设置、AI 请求调度和浏览器右键菜单注册。
 const activeRequests = new AbortableRequestRegistry(60_000);
@@ -91,7 +92,9 @@ void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 void initializeSettings();
 void ensureCacheCleanupAlarm(chrome.alarms);
-void registerYouTubeCaptionHook().catch((error: unknown) => {
+void (
+  YOUTUBE_SUBTITLES_ENABLED ? registerYouTubeCaptionHook() : unregisterYouTubeCaptionHook()
+).catch((error: unknown) => {
   // Video subtitles then report missing captions; page translation is unaffected.
   console.error('YouTube 字幕脚本注册失败', error);
 });

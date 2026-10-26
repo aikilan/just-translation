@@ -27,3 +27,17 @@ export async function registerYouTubeCaptionHook(
   if (registered.length) await scripting.updateContentScripts([script]);
   else await scripting.registerContentScripts([script]);
 }
+
+/** Removes a registration kept from a version that offered video subtitles. */
+export async function unregisterYouTubeCaptionHook(
+  scripting: Pick<
+    typeof chrome.scripting,
+    'getRegisteredContentScripts' | 'unregisterContentScripts'
+  > = chrome.scripting,
+): Promise<void> {
+  const registered = await scripting.getRegisteredContentScripts({
+    ids: [YOUTUBE_CAPTION_HOOK_ID],
+  });
+  if (registered.length)
+    await scripting.unregisterContentScripts({ ids: [YOUTUBE_CAPTION_HOOK_ID] });
+}
