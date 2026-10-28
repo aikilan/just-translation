@@ -156,6 +156,7 @@ describe('background document lifecycle', () => {
         getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
         registerContentScripts: vi.fn().mockResolvedValue(undefined),
         updateContentScripts: vi.fn().mockResolvedValue(undefined),
+        unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
       },
       tabs: {
         onRemoved: event(),
@@ -179,12 +180,14 @@ describe('background document lifecycle', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('keeps the YouTube caption hook registered whenever the worker starts', async () => {
+  it('does not register the YouTube caption hook while video subtitles are hidden', async () => {
     await vi.waitFor(() =>
-      expect(vi.mocked(chrome.scripting.registerContentScripts)).toHaveBeenCalledWith([
-        expect.objectContaining({ id: 'youtube-caption-hook', world: 'MAIN' }),
-      ]),
+      expect(vi.mocked(chrome.scripting.getRegisteredContentScripts)).toHaveBeenCalledWith({
+        ids: ['youtube-caption-hook'],
+      }),
     );
+    expect(vi.mocked(chrome.scripting.registerContentScripts)).not.toHaveBeenCalled();
+    expect(vi.mocked(chrome.scripting.updateContentScripts)).not.toHaveBeenCalled();
   });
 
   it('routes a supported image through trusted storage and the shared quick cancellation scope', async () => {

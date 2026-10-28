@@ -12,6 +12,7 @@ import { registerRetryInteractions } from './retry-interaction';
 import { tryStartAutomaticTranslation } from './auto-start';
 import { isBrowserPdfDocument, mountPdfEntry } from './pdf-entry';
 import { isYouTubeWatchHost, YouTubeSubtitles } from './youtube/youtube-subtitles';
+import { YOUTUBE_SUBTITLES_ENABLED } from '../shared/features';
 import './styles.css';
 
 // 页面唯一入口：只处理当前网页中的译文采集、渲染和状态切换。
@@ -32,7 +33,10 @@ function openPdfViewer(translate: TranslationMode): void {
 }
 
 // Video subtitles are a separate feature of this page; page translation never depends on them.
-const youtubeSubtitles = !pdfDocument && isYouTubeWatchHost() ? new YouTubeSubtitles() : undefined;
+const youtubeSubtitles =
+  YOUTUBE_SUBTITLES_ENABLED && !pdfDocument && isYouTubeWatchHost()
+    ? new YouTubeSubtitles()
+    : undefined;
 youtubeSubtitles?.initialize();
 function pageStatus(): PageTranslationStatus {
   const status = controller.getStatus();

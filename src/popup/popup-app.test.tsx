@@ -14,6 +14,12 @@ import {
   READY_SETTINGS,
 } from '../test-utils/ui';
 let view: Awaited<ReturnType<typeof mount>>;
+const features = vi.hoisted(() => ({ youtubeSubtitles: true }));
+vi.mock('../shared/features', () => ({
+  get YOUTUBE_SUBTITLES_ENABLED() {
+    return features.youtubeSubtitles;
+  },
+}));
 vi.mock('../content/quick-translation-loader.iife.ts?script&iife', () => ({
   default: 'quick-loader.js',
 }));
@@ -1022,5 +1028,16 @@ describe('YouTube subtitles', () => {
     mockExtension();
     view = await mount(<PopupApp />);
     expect(toggle(view.container)).toBeNull();
+  });
+
+  it('is not offered while video subtitles are hidden', async () => {
+    features.youtubeSubtitles = false;
+    try {
+      mockExtension(READY_SETTINGS, IDLE_STATUS, 'https://www.youtube.com/watch?v=abcdefghijk');
+      view = await mount(<PopupApp />);
+      expect(toggle(view.container)).toBeNull();
+    } finally {
+      features.youtubeSubtitles = true;
+    }
   });
 });

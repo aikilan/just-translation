@@ -23,6 +23,7 @@ import {
   type RuntimeRequest,
 } from '../shared/messages';
 import { isUrlExcluded } from '../shared/settings';
+import { YOUTUBE_SUBTITLES_ENABLED } from '../shared/features';
 import {
   getPdfFileName,
   getPdfViewerUrl,
@@ -683,7 +684,7 @@ export function PopupApp() {
                 }}
               />
             </SettingRow>
-            {page?.hostname === 'www.youtube.com' ? (
+            {YOUTUBE_SUBTITLES_ENABLED && page?.hostname === 'www.youtube.com' ? (
               <SettingRow label={t('YouTube 双语字幕')} feedback={feedback.video}>
                 <Switch
                   label={t('YouTube 双语字幕')}
