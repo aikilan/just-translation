@@ -14,6 +14,7 @@ import type {
   SiteRuleUpdate,
 } from '../shared/messages';
 import { isUrlExcluded, normalizeSiteRule, type TranslatorSettings } from '../shared/settings';
+import { YOUTUBE_SUBTITLES_ENABLED } from '../shared/features';
 import {
   isTargetLanguage,
   languageCodeLabel,
@@ -152,18 +153,20 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
             onChange={(value) => change('translateDynamicContent', value)}
           />
         </SettingRow>
-        <SettingRow
-          label={t('YouTube 双语字幕')}
-          description={t('打开 YouTube 视频时自动显示原文和译文字幕')}
-          feedback={feedback.youtubeSubtitles}
-        >
-          <Switch
+        {YOUTUBE_SUBTITLES_ENABLED ? (
+          <SettingRow
             label={t('YouTube 双语字幕')}
-            checked={draft.youtubeSubtitles}
-            disabled={feedback.youtubeSubtitles?.status === 'saving'}
-            onChange={(value) => change('youtubeSubtitles', value)}
-          />
-        </SettingRow>
+            description={t('打开 YouTube 视频时自动显示原文和译文字幕')}
+            feedback={feedback.youtubeSubtitles}
+          >
+            <Switch
+              label={t('YouTube 双语字幕')}
+              checked={draft.youtubeSubtitles}
+              disabled={feedback.youtubeSubtitles?.status === 'saving'}
+              onChange={(value) => change('youtubeSubtitles', value)}
+            />
+          </SettingRow>
+        ) : null}
       </div>
       <div className="reading-preview-heading">
         <h2>{t('阅读效果')}</h2>

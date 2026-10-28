@@ -14,6 +14,7 @@ import { detectPageLanguage, waitForDomQuiet, type PageLanguageResult } from './
 import { isBrowserPdfDocument, mountPdfEntry } from './pdf-entry';
 import { isYouTubeWatchHost, YouTubeSubtitles } from './youtube/youtube-subtitles';
 import { setDocumentTranslationStyle } from './dom-translator';
+import { YOUTUBE_SUBTITLES_ENABLED } from '../shared/features';
 import './styles.css';
 
 // 页面唯一入口：只处理当前网页中的译文采集、渲染和状态切换。
@@ -34,7 +35,10 @@ function openPdfViewer(translate: TranslationMode): void {
 }
 
 // Video subtitles are a separate feature of this page; page translation never depends on them.
-const youtubeSubtitles = !pdfDocument && isYouTubeWatchHost() ? new YouTubeSubtitles() : undefined;
+const youtubeSubtitles =
+  YOUTUBE_SUBTITLES_ENABLED && !pdfDocument && isYouTubeWatchHost()
+    ? new YouTubeSubtitles()
+    : undefined;
 youtubeSubtitles?.initialize();
 // One local detection per URL serves both language rules and the popup's language switch.
 let languageDetection: { url: string; result: Promise<PageLanguageResult> } | undefined;

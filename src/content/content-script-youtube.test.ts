@@ -10,6 +10,7 @@ const subtitles = vi.hoisted(() => ({
   suspend: vi.fn(),
   resume: vi.fn(),
 }));
+const features = vi.hoisted(() => ({ youtubeSubtitles: true }));
 const controller = vi.hoisted(() => ({
   start: vi.fn().mockResolvedValue(undefined),
   stop: vi.fn(),
@@ -25,6 +26,11 @@ vi.mock('./youtube/youtube-subtitles', () => ({
     setDisplayMode = subtitles.setDisplayMode;
     suspend = subtitles.suspend;
     resume = subtitles.resume;
+  },
+}));
+vi.mock('../shared/features', () => ({
+  get YOUTUBE_SUBTITLES_ENABLED() {
+    return features.youtubeSubtitles;
   },
 }));
 vi.mock('./controller', () => ({
@@ -43,7 +49,7 @@ let message: (command: PageCommand, sender: unknown, respond: (value: unknown) =
 let listeners: MockInstance<typeof window.addEventListener>;
 const VIDEO_STATUS: VideoSubtitleStatus = { enabled: true, phase: 'loading' };
 
-beforeEach(async () => {
+async function loadContentScript(): Promise<void> {
   vi.resetModules();
   vi.clearAllMocks();
   controller.getStatus.mockReturnValue({ phase: 'idle', mode: 'segmented' });
@@ -60,6 +66,11 @@ beforeEach(async () => {
     },
   });
   await import('./content-script');
+}
+
+beforeEach(async () => {
+  features.youtubeSubtitles = true;
+  await loadContentScript();
 });
 
 afterEach(() => {
@@ -101,4 +112,13 @@ it('releases subtitles on pagehide and restores them from the back/forward cache
   expect(subtitles.resume).not.toHaveBeenCalled();
   window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   expect(subtitles.resume).toHaveBeenCalledOnce();
+});
+
+it('leaves YouTube untouched while video subtitles are hidden', async () => {
+  features.youtubeSubtitles = false;
+  await loadContentScript();
+  expect(subtitles.initialize).not.toHaveBeenCalled();
+  const respond = vi.fn();
+  message({ type: 'GET_PAGE_STATUS' }, {}, respond);
+  expect(respond).toHaveBeenCalledWith({ phase: 'idle', mode: 'segmented' });
 });
