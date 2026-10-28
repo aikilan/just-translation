@@ -22,6 +22,7 @@ import {
   prepareTranslationRender,
   restoreDocument,
   setDocumentDisplayMode,
+  setDocumentTranslationStyle,
 } from './dom-translator';
 import { RenderTasks } from './render-tasks';
 
@@ -84,6 +85,7 @@ export class FullDocumentTranslationTask {
       if (!settings.supportsFullDocument)
         throw new LocalizedError(message('全文上下文翻译仅支持 AI 配置'));
       this.status.displayMode = settings.displayMode;
+      setDocumentTranslationStyle(settings.translationStyle);
       const session = await sendRuntimeMessage<TranslationSessionInfo>({
         type: 'BEGIN_TRANSLATION_SESSION',
         mode: 'full-document',

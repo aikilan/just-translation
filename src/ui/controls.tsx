@@ -1,4 +1,11 @@
-import { t, message, LocalizedError, renderMessage, type UiMessage } from '../shared/i18n';
+import {
+  t,
+  message,
+  LocalizedError,
+  renderMessage,
+  type MessageKey,
+  type UiMessage,
+} from '../shared/i18n';
 import { Check, LoaderCircle, RotateCcw } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -8,8 +15,15 @@ import {
   type PublicTranslatorSettings,
   type RuntimeRequest,
 } from '../shared/messages';
-import type { DisplayMode } from '../shared/settings';
-import { TRANSLATION_LANGUAGES } from '../shared/translation-languages';
+import { TRANSLATION_STYLES, type DisplayMode, type TranslationStyle } from '../shared/settings';
+import type { BuiltinTranslatorId } from '../shared/translation-engines';
+import {
+  builtinLanguageCode,
+  isPresetTranslationLanguage,
+  sortedTranslationLanguages,
+  translationLanguageLabel,
+  type TranslationLanguage,
+} from '../shared/translation-languages';
 export type SaveState =
   | { status: 'saving' }
   | { status: 'saved' }
@@ -100,6 +114,7 @@ export function LanguagePicker({
   disabled,
   label,
   allowCustom,
+  builtinEngine,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -108,8 +123,10 @@ export function LanguagePicker({
   disabled?: boolean;
   label: string;
   allowCustom: boolean;
+  /** Presets the selected free engine cannot translate into stay visible but disabled. */
+  builtinEngine?: BuiltinTranslatorId;
 }) {
-  const [custom, setCustom] = useState(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
+  const [custom, setCustom] = useState(!isPresetTranslationLanguage(value));
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<UiMessage | ''>('');
   const previousValue = useRef(value);
@@ -120,8 +137,18 @@ export function LanguagePicker({
     // A parent reflecting the current draft must not hide the custom input mid-edit.
     if (value === draft) return;
     setDraft(value);
-    setCustom(!TRANSLATION_LANGUAGES.some(([id]) => id === value));
+    setCustom(!isPresetTranslationLanguage(value));
   }, [value, draft]);
+  const { common, others } = sortedTranslationLanguages();
+  const renderOption = (language: TranslationLanguage) => (
+    <option
+      key={language.id}
+      value={language.id}
+      disabled={Boolean(builtinEngine && !builtinLanguageCode(builtinEngine, language.id))}
+    >
+      {translationLanguageLabel(language.id)}
+    </option>
+  );
   function commit() {
     if (!draft.trim()) {
       setError(message('请填写目标语言'));
@@ -146,11 +173,8 @@ export function LanguagePicker({
           }
         }}
       >
-        {TRANSLATION_LANGUAGES.map(([id, name]) => (
-          <option key={id} value={id}>
-            {t(name)}
-          </option>
-        ))}
+        <optgroup label={t('常用语言')}>{common.map(renderOption)}</optgroup>
+        <optgroup label={t('全部语言')}>{others.map(renderOption)}</optgroup>
         <option value="__custom__" disabled={!allowCustom}>
           {t('自定义语言…')}
         </option>
@@ -214,6 +238,40 @@ export function DisplayModeControl({
         </button>
       ))}
     </div>
+  );
+}
+
+const TRANSLATION_STYLE_LABELS = {
+  inherit: '继承网页',
+  faded: '弱化',
+  dashed: '虚线下划线',
+  highlight: '背景高亮',
+  quote: '引用竖线',
+  blur: '学习模式（悬停显示）',
+} as const satisfies Record<TranslationStyle, MessageKey>;
+
+export function TranslationStyleControl({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: TranslationStyle;
+  onChange: (value: TranslationStyle) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <select
+      aria-label={t('译文样式')}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as TranslationStyle)}
+    >
+      {TRANSLATION_STYLES.map((style) => (
+        <option key={style} value={style}>
+          {t(TRANSLATION_STYLE_LABELS[style])}
+        </option>
+      ))}
+    </select>
   );
 }
 

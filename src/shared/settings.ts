@@ -26,6 +26,27 @@ import {
   type ActiveTranslator,
 } from './translation-engines';
 export type DisplayMode = 'bilingual' | 'translation';
+/** Visual treatment of rendered page translations; `inherit` keeps the host typography only. */
+export const TRANSLATION_STYLES = [
+  'inherit',
+  'faded',
+  'dashed',
+  'highlight',
+  'quote',
+  'blur',
+] as const;
+export type TranslationStyle = (typeof TRANSLATION_STYLES)[number];
+export const MAX_AUTO_TRANSLATE_LANGUAGES = 100;
+export function isValidLanguageRuleList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_AUTO_TRANSLATE_LANGUAGES &&
+    value.every((code) => typeof code === 'string' && /^[a-z]{2,3}$/u.test(code))
+  );
+}
+export function isTranslationStyle(value: unknown): value is TranslationStyle {
+  return TRANSLATION_STYLES.some((style) => style === value);
+}
 
 export interface TranslationProfile extends ProviderOptions {
   id: string;
@@ -48,6 +69,9 @@ export interface TranslatorSettings {
   activeTranslator: ActiveTranslator;
   targetLanguage: string;
   displayMode: DisplayMode;
+  translationStyle: TranslationStyle;
+  /** Shows a translate button beside a page selection; nothing is sent until it is clicked. */
+  selectionIcon: boolean;
   translateDynamicContent: boolean;
   /** Maximum concurrent batches in a page translation operation. */
   translationConcurrency: number;
@@ -57,6 +81,8 @@ export interface TranslatorSettings {
   fullDocumentTimeoutMinutes: number;
   excludedSites: string[];
   autoTranslateSites: string[];
+  /** Primary language subtags whose pages start translating automatically. */
+  autoTranslateLanguages: string[];
   /** Turns on bilingual subtitles for every YouTube video; the player button controls one tab. */
   youtubeSubtitles: boolean;
 }
@@ -122,12 +148,15 @@ export const DEFAULT_SETTINGS: TranslatorSettings = {
   activeTranslator: { ...DEFAULT_ACTIVE_TRANSLATOR },
   targetLanguage: 'Simplified Chinese',
   displayMode: 'bilingual',
+  translationStyle: 'inherit',
+  selectionIcon: true,
   translateDynamicContent: true,
   translationConcurrency: 4,
   translationRetryCount: 1,
   fullDocumentTimeoutMinutes: 10,
   excludedSites: [],
   autoTranslateSites: [],
+  autoTranslateLanguages: [],
   youtubeSubtitles: false,
 };
 
@@ -308,6 +337,13 @@ export function mergeSettings(value: unknown): TranslatorSettings {
       value.displayMode === 'bilingual' || value.displayMode === 'translation'
         ? value.displayMode
         : DEFAULT_SETTINGS.displayMode,
+    translationStyle: isTranslationStyle(value.translationStyle)
+      ? value.translationStyle
+      : DEFAULT_SETTINGS.translationStyle,
+    selectionIcon:
+      typeof value.selectionIcon === 'boolean'
+        ? value.selectionIcon
+        : DEFAULT_SETTINGS.selectionIcon,
     translateDynamicContent:
       typeof value.translateDynamicContent === 'boolean'
         ? value.translateDynamicContent
@@ -323,6 +359,9 @@ export function mergeSettings(value: unknown): TranslatorSettings {
       : DEFAULT_SETTINGS.fullDocumentTimeoutMinutes,
     excludedSites: readStringArray(value.excludedSites),
     autoTranslateSites: readStringArray(value.autoTranslateSites),
+    autoTranslateLanguages: isValidLanguageRuleList(value.autoTranslateLanguages)
+      ? [...new Set(value.autoTranslateLanguages)]
+      : [],
     youtubeSubtitles: value.youtubeSubtitles === true,
   };
 }

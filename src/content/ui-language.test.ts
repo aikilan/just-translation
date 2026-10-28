@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { message, setUiLanguage, t } from '../shared/i18n';
+import { message, setUiLanguage } from '../shared/i18n';
 import { SelectionTranslationView } from './selection-translation-view';
+import { translationLanguageLabel } from '../shared/translation-languages';
 import {
   renderTranslationError,
   renderTranslationPending,
@@ -71,9 +72,12 @@ it('localizes a preset selection target after success and every later locale cha
     translatorName: 'Google',
   });
   const shadow = document.querySelector('[data-justranslate-selection]')!.shadowRoot!;
-  expect(shadow.querySelector('.language')?.textContent).toBe(`Google · ${t('简体中文')}`);
+  expect(shadow.querySelector('.language')?.textContent).toBe('Google · Chinois simplifié');
   setUiLanguage('ar');
-  expect(shadow.querySelector('.language')?.textContent).toBe(`Google · ${t('简体中文')}`);
+  expect(shadow.querySelector('.language')?.textContent).toBe(
+    `Google · ${translationLanguageLabel('Simplified Chinese')}`,
+  );
+  expect(translationLanguageLabel('Simplified Chinese')).not.toBe('Chinois simplifié');
   expect(shadow.querySelector('.result')?.textContent).toBe('译文');
 
   view.success({ text: '译文', targetLanguage: 'Klingon', translatorName: 'Google' });

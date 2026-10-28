@@ -9,6 +9,8 @@ import {
   isValidTranslationConcurrency,
   isValidTranslationRetryCount,
   isValidFullDocumentTimeout,
+  isTranslationStyle,
+  isValidLanguageRuleList,
   MAX_TRANSLATION_RETRY_COUNT,
   MAX_TRANSLATION_CONCURRENCY,
   normalizeTranslationProfile,
@@ -109,6 +111,21 @@ export async function updateReadingPreferences(
           throw new LocalizedError(message('展示方式无效'));
         next.displayMode = patch.displayMode;
       }
+      if (patch.translationStyle !== undefined) {
+        if (!isTranslationStyle(patch.translationStyle))
+          throw new LocalizedError(message('译文样式无效'));
+        next.translationStyle = patch.translationStyle;
+      }
+      if (patch.selectionIcon !== undefined) {
+        if (typeof patch.selectionIcon !== 'boolean')
+          throw new LocalizedError(message('划选图标设置无效'));
+        next.selectionIcon = patch.selectionIcon;
+      }
+      if (patch.autoTranslateLanguages !== undefined) {
+        if (!isValidLanguageRuleList(patch.autoTranslateLanguages))
+          throw new LocalizedError(message('自动翻译语言无效'));
+        next.autoTranslateLanguages = [...new Set(patch.autoTranslateLanguages)];
+      }
       if (patch.translateDynamicContent !== undefined) {
         if (typeof patch.translateDynamicContent !== 'boolean')
           throw new LocalizedError(message('动态翻译设置无效'));
@@ -205,12 +222,15 @@ export function toPublicSettings(settings: TranslatorSettings): PublicTranslator
     configurationError,
     targetLanguage: settings.targetLanguage,
     displayMode: settings.displayMode,
+    translationStyle: settings.translationStyle,
+    selectionIcon: settings.selectionIcon,
     translateDynamicContent: settings.translateDynamicContent,
     translationConcurrency: settings.translationConcurrency,
     translationRetryCount: settings.translationRetryCount,
     fullDocumentTimeoutMinutes: settings.fullDocumentTimeoutMinutes,
     excludedSites: settings.excludedSites,
     autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateLanguages: settings.autoTranslateLanguages,
     youtubeSubtitles: settings.youtubeSubtitles,
   };
 }

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { crx } from '@crxjs/vite-plugin';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 import manifest from './manifest.config.ts';
 import { nativeLocaleMessages } from './src/shared/native-locales.ts';
@@ -21,7 +21,11 @@ const pdfjsAssets: Record<string, (file: string) => boolean> = {
 };
 
 export default defineConfig({
-  test: { setupFiles: ['./src/test-utils/setup-i18n.ts'] },
+  test: {
+    setupFiles: ['./src/test-utils/setup-i18n.ts'],
+    // Agent worktrees under .claude/ hold other checkouts; their tests are not this tree's.
+    exclude: [...configDefaults.exclude, '.claude/**'],
+  },
   plugins: [
     react(),
     crx({ manifest }),

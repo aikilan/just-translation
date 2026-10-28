@@ -8,6 +8,7 @@ import type { ActiveTranslator } from '../shared/translation-engines';
 import type { TranslationDiagnostics } from '../shared/translation-metrics';
 import type { DisplayMode } from '../shared/settings';
 import type { PdfReaderState } from './pdf-reader';
+import { setDocumentTranslationStyle } from '../content/dom-translator';
 
 /** The page translator API the viewer needs; it is the same controller used on webpages. */
 export interface ViewerTranslationController {
@@ -166,6 +167,9 @@ export class PdfViewerSession {
       }
       case 'SET_DISPLAY_MODE':
         this.controller.setDisplayMode(command.displayMode);
+        break;
+      case 'SET_TRANSLATION_STYLE':
+        setDocumentTranslationStyle(command.translationStyle);
         break;
       case 'GET_PAGE_STATUS':
         break;

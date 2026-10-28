@@ -10,8 +10,10 @@ import { isUrlExcluded } from '../shared/settings';
 import { TranslationController } from './controller';
 import { registerRetryInteractions } from './retry-interaction';
 import { tryStartAutomaticTranslation } from './auto-start';
+import { detectPageLanguage, waitForDomQuiet, type PageLanguageResult } from './page-language';
 import { isBrowserPdfDocument, mountPdfEntry } from './pdf-entry';
 import { isYouTubeWatchHost, YouTubeSubtitles } from './youtube/youtube-subtitles';
+import { setDocumentTranslationStyle } from './dom-translator';
 import './styles.css';
 
 // 页面唯一入口：只处理当前网页中的译文采集、渲染和状态切换。
@@ -34,9 +36,39 @@ function openPdfViewer(translate: TranslationMode): void {
 // Video subtitles are a separate feature of this page; page translation never depends on them.
 const youtubeSubtitles = !pdfDocument && isYouTubeWatchHost() ? new YouTubeSubtitles() : undefined;
 youtubeSubtitles?.initialize();
+// One local detection per URL serves both language rules and the popup's language switch.
+let languageDetection: { url: string; result: Promise<PageLanguageResult> } | undefined;
+let pageLanguage: string | undefined;
+// After an SPA route change, detection waits for the new route to render before sampling.
+let routeRendered: Promise<void> = Promise.resolve();
+function readPageLanguage(): Promise<PageLanguageResult> {
+  if (languageDetection?.url !== location.href) {
+    const url = location.href;
+    const result = routeRendered
+      .then(() =>
+        // A newer route replaced this one while it rendered; its text is not this URL's.
+        location.href === url ? detectPageLanguage() : ({ status: 'unknown' } as const),
+      )
+      .then((value) => {
+        if (languageDetection?.url === url) {
+          pageLanguage = value.status === 'detected' ? value.tag : undefined;
+          // Too little text yet: let a later read try again.
+          if (value.status === 'insufficient') languageDetection = undefined;
+        }
+        return value;
+      });
+    languageDetection = { url, result };
+    pageLanguage = undefined;
+  }
+  return languageDetection.result;
+}
+
 function pageStatus(): PageTranslationStatus {
-  const status = controller.getStatus();
-  return youtubeSubtitles ? { ...status, videoSubtitles: youtubeSubtitles.getStatus() } : status;
+  const status: PageTranslationStatus = { ...controller.getStatus() };
+  if (youtubeSubtitles) status.videoSubtitles = youtubeSubtitles.getStatus();
+  if (pageLanguage) status.pageLanguage = pageLanguage;
+  else if (!pdfDocument) void readPageLanguage().catch(() => {});
+  return status;
 }
 
 chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendResponse) => {
@@ -88,6 +120,9 @@ chrome.runtime.onMessage.addListener((command: PageCommand, _sender, sendRespons
       controller.setDisplayMode(command.displayMode);
       youtubeSubtitles?.setDisplayMode(command.displayMode);
       break;
+    case 'SET_TRANSLATION_STYLE':
+      setDocumentTranslationStyle(command.translationStyle);
+      break;
     case 'SET_VIDEO_SUBTITLES':
       youtubeSubtitles?.setEnabled(command.enabled);
       break;
@@ -106,7 +141,14 @@ if (pdfDocument) {
         mountPdfEntry(() => openPdfViewer('segmented'));
     })
     .catch(() => {});
-} else void tryStartAutomaticTranslation(controller, location.href, automaticStartup.signal);
+} else
+  void tryStartAutomaticTranslation(
+    controller,
+    location.href,
+    automaticStartup.signal,
+    undefined,
+    readPageLanguage,
+  );
 
 /** Only an enabled segmented page may resume by itself; a user's stopped page remains stopped. */
 function isResumable(status: PageTranslationStatus): boolean {
@@ -157,6 +199,9 @@ historyNavigation?.addEventListener('currententrychange', (event) => {
   resumableEntries.set(from.key, isResumable(status));
   if (navigationType !== 'push' && navigationType !== 'traverse') return;
   if (!current || isSamePath(from.url, current.url)) return;
+  routeRendered = waitForDomQuiet();
+  languageDetection = undefined;
+  pageLanguage = undefined;
   // A pushed entry always has a new key, so it follows the never-left branch below.
   const resume = resumableEntries.get(current.key);
   if (resume && isResumable(status)) return;
@@ -167,7 +212,13 @@ historyNavigation?.addEventListener('currententrychange', (event) => {
   } else if (resume === undefined) {
     // An entry this script never left follows the same hostname rule as a full navigation.
     automaticStartup = new AbortController();
-    void tryStartAutomaticTranslation(controller, location.href, automaticStartup.signal);
+    void tryStartAutomaticTranslation(
+      controller,
+      location.href,
+      automaticStartup.signal,
+      undefined,
+      readPageLanguage,
+    );
   }
 });
 

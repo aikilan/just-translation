@@ -9,7 +9,7 @@ import {
   stageTitleTranslation,
 } from './document-title';
 import { getElementTranslationPriority } from './viewport';
-import type { DisplayMode } from '../shared/settings';
+import type { DisplayMode, TranslationStyle } from '../shared/settings';
 import { getTranslationSiteRule } from './site-rules';
 import { excludeHostScrollAnchors, restoreHostScrollAnchors } from './scroll-anchoring';
 import { yieldToPage } from './render-tasks';
@@ -45,6 +45,10 @@ import {
 
 const SOURCE_ATTRIBUTE = 'data-justranslate-source';
 const TRANSLATION_ATTRIBUTE = 'data-justranslate-translation';
+// Style presets target this inline wrapper: copied host typography is inline !important on the
+// block element, and an inline box lets underlines and highlights follow each wrapped line.
+const TRANSLATION_TEXT_ATTRIBUTE = 'data-justranslate-translation-text';
+const DOCUMENT_STYLE_ATTRIBUTE = 'data-justranslate-style';
 
 const READING_RUN_ATTRIBUTE = 'data-justranslate-reading-run';
 const TRANSLATION_STATE_ATTRIBUTE = 'data-justranslate-state';
@@ -999,8 +1003,11 @@ export function prepareTranslationRender(
     translation.removeAttribute(TRANSLATION_UNIT_ID_ATTRIBUTE);
     translation.removeAttribute('aria-label');
     translation.removeAttribute('role');
-    translation.removeAttribute('tabindex');
-    translation.textContent = text;
+    syncRevealFocus(translation);
+    const content = document.createElement('span');
+    content.setAttribute(TRANSLATION_TEXT_ATTRIBUTE, '');
+    content.textContent = text;
+    translation.replaceChildren(content);
     return translation;
   };
 }
@@ -1126,7 +1133,52 @@ function applyTranslationTypography(
   }
 }
 
+let documentTranslationStyle: TranslationStyle = 'inherit';
+let documentDisplayMode: DisplayMode = 'bilingual';
+
+/** Switches the visual preset in place; no node is re-rendered and no request is sent. */
+export function setDocumentTranslationStyle(style: TranslationStyle): void {
+  documentTranslationStyle = style;
+  applyDocumentTranslationStyle();
+}
+
+function effectiveTranslationStyle(): TranslationStyle {
+  // Blurring is a self-test aid beside the source; with the source hidden it would hide the page.
+  return documentTranslationStyle === 'blur' && documentDisplayMode === 'translation'
+    ? 'inherit'
+    : documentTranslationStyle;
+}
+
+function applyDocumentTranslationStyle(): void {
+  const style = effectiveTranslationStyle();
+  const root = document.documentElement;
+  const wasBlurred = root.getAttribute(DOCUMENT_STYLE_ATTRIBUTE) === 'blur';
+  if (style === 'inherit') root.removeAttribute(DOCUMENT_STYLE_ATTRIBUTE);
+  else root.setAttribute(DOCUMENT_STYLE_ATTRIBUTE, style);
+  if (wasBlurred === (style === 'blur')) return;
+  document
+    .querySelectorAll<HTMLElement>(
+      `[${TRANSLATION_ATTRIBUTE}][${TRANSLATION_STATE_ATTRIBUTE}="translated"]`,
+    )
+    .forEach(syncRevealFocus);
+}
+
+/**
+ * Blurred prose must be revealable without hover: keyboard focus and a tap both focus the
+ * translation, which `:focus-within` unblurs. Outside learning mode it is plain text again.
+ */
+function syncRevealFocus(translation: HTMLElement): void {
+  if (
+    effectiveTranslationStyle() === 'blur' &&
+    !translation.parentElement?.hasAttribute(LABEL_ATTRIBUTE)
+  )
+    translation.tabIndex = 0;
+  else translation.removeAttribute('tabindex');
+}
+
 export function setDocumentDisplayMode(mode: DisplayMode): void {
+  documentDisplayMode = mode;
+  applyDocumentTranslationStyle();
   applyDocumentTitleTranslations();
   document.querySelectorAll<HTMLElement>(`[${SOURCE_ATTRIBUTE}]`).forEach((source) => {
     setSourceDisplayMode(source, mode);

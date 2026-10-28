@@ -23,17 +23,6 @@ export const BUILTIN_TRANSLATOR_LIMITS: Readonly<BuiltinTranslatorLimits> = {
   maxConcurrency: 2,
 };
 
-const TARGET_LANGUAGE_CODES = {
-  'Simplified Chinese': { 'google-free': 'zh-CN', 'microsoft-free': 'zh-Hans' },
-  English: { 'google-free': 'en', 'microsoft-free': 'en' },
-  Japanese: { 'google-free': 'ja', 'microsoft-free': 'ja' },
-  Korean: { 'google-free': 'ko', 'microsoft-free': 'ko' },
-  French: { 'google-free': 'fr', 'microsoft-free': 'fr' },
-  German: { 'google-free': 'de', 'microsoft-free': 'de' },
-  Spanish: { 'google-free': 'es', 'microsoft-free': 'es' },
-  Arabic: { 'google-free': 'ar', 'microsoft-free': 'ar' },
-} as const satisfies Record<string, Record<BuiltinTranslatorId, string>>;
-
 export function isBuiltinTranslatorId(value: unknown): value is BuiltinTranslatorId {
   return value === 'google-free' || value === 'microsoft-free';
 }
@@ -96,6 +85,7 @@ export function resolveBuiltinTargetLanguage(
   engine: BuiltinTranslatorId,
   targetLanguage: string,
 ): string | undefined {
-  return TARGET_LANGUAGE_CODES[targetLanguage as keyof typeof TARGET_LANGUAGE_CODES]?.[engine];
+  return builtinLanguageCode(engine, targetLanguage);
 }
 import { t } from './i18n';
+import { builtinLanguageCode } from './translation-languages';

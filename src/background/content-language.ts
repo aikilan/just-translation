@@ -1,5 +1,7 @@
 import { detectAll, toISO2 } from 'tinyld/light';
 
+import { TRANSLATION_LANGUAGES } from '../shared/translation-languages';
+
 export interface LanguageScore {
   lang: string;
   accuracy: number;
@@ -8,6 +10,9 @@ export interface LanguageScore {
 export type LanguageDetector = (text: string) => LanguageScore[];
 
 const TARGET_LANGUAGE_CODES: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    TRANSLATION_LANGUAGES.map(({ id, code }) => [id.toLowerCase(), code.split('-')[0]]),
+  ),
   'simplified chinese': 'zh',
   'chinese (simplified)': 'zh',
   'traditional chinese': 'zh',
@@ -40,9 +45,44 @@ const TARGET_SCRIPTS: Readonly<Record<string, RegExp>> = {
   zh: /\p{Script=Han}/u,
   ja: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u,
   ko: /[\p{Script=Hangul}\p{Script=Han}]/u,
+  yue: /\p{Script=Han}/u,
   ru: /\p{Script=Cyrillic}/u,
+  uk: /\p{Script=Cyrillic}/u,
+  be: /\p{Script=Cyrillic}/u,
+  bg: /\p{Script=Cyrillic}/u,
+  mk: /\p{Script=Cyrillic}/u,
+  kk: /\p{Script=Cyrillic}/u,
+  ky: /\p{Script=Cyrillic}/u,
+  mn: /\p{Script=Cyrillic}/u,
+  tt: /\p{Script=Cyrillic}/u,
   ar: /\p{Script=Arabic}/u,
+  fa: /\p{Script=Arabic}/u,
+  ur: /\p{Script=Arabic}/u,
+  ps: /\p{Script=Arabic}/u,
+  ug: /\p{Script=Arabic}/u,
+  he: /\p{Script=Hebrew}/u,
+  el: /\p{Script=Greek}/u,
+  th: /\p{Script=Thai}/u,
+  lo: /\p{Script=Lao}/u,
+  km: /\p{Script=Khmer}/u,
+  my: /\p{Script=Myanmar}/u,
+  ka: /\p{Script=Georgian}/u,
+  hy: /\p{Script=Armenian}/u,
+  am: /\p{Script=Ethiopic}/u,
+  ti: /\p{Script=Ethiopic}/u,
   hi: /\p{Script=Devanagari}/u,
+  mr: /\p{Script=Devanagari}/u,
+  ne: /\p{Script=Devanagari}/u,
+  bn: /\p{Script=Bengali}/u,
+  as: /\p{Script=Bengali}/u,
+  pa: /\p{Script=Gurmukhi}/u,
+  gu: /\p{Script=Gujarati}/u,
+  or: /\p{Script=Oriya}/u,
+  ta: /\p{Script=Tamil}/u,
+  te: /\p{Script=Telugu}/u,
+  kn: /\p{Script=Kannada}/u,
+  ml: /\p{Script=Malayalam}/u,
+  si: /\p{Script=Sinhala}/u,
 };
 
 /** Declarations describe the UI as often as the content; only corroborated text may be skipped. */

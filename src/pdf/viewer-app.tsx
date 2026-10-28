@@ -368,6 +368,11 @@ export function PdfViewerApp({
                   label={t('翻译为')}
                   value={settings.targetLanguage}
                   allowCustom={settings.activeTranslator.kind === 'ai'}
+                  builtinEngine={
+                    settings.activeTranslator.kind === 'builtin'
+                      ? settings.activeTranslator.engine
+                      : undefined
+                  }
                   disabled={saving}
                   onChange={(targetLanguage) => {
                     void save(

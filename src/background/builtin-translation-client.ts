@@ -146,7 +146,8 @@ export class BuiltinTranslationClient {
     const item = translations.find(
       (translation) =>
         isRecord(translation) &&
-        translation.to === request.targetLanguageCode &&
+        typeof translation.to === 'string' &&
+        translation.to.toLowerCase() === request.targetLanguageCode.toLowerCase() &&
         typeof translation.text === 'string',
     );
     if (!isRecord(item) || typeof item.text !== 'string')

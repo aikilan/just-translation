@@ -48,6 +48,7 @@ import {
   restoreDocument,
   restoreSourceElement,
   setDocumentDisplayMode,
+  setDocumentTranslationStyle,
   setSourceDisplayMode,
 } from './dom-translator';
 import { findNearestRenderedReadingRoot } from './reading-structure';
@@ -453,6 +454,7 @@ export class TranslationController {
 
       this.dynamicContentEnabled = settings.translateDynamicContent;
       this.status.displayMode = settings.displayMode;
+      setDocumentTranslationStyle(settings.translationStyle);
       setDocumentDisplayMode(settings.displayMode);
       if (this.dynamicContentEnabled) {
         this.observeDynamicContent();

@@ -14,16 +14,16 @@ Translating a web page is a simple job, yet most bilingual translation extension
 
 ## Features
 
-- **Bilingual reading**: translations render under the original paragraphs and inherit the page's typography. Toggle between "original + translation" and "translation only".
+- **Bilingual reading**: translations render under the original paragraphs and inherit the page's typography. Toggle between "original + translation" and "translation only", and pick a translation style (subtle, dashed underline, highlight, side bar, or a blurred learning mode).
 - **Free engines, no setup**: Google Translate (default) and Microsoft Translator channels need no account, API key or browser cookies.
 - **Bring your own AI**: OpenAI, Anthropic, Gemini, Grok, Kimi, GLM, Xiaomi MiMo, DeepSeek, Qwen, or any compatible endpoint, including local servers on `localhost`. Each profile can have its own prompt and thinking settings.
 - **Full-document translation** (AI only): sends the whole loaded article in one request, so terminology and cross-paragraph references stay consistent.
-- **Selection translation**: select text, right-click, and the result appears in a popover next to the selection. Works in iframes and editable fields.
+- **Selection translation**: select text and click the small button beside it (nothing is sent until you click), or right-click; the result appears in a popover next to the selection. Works in iframes and editable fields.
 - **Quick translation**: a popup for pasted text, plus image translation with vision-capable AI models.
 - **PDF translation**: open a PDF in the built-in reader to see each original page next to its reflowed text and translation, or switch to a single-column reading view. Translated text never covers the page, and pages are translated as you scroll to them, so a long book costs only what you read. Works with online PDFs and local files (drag and drop), and pdf.js ships inside the extension, so the reader also works offline.
 - **YouTube bilingual subtitles**: on a YouTube video, the button next to CC replaces YouTube's captions with the original line and its translation underneath. It uses the captions the video already has, uploaded or auto-generated; auto-generated words are joined into whole sentences, and only the lines around the playback position are translated. Turn it on in the popup or settings to show it on every video.
 - **Viewport first**: what's on screen is translated first, then the next screen, then the rest. Dynamic content is picked up incrementally.
-- **Site rules**: auto-translate exact domains, exclude domains or `*.example.com` wildcards.
+- **Site rules**: auto-translate exact domains or every page in chosen languages (detected locally), exclude domains or `*.example.com` wildcards.
 - **Local cache**: translations are cached in IndexedDB under SHA-256 keys for 72 hours.
 - **No silent fallback**: if an engine fails, your page text is never quietly resent to a different service. You retry or switch engines yourself.
 - `Alt + T` shortcut, light and dark themes, UI in English, Simplified Chinese, French, German and Arabic.

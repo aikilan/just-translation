@@ -199,8 +199,38 @@ describe('configuration service', () => {
     });
   });
 
+  it('persists a translation style preset and rejects unknown presets without writing', async () => {
+    await expect(
+      updateReadingPreferences({ translationStyle: 'highlight' }),
+    ).resolves.toMatchObject({
+      translationStyle: 'highlight',
+    });
+    await expect(updateReadingPreferences({ translationStyle: 'neon' as never })).rejects.toThrow(
+      '译文样式无效',
+    );
+    await expect(readPublicSettings()).resolves.toMatchObject({ translationStyle: 'highlight' });
+  });
+  it('validates selection button and language rule preferences at the write boundary', async () => {
+    await expect(updateReadingPreferences({ selectionIcon: false })).resolves.toMatchObject({
+      selectionIcon: false,
+    });
+    await expect(updateReadingPreferences({ selectionIcon: 'yes' as never })).rejects.toThrow(
+      '划选图标设置无效',
+    );
+    await expect(
+      updateReadingPreferences({ autoTranslateLanguages: ['en', 'ja', 'en'] }),
+    ).resolves.toMatchObject({ autoTranslateLanguages: ['en', 'ja'] });
+    for (const invalid of [['English'], ['en-US'], 'en', [1]])
+      await expect(
+        updateReadingPreferences({ autoTranslateLanguages: invalid as never }),
+      ).rejects.toThrow('自动翻译语言无效');
+    await expect(readPublicSettings()).resolves.toMatchObject({
+      selectionIcon: false,
+      autoTranslateLanguages: ['en', 'ja'],
+    });
+  });
   it('keeps a custom target recoverable but not ready for a free engine', async () => {
-    await updateReadingPreferences({ targetLanguage: 'Portuguese' });
+    await updateReadingPreferences({ targetLanguage: 'Klingon' });
     await expect(readPublicSettings()).resolves.toMatchObject({
       ready: false,
       supportsFullDocument: false,

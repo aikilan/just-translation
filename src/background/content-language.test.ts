@@ -42,6 +42,11 @@ describe('shouldSkipTargetLanguage', () => {
       'Russian',
       'Arabic',
       'Hindi',
+      'Thai',
+      'Hebrew',
+      'Greek',
+      'Ukrainian',
+      'Bengali',
     ]) {
       expect(
         shouldSkipTargetLanguage(
@@ -130,5 +135,17 @@ describe('shouldSkipTargetLanguage', () => {
       ),
     ).toBe(false);
     expect(detector).not.toHaveBeenCalled();
+  });
+
+  it('maps newly listed preset names to their language before skipping', () => {
+    const detector = vi.fn<() => LanguageScore[]>(() => [{ lang: 'it', accuracy: 0.99 }]);
+    expect(
+      shouldSkipTargetLanguage(
+        'Questo è un paragrafo abbastanza lungo scritto interamente in lingua italiana.',
+        undefined,
+        'Italian',
+        detector,
+      ),
+    ).toBe(true);
   });
 });

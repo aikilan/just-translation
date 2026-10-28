@@ -1,6 +1,11 @@
 import { isUiMessage, toUiMessage, type UiMessage, type UiLanguage, type UiLocale } from './i18n';
 import type { TranslationSegment, TranslationUnit } from './batching';
-import type { DisplayMode, TranslationProfile, TranslatorSettings } from './settings';
+import type {
+  DisplayMode,
+  TranslationProfile,
+  TranslationStyle,
+  TranslatorSettings,
+} from './settings';
 import {
   isActiveTranslator,
   type ActiveTranslator,
@@ -38,6 +43,8 @@ export interface PageTranslationStatus {
   /** The document is a PDF shown by the browser viewer; translation opens the PDF reader. */
   pdfDocument?: boolean;
   videoSubtitles?: VideoSubtitleStatus;
+  /** Language detected locally from the page text (`en`, `zh-Hant`); absent until known. */
+  pageLanguage?: string;
 }
 
 function isVideoSubtitleStatus(value: unknown): value is VideoSubtitleStatus {
@@ -86,7 +93,10 @@ export function isPageTranslationStatus(value: unknown): value is PageTranslatio
         typeof context.targetLanguage === 'string')) &&
     (status.needsRestart === undefined || typeof status.needsRestart === 'boolean') &&
     (status.pdfDocument === undefined || typeof status.pdfDocument === 'boolean') &&
-    (status.videoSubtitles === undefined || isVideoSubtitleStatus(status.videoSubtitles))
+    (status.videoSubtitles === undefined || isVideoSubtitleStatus(status.videoSubtitles)) &&
+    (status.pageLanguage === undefined ||
+      (typeof status.pageLanguage === 'string' &&
+        /^[a-z]{2,3}(?:-Han[st])?$/u.test(status.pageLanguage)))
   );
 }
 
@@ -103,6 +113,8 @@ export type PublicTranslatorSettings = Pick<
   | 'uiLanguage'
   | 'targetLanguage'
   | 'displayMode'
+  | 'translationStyle'
+  | 'selectionIcon'
   | 'translateDynamicContent'
   | 'translationConcurrency'
   | 'translationRetryCount'
@@ -110,6 +122,7 @@ export type PublicTranslatorSettings = Pick<
   | 'excludedSites'
   | 'activeTranslator'
   | 'autoTranslateSites'
+  | 'autoTranslateLanguages'
   | 'youtubeSubtitles'
 > & {
   profiles: PublicTranslationProfile[];
@@ -167,11 +180,14 @@ export type ReadingPreferences = Pick<
   TranslatorSettings,
   | 'targetLanguage'
   | 'displayMode'
+  | 'translationStyle'
+  | 'selectionIcon'
   | 'translateDynamicContent'
   | 'translationConcurrency'
   | 'translationRetryCount'
   | 'fullDocumentTimeoutMinutes'
   | 'youtubeSubtitles'
+  | 'autoTranslateLanguages'
 >;
 export interface SiteRuleUpdate {
   list: 'autoTranslateSites' | 'excludedSites';
@@ -271,6 +287,7 @@ export type PageCommand =
   | { type: 'RESTORE_PAGE' }
   | { type: 'TOGGLE_TRANSLATION' }
   | { type: 'SET_DISPLAY_MODE'; displayMode: DisplayMode }
+  | { type: 'SET_TRANSLATION_STYLE'; translationStyle: TranslationStyle }
   /** Bilingual video subtitles in this tab; the saved preference is changed separately. */
   | { type: 'SET_VIDEO_SUBTITLES'; enabled: boolean }
   | { type: 'GET_PAGE_STATUS' };

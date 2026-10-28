@@ -89,7 +89,7 @@ describe('translation engine resolution', () => {
     ).toThrow('设置已改变');
     expect(() =>
       resolveTranslationRuntimeConfig(
-        { ...settings, targetLanguage: 'Portuguese' },
+        { ...settings, targetLanguage: 'Klingon' },
         settings.activeTranslator,
       ),
     ).toThrow('不支持当前目标语言');

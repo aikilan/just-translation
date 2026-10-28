@@ -12,4 +12,15 @@ describe('content translation styles', () => {
     expect(stylesheet).not.toContain("content: '•••'");
     expect(stylesheet).not.toContain('justranslate-pending-dots');
   });
+
+  it('defines every non-default preset and keeps interface labels out of them', () => {
+    for (const style of ['faded', 'dashed', 'highlight', 'quote', 'blur'])
+      expect(stylesheet).toContain(`:root[data-justranslate-style='${style}']`);
+    const presetRules = stylesheet.match(/:root\[data-justranslate-style='[a-z]+'\]\n[^{]+\{/gu);
+    expect(presetRules?.length).toBeGreaterThan(4);
+    for (const rule of presetRules ?? []) {
+      if (rule.includes(':hover') || rule.includes(':focus-within')) continue;
+      expect(rule).toContain(':not([data-justranslate-label])');
+    }
+  });
 });

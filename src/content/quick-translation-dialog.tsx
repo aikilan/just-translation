@@ -194,6 +194,9 @@ function QuickTranslationApp({
                 label={t('翻译为')}
                 value={state.targetLanguage}
                 allowCustom={state.translator.kind === 'ai'}
+                builtinEngine={
+                  state.translator.kind === 'builtin' ? state.translator.engine : undefined
+                }
                 disabled={disabled}
                 onChange={(value) => model.setTargetLanguage(value)}
                 onDraftChange={(value) => model.setTargetLanguage(value)}

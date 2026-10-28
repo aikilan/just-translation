@@ -15,7 +15,13 @@ import type {
 } from '../shared/messages';
 import { isUrlExcluded, normalizeSiteRule, type TranslatorSettings } from '../shared/settings';
 import {
+  isTargetLanguage,
+  languageCodeLabel,
+  sortedRuleLanguageCodes,
+} from '../shared/translation-languages';
+import {
   DisplayModeControl,
+  TranslationStyleControl,
   LanguagePicker,
   SaveFeedback,
   SettingRow,
@@ -33,7 +39,10 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
     useState<
       Omit<
         ReadingPreferences,
-        'translationConcurrency' | 'translationRetryCount' | 'fullDocumentTimeoutMinutes'
+        | 'translationConcurrency'
+        | 'translationRetryCount'
+        | 'fullDocumentTimeoutMinutes'
+        | 'autoTranslateLanguages'
       >
     >(settings);
   const { feedback, save, clear } = useSettingsMutation();
@@ -47,6 +56,14 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
           : current.targetLanguage,
       displayMode:
         current.displayMode === old.displayMode ? settings.displayMode : current.displayMode,
+      translationStyle:
+        current.translationStyle === old.translationStyle
+          ? settings.translationStyle
+          : current.translationStyle,
+      selectionIcon:
+        current.selectionIcon === old.selectionIcon
+          ? settings.selectionIcon
+          : current.selectionIcon,
       translateDynamicContent:
         current.translateDynamicContent === old.translateDynamicContent
           ? settings.translateDynamicContent
@@ -80,6 +97,11 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
             label={t('目标语言')}
             value={draft.targetLanguage}
             allowCustom={settings.activeTranslator.kind === 'ai'}
+            builtinEngine={
+              settings.activeTranslator.kind === 'builtin'
+                ? settings.activeTranslator.engine
+                : undefined
+            }
             disabled={feedback.targetLanguage?.status === 'saving'}
             onChange={(value) => change('targetLanguage', value)}
           />
@@ -93,6 +115,29 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
             value={draft.displayMode}
             disabled={feedback.displayMode?.status === 'saving'}
             onChange={(value) => change('displayMode', value)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('译文样式')}
+          description={t('译文的视觉效果，切换后立即生效，不会重新翻译')}
+          feedback={feedback.translationStyle}
+        >
+          <TranslationStyleControl
+            value={draft.translationStyle}
+            disabled={feedback.translationStyle?.status === 'saving'}
+            onChange={(value) => change('translationStyle', value)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t('划选后显示翻译图标')}
+          description={t('选中文字后在旁边显示按钮，点击后才发送')}
+          feedback={feedback.selectionIcon}
+        >
+          <Switch
+            label={t('划选后显示翻译图标')}
+            checked={draft.selectionIcon}
+            disabled={feedback.selectionIcon?.status === 'saving'}
+            onChange={(value) => change('selectionIcon', value)}
           />
         </SettingRow>
         <SettingRow
@@ -136,8 +181,19 @@ export function ReadingPreferencesPanel({ settings, onSaved }: Props) {
             <ArrowDown aria-hidden="true" className="preview-arrow" />
           </>
         ) : null}
-        <p lang={getUiLocale()} dir={getUiLocale() === 'ar' ? 'rtl' : 'ltr'}>
-          {t('阅读为我们打开一扇窗，通往日常之外的思想。片刻安静，也能改变我们看待世界的方式。')}
+        <p
+          lang={getUiLocale()}
+          dir={getUiLocale() === 'ar' ? 'rtl' : 'ltr'}
+          data-preview-style={
+            draft.displayMode === 'translation' && draft.translationStyle === 'blur'
+              ? 'inherit'
+              : draft.translationStyle
+          }
+          tabIndex={draft.translationStyle === 'blur' ? 0 : undefined}
+        >
+          <span>
+            {t('阅读为我们打开一扇窗，通往日常之外的思想。片刻安静，也能改变我们看待世界的方式。')}
+          </span>
         </p>
         <small>{t('实际译文继承所在网页的字体与颜色。')}</small>
       </div>
@@ -152,6 +208,7 @@ export function SiteRulesPanel({ settings, onSaved }: Props) {
   return (
     <div className="site-rules">
       <SiteRuleList list="autoTranslateSites" settings={settings} onSaved={onSaved} />
+      <LanguageRuleList settings={settings} onSaved={onSaved} />
       <SiteRuleList list="excludedSites" settings={settings} onSaved={onSaved} />
     </div>
   );
@@ -267,6 +324,109 @@ function SiteRuleList({ list, settings, onSaved }: Props & { list: SiteRuleUpdat
               ? t('添加域名，让这些网站保持原样。')
               : t('也可以在网页的插件弹窗中开启“此站自动翻译”。')}
           </small>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Page-language rules share the reading-preference write path; each change saves the whole list. */
+function LanguageRuleList({ settings, onSaved }: Props) {
+  const [choice, setChoice] = useState('');
+  const [error, setError] = useState<UiMessage | ''>('');
+  const { feedback, save, clear } = useSettingsMutation();
+  const saving = feedback.languages?.status === 'saving';
+  const languages = settings.autoTranslateLanguages;
+  const options = sortedRuleLanguageCodes().filter((code) => !languages.includes(code));
+  function update(next: string[]) {
+    if (saving) return;
+    setError('');
+    void save(
+      'languages',
+      { type: 'UPDATE_READING_PREFERENCES', patch: { autoTranslateLanguages: next } },
+      (result) => {
+        setChoice('');
+        onSaved(result);
+      },
+    );
+  }
+  return (
+    <section className="site-rule-section">
+      <div className="section-heading">
+        <h2>{t('按语言自动翻译')}</h2>
+        <span className="rule-count">{languages.length}</span>
+      </div>
+      <p>
+        {t(
+          '这些语言的网页会自动发送给当前翻译引擎。语言只在本机识别；不翻译站点和含密码输入框的页面不会自动开始。',
+        )}
+      </p>
+      <form
+        className="site-add-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!choice) return;
+          if (languages.includes(choice)) {
+            setError(message('此语言已在列表中'));
+            return;
+          }
+          update([...languages, choice]);
+        }}
+      >
+        <select
+          aria-label={t('选择语言')}
+          value={choice}
+          disabled={saving}
+          onChange={(event) => {
+            setChoice(event.target.value);
+            setError('');
+            clear('languages');
+          }}
+        >
+          <option value="">{t('选择语言')}</option>
+          {options.map((code) => (
+            <option key={code} value={code}>
+              {languageCodeLabel(code)}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="button" disabled={saving || !choice}>
+          <Plus aria-hidden="true" />
+          {t('添加语言')}
+        </button>
+      </form>
+      {error ? (
+        <p className="field-error" role="alert">
+          {renderMessage(error)}
+        </p>
+      ) : null}
+      <SaveFeedback state={feedback.languages} />
+      {languages.length ? (
+        <ul className="site-list">
+          {languages.map((code) => (
+            <li key={code}>
+              <div>
+                <span className="site-hostname">{languageCodeLabel(code)}</span>
+                {isTargetLanguage(code, settings.targetLanguage) ? (
+                  <small className="rule-conflict">{t('与目标语言相同')}</small>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={saving}
+                aria-label={t('删除自动翻译语言 {{p0}}', { p0: languageCodeLabel(code) })}
+                onClick={() => update(languages.filter((value) => value !== code))}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="empty-rules">
+          <span>{t('还没有按语言自动翻译的规则')}</span>
+          <small>{t('也可以在网页的插件弹窗中，用“总是翻译（当前页面语言）网页”开关添加。')}</small>
         </div>
       )}
     </section>

@@ -321,12 +321,14 @@ describe('popup settings synchronization', () => {
   });
 });
 
-it('offers Arabic instead of Traditional Chinese as a preset target language', async () => {
+it('lists common target languages first and the expanded catalog after them', async () => {
   mockExtension();
   view = await mount(<PopupApp />);
   const options = view.container.querySelector<HTMLSelectElement>('[aria-label="翻译为"]')!;
-  expect(Array.from(options.options, (option) => option.value)).toEqual([
+  const values = Array.from(options.options, (option) => option.value);
+  expect(values.slice(0, 9)).toEqual([
     'Simplified Chinese',
+    'Traditional Chinese',
     'English',
     'Japanese',
     'Korean',
@@ -334,9 +336,12 @@ it('offers Arabic instead of Traditional Chinese as a preset target language', a
     'German',
     'Spanish',
     'Arabic',
-    '__custom__',
   ]);
+  expect(values).toContain('Italian');
+  expect(values.at(-1)).toBe('__custom__');
   expect(Array.from(options.options, (option) => option.textContent)).toContain('阿拉伯语');
+  // Google can translate into Latin; Microsoft cannot, which the Microsoft picker disables.
+  expect(options.querySelector<HTMLOptionElement>('option[value="Latin"]')?.disabled).toBe(false);
 });
 
 describe('popup reading controls', () => {
@@ -940,6 +945,54 @@ describe('PDF documents', () => {
     expect(chrome.tabs.create).toHaveBeenCalledWith(
       expect.objectContaining({ url: 'chrome-extension://test/src/pdf/index.html' }),
     );
+  });
+});
+
+describe('page language rule', () => {
+  const toggle = (container: HTMLElement) =>
+    container.querySelector<HTMLInputElement>('[role="switch"][aria-label="总是翻译英语网页"]');
+
+  it('offers the detected page language and starts this idle page when enabled', async () => {
+    const { send, tabSend } = mockExtension(READY_SETTINGS, {
+      ...IDLE_STATUS,
+      pageLanguage: 'en',
+    });
+    view = await mount(<PopupApp />);
+    expect(toggle(view.container)?.checked).toBe(false);
+    await act(async () => {
+      toggle(view.container)!.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith({
+        type: 'UPDATE_READING_PREFERENCES',
+        patch: { autoTranslateLanguages: ['en'] },
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(tabSend).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ type: 'START_TRANSLATION' }),
+        MAIN_FRAME,
+      ),
+    );
+    expect(toggle(view.container)?.checked).toBe(true);
+  });
+
+  it('hides the switch when the page is already in the target language or undetected', async () => {
+    mockExtension(
+      { ...READY_SETTINGS, targetLanguage: 'English' },
+      {
+        ...IDLE_STATUS,
+        pageLanguage: 'en',
+      },
+    );
+    view = await mount(<PopupApp />);
+    expect(toggle(view.container)).toBeNull();
+    view.unmount();
+    mockExtension(READY_SETTINGS, IDLE_STATUS);
+    view = await mount(<PopupApp />);
+    expect(view.container.querySelector('[aria-label^="总是翻译"]')).toBeNull();
   });
 });
 

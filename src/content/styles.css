@@ -87,3 +87,62 @@ th > [data-justranslate-translation] {
   > [data-justranslate-translation]:not([data-justranslate-state='translated']) {
   display: none !important;
 }
+
+/* Translation style presets. Interface labels keep the plain treatment so controls never change. */
+:root[data-justranslate-style='faded']
+  :not([data-justranslate-label])
+  > [data-justranslate-translation]
+  > [data-justranslate-translation-text] {
+  opacity: 0.66 !important;
+}
+
+:root[data-justranslate-style='dashed']
+  :not([data-justranslate-label])
+  > [data-justranslate-translation]
+  > [data-justranslate-translation-text] {
+  text-decoration-line: underline !important;
+  text-decoration-style: dashed !important;
+  text-decoration-color: color-mix(in srgb, currentcolor 55%, transparent) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 0.28em !important;
+}
+
+:root[data-justranslate-style='highlight']
+  :not([data-justranslate-label])
+  > [data-justranslate-translation]
+  > [data-justranslate-translation-text] {
+  border-radius: 0.2em !important;
+  padding-inline: 0.12em !important;
+  background-color: color-mix(in srgb, #ffd400 30%, transparent) !important;
+  -webkit-box-decoration-break: clone !important;
+  box-decoration-break: clone !important;
+}
+
+:root[data-justranslate-style='quote']
+  :not([data-justranslate-label])
+  > [data-justranslate-translation][data-justranslate-state='translated'] {
+  padding-inline-start: 0.65em !important;
+  border-inline-start: 3px solid color-mix(in srgb, currentcolor 32%, transparent) !important;
+}
+
+/* Learning mode: blurred until the paragraph is hovered or the translation receives focus. */
+:root[data-justranslate-style='blur']
+  :not([data-justranslate-label])
+  > [data-justranslate-translation][data-justranslate-state='translated'] {
+  filter: blur(0.3em) !important;
+  transition: filter 0.16s ease !important;
+}
+
+:root[data-justranslate-style='blur']
+  [data-justranslate-source]:hover
+  > [data-justranslate-translation][data-justranslate-state='translated'],
+:root[data-justranslate-style='blur']
+  [data-justranslate-translation][data-justranslate-state='translated']:focus-within {
+  filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-justranslate-style='blur'] [data-justranslate-translation] {
+    transition: none !important;
+  }
+}

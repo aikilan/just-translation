@@ -393,6 +393,38 @@ h2 {
   line-height: 1.9;
   margin: 12px 0;
 }
+/* Mirrors the page presets in content/styles.css for the local sample. */
+.reading-preview [data-preview-style='faded'] > span {
+  opacity: 0.66;
+}
+.reading-preview [data-preview-style='dashed'] > span {
+  text-decoration: underline dashed color-mix(in srgb, currentcolor 55%, transparent) 1px;
+  text-underline-offset: 0.28em;
+}
+.reading-preview [data-preview-style='highlight'] > span {
+  border-radius: 0.2em;
+  padding-inline: 0.12em;
+  background-color: color-mix(in srgb, #ffd400 30%, transparent);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.reading-preview [data-preview-style='quote'] {
+  padding-inline-start: 0.65em;
+  border-inline-start: 3px solid color-mix(in srgb, currentcolor 32%, transparent);
+}
+.reading-preview [data-preview-style='blur'] {
+  filter: blur(0.3em);
+  transition: filter 0.16s ease;
+}
+.reading-preview [data-preview-style='blur']:hover,
+.reading-preview [data-preview-style='blur']:focus-visible {
+  filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-preview [data-preview-style='blur'] {
+    transition: none;
+  }
+}
 .preview-arrow {
   color: var(--text-muted);
   width: 14px;

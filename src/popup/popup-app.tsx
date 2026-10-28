@@ -30,10 +30,16 @@ import {
   isPdfViewerUrl,
   readPdfViewerParameters,
 } from '../shared/pdf-viewer';
-import { translationLanguageLabel } from '../shared/translation-languages';
+import {
+  isTargetLanguage,
+  languageCodeLabel,
+  normalizeLanguageCode,
+  translationLanguageLabel,
+} from '../shared/translation-languages';
 import { activeTranslatorEquals } from '../shared/translation-engines';
 import {
   DisplayModeControl,
+  TranslationStyleControl,
   LanguagePicker,
   SettingRow,
   Switch,
@@ -289,6 +295,10 @@ export function PopupApp() {
   const needsRestart = status.context ? contextChanged : Boolean(status.needsRestart);
   const saving = Object.values(feedback).some((value) => value?.status === 'saving');
   const canTranslate = Boolean(page?.available && settings?.ready && !excluded);
+  // Rules hold the primary language; the tag may also name a Chinese script.
+  const pageRuleLanguage = status.pageLanguage
+    ? normalizeLanguageCode(status.pageLanguage)
+    : undefined;
   const pdf = Boolean(page?.pdfViewer || status.pdfDocument);
   const fullDocument = status.mode === 'full-document';
   const incremental = fullDocument && status.stage === 'incremental';
@@ -626,6 +636,11 @@ export function PopupApp() {
                 label={t('翻译为')}
                 value={settings.targetLanguage}
                 allowCustom={settings.activeTranslator.kind === 'ai'}
+                builtinEngine={
+                  settings.activeTranslator.kind === 'builtin'
+                    ? settings.activeTranslator.engine
+                    : undefined
+                }
                 disabled={saving || busy}
                 onChange={(targetLanguage) => {
                   void save(
@@ -662,6 +677,32 @@ export function PopupApp() {
                 }}
               />
             </SettingRow>
+            <SettingRow label={t('译文样式')} feedback={feedback.style}>
+              <TranslationStyleControl
+                value={settings.translationStyle}
+                disabled={saving || busy}
+                onChange={(translationStyle) => {
+                  void save(
+                    'style',
+                    { type: 'UPDATE_READING_PREFERENCES', patch: { translationStyle } },
+                    (next) => {
+                      accept(next);
+                      if (page?.available && page.tabId !== undefined)
+                        void sendMainFrameCommand(page.tabId, {
+                          type: 'SET_TRANSLATION_STYLE',
+                          translationStyle,
+                        })
+                          .then(setStatus)
+                          .catch(() =>
+                            setCommandError(
+                              message('偏好已保存，当前网页应用失败，请刷新后重试。'),
+                            ),
+                          );
+                    },
+                  );
+                }}
+              />
+            </SettingRow>
             <SettingRow label={t('此站自动翻译')} feedback={feedback.auto}>
               <Switch
                 label={t('此站自动翻译')}
@@ -683,6 +724,39 @@ export function PopupApp() {
                 }}
               />
             </SettingRow>
+            {pageRuleLanguage &&
+            !isTargetLanguage(status.pageLanguage!, settings.targetLanguage) ? (
+              <SettingRow
+                label={t('总是翻译{{p0}}网页', { p0: languageCodeLabel(pageRuleLanguage) })}
+                feedback={feedback.languageRule}
+              >
+                <Switch
+                  label={t('总是翻译{{p0}}网页', {
+                    p0: languageCodeLabel(pageRuleLanguage),
+                  })}
+                  checked={settings.autoTranslateLanguages.includes(pageRuleLanguage)}
+                  disabled={!canTranslate || saving || busy}
+                  onChange={(enabled) => {
+                    const language = pageRuleLanguage;
+                    const next = enabled
+                      ? [...new Set([...settings.autoTranslateLanguages, language])]
+                      : settings.autoTranslateLanguages.filter((code) => code !== language);
+                    void save(
+                      'languageRule',
+                      {
+                        type: 'UPDATE_READING_PREFERENCES',
+                        patch: { autoTranslateLanguages: next },
+                      },
+                      (result) => {
+                        accept(result);
+                        if (enabled && status.phase === 'idle' && !status.context)
+                          void run('START_TRANSLATION');
+                      },
+                    );
+                  }}
+                />
+              </SettingRow>
+            ) : null}
             {page?.hostname === 'www.youtube.com' ? (
               <SettingRow label={t('YouTube 双语字幕')} feedback={feedback.video}>
                 <Switch

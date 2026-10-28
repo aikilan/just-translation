@@ -27,14 +27,25 @@ describe('built-in translation engines', () => {
     ['German', 'de', 'de'],
     ['Spanish', 'es', 'es'],
     ['Arabic', 'ar', 'ar'],
+    ['Traditional Chinese', 'zh-TW', 'zh-Hant'],
+    ['Hebrew', 'iw', 'he'],
+    ['Filipino', 'tl', 'fil'],
+    ['Norwegian', 'no', 'nb'],
+    ['Serbian', 'sr', 'sr-Cyrl'],
+    ['European Portuguese', 'pt-PT', 'pt-PT'],
   ])('maps %s to exact Google and Microsoft codes', (language, google, microsoft) => {
     expect(resolveBuiltinTargetLanguage('google-free', language)).toBe(google);
     expect(resolveBuiltinTargetLanguage('microsoft-free', language)).toBe(microsoft);
   });
 
   it('rejects custom language names instead of guessing a provider code', () => {
-    expect(resolveBuiltinTargetLanguage('google-free', 'Portuguese')).toBeUndefined();
+    expect(resolveBuiltinTargetLanguage('google-free', 'Brazilian')).toBeUndefined();
     expect(resolveBuiltinTargetLanguage('microsoft-free', '粤语')).toBeUndefined();
+  });
+
+  it('leaves a preset without a code for the engine that cannot translate into it', () => {
+    expect(resolveBuiltinTargetLanguage('google-free', 'Latin')).toBe('la');
+    expect(resolveBuiltinTargetLanguage('microsoft-free', 'Latin')).toBeUndefined();
   });
 
   it('uses conservative non-streaming request limits for both free engines', () => {
